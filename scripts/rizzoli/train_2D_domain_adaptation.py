@@ -7,7 +7,7 @@ from sklearn.model_selection import train_test_split
 from synaptic_reconstruction.training.domain_adaptation import mean_teacher_adaptation
 
 TRAIN_ROOT = "/mnt/lustre-emmy-hdd/projects/nim00007/data/synaptic-reconstruction/cooper/2D_data"
-OUTPUT_ROOT = "/mnt/lustre-emmy-hdd/usr/u12095/synaptic_reconstruction/2D_DA_training_rizzoli_v4"
+OUTPUT_ROOT = "/mnt/lustre-emmy-hdd/usr/u12095/synaptic_reconstruction/2D_DA_training_2Dcooper_v1"
 
 def _require_train_val_test_split(datasets):
     train_ratio, val_ratio, test_ratio = 0.8, 0.1, 0.1
@@ -77,9 +77,8 @@ def vesicle_domain_adaptation(teacher_model, testset = True):
     os.makedirs(OUTPUT_ROOT, exist_ok=True)
 
     datasets = [
-    "maus_2020_tem2d_wt_unt_div14_exported_scaled_grouped",
     "20241021_imig_2014_data_transfer_exported_grouped"
-]
+]#"maus_2020_tem2d_wt_unt_div14_exported_scaled_grouped",
     train_paths = get_paths("train", datasets=datasets, testset=testset)
     val_paths = get_paths("val", datasets=datasets, testset=testset)
     
@@ -89,7 +88,7 @@ def vesicle_domain_adaptation(teacher_model, testset = True):
 
     #adjustable parameters
     patch_shape = [1, 256, 256] #2D
-    model_name = "2D-vesicle-DA-rizzoli-v5"
+    model_name = "2D-vesicle-DA-2Dcooper-imig-v1"
     
     model_root = "/mnt/lustre-emmy-hdd/usr/u12095/synaptic_reconstruction/models_v2/checkpoints/"
     checkpoint_path = os.path.join(model_root, teacher_model)
