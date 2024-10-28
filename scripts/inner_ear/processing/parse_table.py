@@ -86,7 +86,14 @@ def check_val_table(val_table, row):
     # Latest: "Kommentar 16.09.24"
     # Previous: "Kommentar 08.09.24"
     # Fallback: "Fertig 3.0?"
-    if "Kommentar 08.10.2024" in val_table.columns:
+    if "Kommentar 27-10-24" in val_table.columns:
+        print("Using Kommentar 27.10.2024")
+        complete_vals = val_table[row_selection]["Kommentar 27-10-24"].values
+        is_complete = (
+            (complete_vals == "passt") |
+            (complete_vals == "skip")
+        ).all()
+    elif "Kommentar 08.10.2024" in val_table.columns:
         print("Using Kommentar 08.10.2024")
         complete_vals = val_table[row_selection]["Kommentar 08.10.2024"].values
         is_complete = (

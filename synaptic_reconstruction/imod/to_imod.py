@@ -16,6 +16,55 @@ from skimage.measure import regionprops
 from tqdm import tqdm
 
 
+# FIXME how to bring the data to the IMOD axis convention?
+def _to_imod_order(data):
+    # data = np.swapaxes(data, 0, -1)
+    # data = np.fliplr(data)
+    # data = np.swapaxes(data, 0, -1)
+    return data
+
+
+def write_segmentation_to_imod(
+    mrc_path: str,
+    segmentation_path: str,
+    output_path: str,
+) -> None:
+    """Write a segmentation to a mod file as contours.
+
+    Args:
+        mrc_path: a
+        segmentation_path: a
+        output_path: a
+    """
+    cmd = "imodauto"
+    cmd_path = shutil.which(cmd)
+    assert cmd_path is not None, f"Could not find the {cmd} imod command."
+
+    assert os.path.exists(mrc_path)
+    with mrcfile.open(mrc_path, mode="r+") as f:
+        voxel_size = f.voxel_size
+
+    with tempfile.NamedTemporaryFile(suffix=".mrc") as f:
+        tmp_path = f.name
+
+        seg = (imageio.imread(segmentation_path) > 0).astype("uint8")
+        seg_ = _to_imod_order(seg)
+
+        # import napari
+        # v = napari.Viewer()
+        # v.add_image(seg)
+        # v.add_labels(seg_)
+        # napari.run()
+
+        mrcfile.new(tmp_path, data=seg_, overwrite=True)
+        with mrcfile.open(tmp_path, mode="r+") as f:
+            f.voxel_size = voxel_size
+            f.update_header_from_data()
+
+        cmd_list = [cmd, "-E", "1", "-u", tmp_path, output_path]
+        run(cmd_list)
+
+
 def convert_segmentation_to_spheres(
     segmentation: np.ndarray,
     verbose: bool = False,
@@ -23,7 +72,7 @@ def convert_segmentation_to_spheres(
     resolution: Optional[Tuple[float, float, float]] = None,
     radius_factor: float = 1.0,
     estimate_radius_2d: bool = True,
-):
+) -> Tuple[np.ndarray, np.ndarray]:
     """Extract spheres parameterized by center and radius from a segmentation.
 
     Args:
@@ -80,7 +129,7 @@ def write_points_to_imod(
     min_radius: Union[float, int],
     output_path: str,
     color: Optional[Tuple[int, int, int]] = None,
-):
+) -> None:
     """Write point annotations to a .mod file for IMOD.
 
     Args:
@@ -129,7 +178,7 @@ def write_segmentation_to_imod_as_points(
     min_radius: Union[int, float],
     radius_factor: float = 1.0,
     estimate_radius_2d: bool = True,
-):
+) -> None:
     """Write segmentation results to .mod file with imod point annotations.
 
     This approximates each segmented object as a sphere.
@@ -183,7 +232,7 @@ def export_helper(
     output_root: str,
     export_function: callable,
     force: bool = False,
-):
+) -> None:
     """
     Helper function to run imod export for files in a directory.
 

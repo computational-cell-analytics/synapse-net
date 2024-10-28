@@ -255,7 +255,7 @@ def supervised_training(
         pass
     # If we have an ignore label the loss and metric have to be modified
     # so that the ignore mask is not used in the gradient calculation.
-    if ignore_label is not None:
+    elif ignore_label is not None:
         loss = torch_em.loss.LossWrapper(
             loss=torch_em.loss.DiceLoss(),
             transform=torch_em.loss.wrapper.MaskIgnoreLabel(
