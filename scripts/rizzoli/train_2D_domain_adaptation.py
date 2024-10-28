@@ -6,11 +6,13 @@ import json
 from sklearn.model_selection import train_test_split
 from synaptic_reconstruction.training.domain_adaptation import mean_teacher_adaptation
 
-TRAIN_ROOT = "/mnt/lustre-emmy-hdd/projects/nim00007/data/synaptic-reconstruction/rizzoli/extracted"
-OUTPUT_ROOT = "/mnt/lustre-emmy-hdd/usr/u12095/synaptic_reconstruction/2D_DA_training_rizzoli"
+TRAIN_ROOT = "/mnt/lustre-emmy-hdd/projects/nim00007/data/synaptic-reconstruction/cooper/2D_data"
+OUTPUT_ROOT = "/mnt/lustre-emmy-hdd/usr/u12095/synaptic_reconstruction/2D_DA_training_rizzoli_v4"
 
 def _require_train_val_test_split(datasets):
     train_ratio, val_ratio, test_ratio = 0.8, 0.1, 0.1
+    if len(datasets) < 10:
+        train_ratio, val_ratio, test_ratio = 0.5, 0.25, 0.25
 
     def _train_val_test_split(names):
         train, test = train_test_split(names, test_size=1 - train_ratio, shuffle=True)
@@ -71,8 +73,12 @@ def get_paths(split, datasets, testset=True):
     return paths
 
 def vesicle_domain_adaptation(teacher_model, testset = True):
+
+    os.makedirs(OUTPUT_ROOT, exist_ok=True)
+
     datasets = [
-    "upsampled_by2"
+    "maus_2020_tem2d_wt_unt_div14_exported_scaled_grouped",
+    "20241021_imig_2014_data_transfer_exported_grouped"
 ]
     train_paths = get_paths("train", datasets=datasets, testset=testset)
     val_paths = get_paths("val", datasets=datasets, testset=testset)
@@ -83,7 +89,7 @@ def vesicle_domain_adaptation(teacher_model, testset = True):
 
     #adjustable parameters
     patch_shape = [1, 256, 256] #2D
-    model_name = "2D-vesicle-DA-rizzoli-v3"
+    model_name = "2D-vesicle-DA-rizzoli-v5"
     
     model_root = "/mnt/lustre-emmy-hdd/usr/u12095/synaptic_reconstruction/models_v2/checkpoints/"
     checkpoint_path = os.path.join(model_root, teacher_model)
@@ -97,7 +103,7 @@ def vesicle_domain_adaptation(teacher_model, testset = True):
         save_root="/mnt/lustre-emmy-hdd/usr/u12095/synaptic_reconstruction/DA_models",
         source_checkpoint=checkpoint_path,
         confidence_threshold=0.75,
-        n_iterations=int(5e4),
+        n_iterations=int(5e5),
     )
 
 

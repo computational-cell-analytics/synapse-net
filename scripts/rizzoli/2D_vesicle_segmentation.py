@@ -57,7 +57,7 @@ def get_volume(input_path):
         input_volume = seg_file["raw"][:]
     return input_volume
 
-def run_vesicle_segmentation(input_path, output_path, model_path, tile_shape, halo, include_boundary, key_label):
+def run_vesicle_segmentation(input_path, output_path, model_path, tile_shape, halo, include_boundary, key_label, scale):
 
     tiling = get_2D_tiling()
 
@@ -72,20 +72,24 @@ def run_vesicle_segmentation(input_path, output_path, model_path, tile_shape, ha
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = torch_em.util.load_model(checkpoint=model_path, device=device)
 
-    def process_slices(input_volume):
+    def process_slices(input_volume, scale):
         processed_slices = []
         foreground = []
         boundaries = []
         for z in range(input_volume.shape[0]):
             slice_ = input_volume[z, :, :]
-            segmented_slice, prediction_slice = segment_vesicles(input_volume=slice_, model=model, verbose=False, tiling=tiling, return_predictions=True, exclude_boundary=not include_boundary)
+            segmented_slice, prediction_slice = segment_vesicles(input_volume=slice_, model=model, verbose=False, tiling=tiling, return_predictions=True, scale = scale, exclude_boundary=not include_boundary)
             processed_slices.append(segmented_slice)
             foreground_pred_slice, boundaries_pred_slice = prediction_slice[:2]
             foreground.append(foreground_pred_slice)
             boundaries.append(boundaries_pred_slice)
         return processed_slices, foreground, boundaries
 
-    segmentation, foreground, boundaries = process_slices(input)
+    if input.ndim == 2:
+        segmentation, prediction = segment_vesicles(input_volume=input, model=model, verbose=False, tiling=tiling, return_predictions=True, scale = scale, exclude_boundary=not include_boundary)
+        foreground, boundaries = prediction[:2]
+    else:
+        segmentation, foreground, boundaries = process_slices(input, scale)
 
     seg_output = _require_output_folders(output_path)
     file_name = Path(input_path).stem
@@ -121,7 +125,7 @@ def segment_folder(args):
     print(input_files)
     pbar = tqdm(input_files, desc="Run segmentation")
     for input_path in pbar:
-        run_vesicle_segmentation(input_path, args.output_path, args.model_path, args.tile_shape, args.halo, args.include_boundary, args.key_label)
+        run_vesicle_segmentation(input_path, args.output_path, args.model_path, args.tile_shape, args.halo, args.include_boundary, args.key_label, args.scale)
 
 def main():
     parser = argparse.ArgumentParser(description="Segment vesicles in EM tomograms.")
@@ -152,6 +156,10 @@ def main():
         "--key_label", "-k", default = "combined_vesicles",
         help="Give the key name for saving the segmentation in h5."
     )
+    parser.add_argument(
+        "--scale", "-s", type=float, nargs=2,
+        help="Scales the input data."
+    )
     args = parser.parse_args()
 
     input_ = args.input_path
@@ -159,7 +167,7 @@ def main():
     if os.path.isdir(input_):
         segment_folder(args)
     else:
-        run_vesicle_segmentation(input_, args.output_path, args.model_path, args.tile_shape, args.halo, args.include_boundary, args.key_label)
+        run_vesicle_segmentation(input_, args.output_path, args.model_path, args.tile_shape, args.halo, args.include_boundary, args.key_label, args.scale)
 
     print("Finished segmenting!")
 

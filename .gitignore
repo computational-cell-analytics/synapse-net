@@ -11,3 +11,5 @@ scripts/cooper/evaluation_results/
 scripts/cooper/training/copy_testset.py
 scripts/rizzoli/upsample_data.py
 scripts/cooper/training/find_rec_testset.py
+scripts/rizzoli/combine_2D_slices.py
+scripts/rizzoli/combine_2D_slices_raw.py
