@@ -61,17 +61,26 @@ def get_unsupervised_loader(
     else:
         roi = None
 
-    z,y,x = patch_shape
-    ndim = 2 if z == 1 else 3
+    if len(patch_shape) == 2:
+        ndim = 2
+    else:
+        assert len(patch_shape) == 3
+        z, y, x = patch_shape
+        ndim = 2 if z == 1 else 3
     print("ndim is: ", ndim)
 
     raw_transform = torch_em.transform.get_raw_transform()
     transform = torch_em.transform.get_augmentations(ndim=ndim)
 
+    if n_samples is None:
+        n_samples_per_ds = None
+    else:
+        n_samples_per_ds = int(n_samples / len(data_paths))
+
     augmentations = (weak_augmentations(), weak_augmentations())
     datasets = [
         torch_em.data.RawDataset(path, raw_key, patch_shape, raw_transform, transform,
-                                 augmentations=augmentations, roi=roi, ndim = ndim)
+                                 augmentations=augmentations, roi=roi, ndim=ndim, n_samples=n_samples_per_ds)
         for path in data_paths
     ]
     ds = torch.utils.data.ConcatDataset(datasets)
@@ -136,9 +145,9 @@ def semisupervised_training(
         # check_loader(val_loader, n_samples=4)
         return
 
-    #check for 2D or 3D training
+    # Check for 2D or 3D training
     is_2d = False
-    z,y,x = patch_shape
+    z, y, x = patch_shape
     is_2d = z == 1
 
     if is_2d:
