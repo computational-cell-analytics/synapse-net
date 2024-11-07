@@ -34,7 +34,7 @@ def get_volume(input_path):
         input_volume = f[key][:]
     return input_volume
 
-def run_vesicle_segmentation(input_path, output_path, model_path, mask_path, mask_key,tile_shape, halo, include_boundary, key_label):
+def run_vesicle_segmentation(input_path, output_path, model_path, mask_path, mask_key,tile_shape, halo, include_boundary, key_label, distance_threshold = None):
     tiling = parse_tiling(tile_shape, halo)
     print(f"using tiling {tiling}")
     input = get_volume(input_path)
@@ -45,8 +45,17 @@ def run_vesicle_segmentation(input_path, output_path, model_path, mask_path, mas
                         mask = f[mask_key][:]
     else:
         mask = None
+    if distance_threshold is not None:
+        segmentation, prediction = segment_vesicles(
+            input_volume=input, model_path=model_path, verbose=False, tiling=tiling, return_predictions=True, 
+            exclude_boundary=not include_boundary, mask = mask, distance_threshold = distance_threshold
+        )
+    else:
+        segmentation, prediction = segment_vesicles(
+            input_volume=input, model_path=model_path, verbose=False, tiling=tiling, return_predictions=True, 
+            exclude_boundary=not include_boundary, mask = mask
+        )
 
-    segmentation, prediction = segment_vesicles(input_volume=input, model_path=model_path, verbose=False, tiling=tiling, return_predictions=True, exclude_boundary=not include_boundary, mask = mask)
     foreground, boundaries = prediction[:2]
 
     seg_output = _require_output_folders(output_path)
@@ -84,7 +93,7 @@ def segment_folder(args):
     input_files = []
     for root, dirs, files in os.walk(args.input_path):
         input_files.extend([
-            os.path.join(root, name) for name in files if name.endswith(".h5")
+            os.path.join(root, name) for name in files if name.endswith(args.data_ext)
         ])
     print(input_files)
     pbar = tqdm(input_files, desc="Run segmentation")
@@ -97,7 +106,10 @@ def segment_folder(args):
             print(f"Mask file not found for {input_path}")
             mask_path = None
 
-        run_vesicle_segmentation(input_path, args.output_path, args.model_path, mask_path, args.mask_key, args.tile_shape, args.halo, args.include_boundary, args.key_label)
+        run_vesicle_segmentation(
+            input_path, args.output_path, args.model_path, mask_path, args.mask_key, 
+            args.tile_shape, args.halo, args.include_boundary, args.key_label, args.distance_threshold
+        )
 
 def main():
     parser = argparse.ArgumentParser(description="Segment vesicles in EM tomograms.")
@@ -134,6 +146,14 @@ def main():
         "--key_label", "-k", default = "combined_vesicles",
         help="Give the key name for saving the segmentation in h5."
     )
+    parser.add_argument(
+        "--distance_threshold", "-t", type=int,
+        help="Used for distance based segmentation."
+    )
+    parser.add_argument(
+        "--data_ext", "-d", default = ".h5",
+        help="Format extension of data to be segmented, default is .h5."
+    )
     args = parser.parse_args()
 
     input_ = args.input_path
@@ -141,7 +161,7 @@ def main():
     if os.path.isdir(input_):
         segment_folder(args)
     else:
-        run_vesicle_segmentation(input_, args.output_path, args.model_path, args.mask_path, args.mask_key, args.tile_shape, args.halo, args.include_boundary, args.key_label)
+        run_vesicle_segmentation(input_, args.output_path, args.model_path, args.mask_path, args.mask_key, args.tile_shape, args.halo, args.include_boundary, args.key_label, args.distance_threshold)
 
     print("Finished segmenting!")
 

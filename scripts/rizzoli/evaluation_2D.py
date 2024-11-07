@@ -6,8 +6,13 @@ import pandas as pd
 import numpy as np
 
 from elf.evaluation import matching
+from skimage.transform import rescale
 
-
+def transpose_tomo(tomogram):
+        data0 = np.swapaxes(tomogram, 0, -1)
+        data1 = np.fliplr(data0)
+        transposed_data = np.swapaxes(data1, 0, -1)
+        return transposed_data
 
 def evaluate(labels, vesicles):
     assert labels.shape == vesicles.shape
@@ -54,21 +59,34 @@ def evaluate_file(labels_path, vesicles_path, model_name, segment_key, anno_key)
 
     ds_name = os.path.basename(os.path.dirname(labels_path))
     tomo = os.path.basename(labels_path)
-
+    use_mask = True
     #get the labels and vesicles
     with h5py.File(labels_path) as label_file:
         labels = label_file["labels"]
-        vesicles = labels["vesicles"]
-        gt = vesicles[anno_key][:]
+        #vesicles = labels["vesicles"]
+        gt = labels[anno_key][:]
+        gt = rescale(gt, scale=0.5, order=0, anti_aliasing=False, preserve_range=True).astype(gt.dtype)
+        gt = transpose_tomo(gt)
+
+        if use_mask:
+            mask = labels["mask"][:]
+            mask = rescale(mask, scale=0.5, order=0, anti_aliasing=False, preserve_range=True).astype(mask.dtype)
+            mask = transpose_tomo(mask)
         
     with h5py.File(vesicles_path) as seg_file:
         segmentation = seg_file["vesicles"]
         vesicles = segmentation[segment_key][:] 
     
+    if use_mask:
+        gt[mask == 0] = 0
+        vesicles[mask == 0] = 0
+    
     
     #evaluate the match of ground truth and vesicles
-    scores = evaluate_slices(gt, vesicles)
-    
+    if len(vesicles.shape) == 3:
+        scores = evaluate_slices(gt, vesicles)
+    else:
+        scores = evaluate(gt,vesicles)
     #store results
     result_folder ="/user/muth9/u12095/synaptic-reconstruction/scripts/cooper/evaluation_results"
     os.makedirs(result_folder, exist_ok=True)

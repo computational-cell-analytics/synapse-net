@@ -78,7 +78,7 @@ def vesicle_domain_adaptation(teacher_model, testset = True):
 
     datasets = [
     "20241021_imig_2014_data_transfer_exported_grouped"
-]#"maus_2020_tem2d_wt_unt_div14_exported_scaled_grouped",
+]
     train_paths = get_paths("train", datasets=datasets, testset=testset)
     val_paths = get_paths("val", datasets=datasets, testset=testset)
     
@@ -88,10 +88,12 @@ def vesicle_domain_adaptation(teacher_model, testset = True):
 
     #adjustable parameters
     patch_shape = [1, 256, 256] #2D
-    model_name = "2D-vesicle-DA-2Dcooper-imig-v1"
+    model_name = "2D-vesicle-DA-2Dcooper-imig-v2"
     
     model_root = "/mnt/lustre-emmy-hdd/usr/u12095/synaptic_reconstruction/models_v2/checkpoints/"
     checkpoint_path = os.path.join(model_root, teacher_model)
+
+    patch_shape = [256, 256] if any("maus" in dataset for dataset in datasets) else [1, 256, 256]
 
     mean_teacher_adaptation(
         name=model_name,
@@ -102,7 +104,10 @@ def vesicle_domain_adaptation(teacher_model, testset = True):
         save_root="/mnt/lustre-emmy-hdd/usr/u12095/synaptic_reconstruction/DA_models",
         source_checkpoint=checkpoint_path,
         confidence_threshold=0.75,
-        n_iterations=int(5e5),
+        batch_size=8,
+        n_iterations=int(1.5e4),
+        n_samples_train=8000,
+        n_samples_val=50,
     )
 
 

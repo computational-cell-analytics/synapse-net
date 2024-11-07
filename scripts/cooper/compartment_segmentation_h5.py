@@ -6,7 +6,7 @@ from pathlib import Path
 from tqdm import tqdm
 from elf.io import open_file
 
-from synaptic_reconstruction.inference.AZ import segment_AZ
+from synaptic_reconstruction.inference.compartments import segment_compartments
 from synaptic_reconstruction.inference.util import parse_tiling
 
 def _require_output_folders(output_folder):
@@ -16,10 +16,7 @@ def _require_output_folders(output_folder):
     return seg_output
 
 def get_volume(input_path):
-    '''
-    with h5py.File(input_path) as seg_file:
-        input_volume = seg_file["raw"][:]
-    '''
+
     with open_file(input_path, "r") as f:
 
         # Try to automatically derive the key with the raw data.
@@ -34,19 +31,12 @@ def get_volume(input_path):
         input_volume = f[key][:]
     return input_volume
 
-def run_AZ_segmentation(input_path, output_path, model_path, mask_path, mask_key,tile_shape, halo, key_label):
+def run_compartment_segmentation(input_path, output_path, model_path, tile_shape, halo, key_label):
     tiling = parse_tiling(tile_shape, halo)
     print(f"using tiling {tiling}")
     input = get_volume(input_path)
 
-    #check if we have a restricting mask for the segmentation
-    if mask_path is not None:
-        with open_file(mask_path, "r") as f:
-                        mask = f[mask_key][:]
-    else:
-        mask = None
-
-    foreground = segment_AZ(input_volume=input, model_path=model_path, verbose=False, tiling=tiling, mask = mask)
+    segmentation, prediction = segment_compartments(input_volume=input, model_path=model_path, verbose=False, tiling=tiling, return_predictions=True, scale=[0.25, 0.25, 0.25])
 
     seg_output = _require_output_folders(output_path)
     file_name = Path(input_path).stem
@@ -62,17 +52,12 @@ def run_AZ_segmentation(input_path, output_path, model_path, mask_path, mask_key
         else:
             f.create_dataset("raw", data=input, compression="gzip")
 
-        key=f"AZ/segment_from_{key_label}"
+        key=f"compartments/segment_from_{key_label}"
         if key in f:
             print("Skipping", input_path, "because", key, "exists")
         else:
-            f.create_dataset(key, data=foreground, compression="gzip")
-
-        if mask is not None:
-            if mask_key in f:
-                print("mask image already saved")
-            else:
-                f.create_dataset(mask_key, data = mask, compression = "gzip")
+            f.create_dataset(key, data=segmentation, compression="gzip")
+            f.create_dataset(f"compartment_pred_{key_label}/foreground", data = prediction, compression="gzip")
         
         
 
@@ -86,15 +71,7 @@ def segment_folder(args):
     print(input_files)
     pbar = tqdm(input_files, desc="Run segmentation")
     for input_path in pbar:
-
-        filename = os.path.basename(input_path)
-        try:
-            mask_path = os.path.join(args.mask_path, filename)
-        except:
-            print(f"Mask file not found for {input_path}")
-            mask_path = None
-
-        run_AZ_segmentation(input_path, args.output_path, args.model_path, mask_path, args.mask_key, args.tile_shape, args.halo, args.key_label)
+        run_compartment_segmentation(input_path, args.output_path, args.model_path, args.tile_shape, args.halo, args.key_label)
 
 def main():
     parser = argparse.ArgumentParser(description="Segment vesicles in EM tomograms.")
@@ -110,12 +87,6 @@ def main():
         "--model_path", "-m", required=True, help="The filepath to the vesicle model."
     )
     parser.add_argument(
-        "--mask_path", help="The filepath to a h5 file with a mask that will be used to restrict the segmentation. Needs to be in combination with mask_key."
-    )
-    parser.add_argument(
-        "--mask_key", help="Key name that holds the mask segmentation"
-    )
-    parser.add_argument(
         "--tile_shape", type=int, nargs=3,
         help="The tile shape for prediction. Lower the tile shape if GPU memory is insufficient."
     )
@@ -124,12 +95,11 @@ def main():
         help="The halo for prediction. Increase the halo to minimize boundary artifacts."
     )
     parser.add_argument(
-        "--key_label", "-k", default = "combined_vesicles",
-        help="Give the key name for saving the segmentation in h5."
+        "--data_ext", "-d", default=".h5", help="The extension of the tomogram data. By default .h5."
     )
     parser.add_argument(
-        "--data_ext", "-d", default = ".h5",
-        help="Format extension of data to be segmented, default is .h5."
+        "--key_label", "-k", default = "3Dmodel_v1",
+        help="Give the key name for saving the segmentation in h5."
     )
     args = parser.parse_args()
 
@@ -138,7 +108,7 @@ def main():
     if os.path.isdir(input_):
         segment_folder(args)
     else:
-        run_AZ_segmentation(input_, args.output_path, args.model_path, args.mask_path, args.mask_key, args.tile_shape, args.halo, args.key_label, args.data_ext)
+        run_compartment_segmentation(input_, args.output_path, args.model_path, args.tile_shape, args.halo, args.key_label)
 
     print("Finished segmenting!")
 
