@@ -59,14 +59,14 @@ def evaluate_file(labels_path, vesicles_path, model_name, segment_key, anno_key)
 
     ds_name = os.path.basename(os.path.dirname(labels_path))
     tomo = os.path.basename(labels_path)
-    use_mask = True
+    use_mask = False
     #get the labels and vesicles
     with h5py.File(labels_path) as label_file:
         labels = label_file["labels"]
         #vesicles = labels["vesicles"]
         gt = labels[anno_key][:]
-        gt = rescale(gt, scale=0.5, order=0, anti_aliasing=False, preserve_range=True).astype(gt.dtype)
-        gt = transpose_tomo(gt)
+        #gt = rescale(gt, scale=0.5, order=0, anti_aliasing=False, preserve_range=True).astype(gt.dtype)
+        #gt = transpose_tomo(gt)
 
         if use_mask:
             mask = labels["mask"][:]

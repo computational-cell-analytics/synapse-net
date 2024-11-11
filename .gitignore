@@ -13,3 +13,4 @@ scripts/rizzoli/upsample_data.py
 scripts/cooper/training/find_rec_testset.py
 scripts/rizzoli/combine_2D_slices.py
 scripts/rizzoli/combine_2D_slices_raw.py
+scripts/cooper/remove_h5key.py

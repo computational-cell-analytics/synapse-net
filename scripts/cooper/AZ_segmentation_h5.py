@@ -138,7 +138,7 @@ def main():
     if os.path.isdir(input_):
         segment_folder(args)
     else:
-        run_AZ_segmentation(input_, args.output_path, args.model_path, args.mask_path, args.mask_key, args.tile_shape, args.halo, args.key_label, args.data_ext)
+        run_AZ_segmentation(input_, args.output_path, args.model_path, args.mask_path, args.mask_key, args.tile_shape, args.halo, args.key_label)
 
     print("Finished segmenting!")
 
