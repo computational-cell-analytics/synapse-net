@@ -10,8 +10,8 @@ import h5py
 from tqdm import tqdm
 from synaptic_reconstruction.imod.to_imod import convert_segmentation_to_spheres
 
-DATA_ROOT = "/mnt/lustre-emmy-hdd/projects/nim00007/data/synaptic-reconstruction/cooper/ground_truth/04Dataset_for_vesicle_eval"  # noqa
-PREDICTION_ROOT = "/mnt/lustre-emmy-hdd/projects/nim00007/data/synaptic-reconstruction/cooper/04Dataset_for_vesicle_eval/model_segmentation"  # noqa
+DATA_ROOT = "/mnt/lustre-emmy-hdd/projects/nim00007/data/synaptic-reconstruction/cooper/20241102_TOMO_DATA_Imig2014"  # noqa
+PREDICTION_ROOT = "/mnt/lustre-emmy-hdd/usr/u12095/synaptic_reconstruction/segmentation/for_spatial_distribution_analysis/20241102_TOMO_DATA_Imig2014"  # noqa
 RESULT_FOLDER = "./analysis_results/analysis_1"
 
 
@@ -22,7 +22,7 @@ RESULT_FOLDER = "./analysis_results/analysis_1"
 def compute_sizes_for_all_tomorams():
     os.makedirs(RESULT_FOLDER, exist_ok=True)
 
-    resolution = (0.8681,) * 3
+    resolution = (0.8681,) * 3 #change for each dataset
     radius_factor = 1.3
     estimate_radius_2d = True
 
