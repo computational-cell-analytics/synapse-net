@@ -2,8 +2,8 @@ from common import apply_cryo_vesnet
 
 
 def main():
-    input_folder = "/mnt/lustre-emmy-hdd/projects/nim00007/data/synaptic-reconstruction/fernandez-busnadiego/vesicle_gt/v2"  # noqa
-    output_folder = "./cryo-vesnet-test"
+    input_folder = "/mnt/lustre-emmy-hdd/projects/nim00007/data/synaptic-reconstruction/fernandez-busnadiego/vesicle_gt/v3"  # noqa
+    output_folder = "./predictions/cryo"
 
     # Resolution in Angstrom in XYZ
     # The two tomograms have a different resolution.

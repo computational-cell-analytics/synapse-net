@@ -11,8 +11,8 @@ from tqdm import tqdm
 from train_structure_segmentation import get_train_val_test_split
 from train_structure_segmentation import noop  # noqa
 
-# ROOT = "/mnt/lustre-emmy-hdd/projects/nim00007/data/synaptic-reconstruction/moser"
-ROOT = "/home/pape/Work/data/synaptic_reconstruction/moser"
+ROOT = "/mnt/lustre-emmy-hdd/projects/nim00007/data/synaptic-reconstruction/moser"
+# ROOT = "/home/pape/Work/data/synaptic_reconstruction/moser"
 OUTPUT_ROOT = "./predictions"
 
 
@@ -176,13 +176,13 @@ def predict_and_evaluate_target_domain(paths, name, adapted_model_path):
 
 def predict_and_evaluate_vesicle_pools():
     paths = sorted(glob(os.path.join(ROOT, "other_tomograms/01_vesicle_pools", "*.h5")))
-    adapted_model_path = "./checkpoints/structure-model-adapt-vesicle_pools"
+    adapted_model_path = "./checkpoints/structure-model-adapt-vesicle_pools-v2"
     predict_and_evaluate_target_domain(paths, "vesicle_pools", adapted_model_path)
 
 
 def predict_and_evaluate_rat():
     paths = sorted(glob(os.path.join(ROOT, "other_tomograms/03_ratten_tomos", "*.h5")))
-    adapted_model_path = "./checkpoints/structure-model-adapt-rat"
+    adapted_model_path = "./checkpoints/structure-model-adapt-rat-v2"
     predict_and_evaluate_target_domain(paths, "rat", adapted_model_path)
 
 

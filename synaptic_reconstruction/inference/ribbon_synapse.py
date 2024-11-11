@@ -36,7 +36,7 @@ def segment_ribbon_synapse_structures(
         and the predictions if return_predictions is True.
     """
     if verbose:
-        print("Segmenting mitochondria in volume of shape", input_volume.shape)
+        print("Segmenting ribbon synapse structures in volume of shape", input_volume.shape)
     # Create the scaler to handle prediction with a different scaling factor.
     scaler = _Scaler(scale, verbose)
     input_volume = scaler.scale_input(input_volume)
@@ -49,7 +49,7 @@ def segment_ribbon_synapse_structures(
     assert len(structure_names) == predictions.shape[0]
 
     predictions = {
-        name: scaler.scale_output(predictions[i], is_segmentation=False) for i, name in enumerate(structure_names)
+        name: scaler.rescale_output(predictions[i], is_segmentation=False) for i, name in enumerate(structure_names)
     }
     if threshold is not None:
         for name in structure_names:

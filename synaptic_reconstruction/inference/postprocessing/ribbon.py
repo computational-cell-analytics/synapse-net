@@ -31,7 +31,7 @@ def segment_ribbon(
     ribbon_prediction = ribbon_prediction[slice_mask]
     vesicle_segmentation = vesicle_segmentation[slice_mask]
 
-    block_shape = (32, 256, 256)
+    block_shape = (48, 384, 384)
     # Label the ribbon predictions.
     ribbon_segmentation = parallel.label(ribbon_prediction, block_shape=block_shape)
 
@@ -61,7 +61,8 @@ def segment_ribbon(
 
         ribbon_coord = tuple(idx_[min_dist_point] for idx_ in idx)
         ribbon_id = ribbon_segmentation[ribbon_coord]
-        assert ribbon_id != 0
+        if ribbon_id == 0:
+            continue
 
         if ribbon_id in vesicle_counts:
             vesicle_counts[ribbon_id] += 1

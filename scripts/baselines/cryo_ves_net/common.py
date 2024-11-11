@@ -53,7 +53,18 @@ def _prepare_input(path, output_folder, input_key, resolution, rel_folder=None):
     return out_path, sub_folder
 
 
-def _process_output(tmp, tmp_file, output_folder, output_key, rel_folder=None, mask_file=None, mask_key=None):
+def _get_output_path(fname, output_folder, rel_folder=None):
+    if rel_folder is None:
+        this_output_folder = output_folder
+    else:
+        this_output_folder = os.path.join(output_folder, rel_folder)
+        os.makedirs(this_output_folder, exist_ok=True)
+
+    out_path = os.path.join(this_output_folder, f"{fname}.h5")
+    return out_path
+
+
+def _process_output(tmp, tmp_file, out_path, output_key, mask_file=None, mask_key=None):
     fname = Path(tmp_file).stem
     seg_path = os.path.join(tmp, "cryovesnet", f"{fname}_convex_labels.mrc")
     with mrcfile.open(seg_path, "r") as f:
@@ -66,13 +77,6 @@ def _process_output(tmp, tmp_file, output_folder, output_key, rel_folder=None, m
         seg = np.asarray(seg).copy()
         seg[~mask] = 0
 
-    if rel_folder is None:
-        this_output_folder = output_folder
-    else:
-        this_output_folder = os.path.join(output_folder, rel_folder)
-        os.makedirs(this_output_folder, exist_ok=True)
-
-    out_path = os.path.join(this_output_folder, f"{fname}.h5")
     with h5py.File(out_path, "a") as f:
         f.create_dataset(output_key, data=seg, compression="gzip")
 
@@ -101,16 +105,22 @@ def apply_cryo_vesnet(
     with tempfile.TemporaryDirectory() as tmp:
 
         for i, file in enumerate(files):
+            fname = Path(file).stem
 
             # Get the resolution info for this file.
             if resolution is None:
                 res = None
             else:
-                fname = Path(file).stem
                 res = resolution[fname] if isinstance(resolution, dict) else resolution
 
-            # Prepare the input files by copying them over or resaving them (if h5).
+            # Get the current output path, skip processing if it already exists
             rel_folder = os.path.split(os.path.relpath(file, input_folder))[0] if nested else None
+            out_path = _get_output_path(fname, output_folder, rel_folder=rel_folder)
+            if os.path.exists(out_path):
+                print("Skipping processing of the", file, "because the output at", out_path, "already exists")
+                continue
+
+            # Prepare the input files by copying them over or resaving them (if h5).
             tmp_file, sub_folder = _prepare_input(file, tmp, input_key, res, rel_folder=rel_folder)
 
             # Segment the vesicles in the file.
@@ -119,5 +129,5 @@ def apply_cryo_vesnet(
             # Write the output file.
             mask_file = None if mask_files is None else mask_files[i]
             _process_output(
-                sub_folder, tmp_file, output_folder, output_key, rel_folder, mask_file=mask_file, mask_key=mask_key
+                sub_folder, tmp_file, out_path, output_key, mask_file=mask_file, mask_key=mask_key
             )
