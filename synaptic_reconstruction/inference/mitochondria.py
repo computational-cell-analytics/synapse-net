@@ -5,7 +5,7 @@ import elf.parallel as parallel
 import numpy as np
 import torch
 
-from synaptic_reconstruction.inference.util import apply_size_filter, get_prediction, _Scaler
+from synaptic_reconstruction.inference.util import apply_size_filter, get_prediction, _Scaler, _postprocess_seg_3d
 
 
 def _run_segmentation(
@@ -37,6 +37,7 @@ def _run_segmentation(
         print("Compute watershed in", time.time() - t0, "s")
 
     seg = apply_size_filter(seg, min_size, verbose=verbose, block_shape=block_shape)
+    seg = _postprocess_seg_3d(seg)
     return seg
 
 

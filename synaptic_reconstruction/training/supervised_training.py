@@ -266,7 +266,8 @@ def supervised_training(
     elif mask_channel:
         loss = torch_em.loss.LossWrapper(
             loss=torch_em.loss.DiceLoss(),
-            transform=torch_em.loss.wrapper.ApplyAndRemoveMask()
+            transform=torch_em.loss.wrapper.ApplyAndRemoveMask(
+                masking_method="crop" if out_channels == 1 else "multiply")
         )
         metric = loss
     else:

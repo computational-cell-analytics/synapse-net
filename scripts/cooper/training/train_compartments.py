@@ -2,13 +2,14 @@ import os
 from glob import glob
 
 import numpy as np
-from sklearn.model_selection import train_test_split
+import torch_em
 
+from sklearn.model_selection import train_test_split
 from skimage import img_as_ubyte
 from skimage.segmentation import find_boundaries
 from skimage.filters import gaussian, rank
 from skimage.morphology import disk
-from scipy.ndimage import binary_dilation
+from scipy.ndimage import binary_dilation, distance_transform_edt
 
 from synaptic_reconstruction.training import supervised_training
 
@@ -23,19 +24,26 @@ def get_paths_2d():
 
 def get_paths_3d():
     paths = sorted(glob(os.path.join(TRAIN_ROOT, "v2", "**", "*.h5"), recursive=True))
+    paths += sorted(glob(os.path.join(TRAIN_ROOT, "v3", "**", "*.h5"), recursive=True))
     return paths
 
 
 def label_transform_2d(seg):
-    boundaries = find_boundaries(seg).astype("float32")
-    boundaries = gaussian(boundaries, sigma=1.0)
+    boundaries = find_boundaries(seg)
+    distances = distance_transform_edt(~seg).astype("float32")
+    distances /= distances.max()
+
+    boundaries = gaussian(boundaries.astype("float32"), sigma=1.0)
     boundaries = rank.autolevel(img_as_ubyte(boundaries), disk(8)).astype("float") / 255
-    mask = binary_dilation(seg != 0, iterations=8)
-    return np.stack([boundaries, mask])
+
+    distance_mask = seg != 0
+    boundary_mask = binary_dilation(distance_mask, iterations=8)
+
+    return np.stack([boundaries, distances, boundary_mask, distance_mask])
 
 
 def label_transform_3d(seg):
-    output = np.zeros((2,) + seg.shape, dtype="float32")
+    output = np.zeros((4,) + seg.shape, dtype="float32")
     for z in range(seg.shape[0]):
         out = label_transform_2d(seg[z])
         output[:, z] = out
@@ -70,18 +78,21 @@ def train_compartments_2d_v1():
     )
 
 
-def train_compartments_3d_v1():
+def train_compartments_3d_v2():
     paths = get_paths_3d()
-    train_paths, val_paths = train_test_split(paths, test_size=0.15, random_state=42)
+    train_paths, val_paths = train_test_split(paths, test_size=0.10, random_state=42)
+    print("Number of train paths:", len(train_paths))
+    print("Number of val paths:", len(val_paths))
 
     patch_shape = (64, 384, 384)
     batch_size = 1
 
     check = False
+    sampler = torch_em.data.sampler.MinInstanceSampler(min_num_instances=2)
 
     save_root = "."
     supervised_training(
-        name="compartment_model_3d/v1",
+        name="compartment_model_3d/v2",
         train_paths=train_paths,
         val_paths=val_paths,
         label_key="/labels/compartments",
@@ -90,16 +101,18 @@ def train_compartments_3d_v1():
         save_root=save_root,
         label_transform=label_transform_3d,
         mask_channel=True,
-        n_samples_train=100,
-        n_samples_val=10,
-        n_iterations=int(2e4),
-        out_channels=1,
+        n_samples_train=250,
+        n_samples_val=25,
+        n_iterations=int(5e4),
+        out_channels=2,
+        sampler=sampler,
+        num_workers=8,
     )
 
 
 def main():
     # train_compartments_2d_v1()
-    train_compartments_3d_v1()
+    train_compartments_3d_v2()
 
 
 if __name__ == "__main__":

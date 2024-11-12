@@ -17,6 +17,9 @@ import torch_em
 import xarray
 
 from elf.io import open_file
+from scipy.ndimage import binary_closing
+from skimage.measure import regionprops
+from skimage.morphology import remove_small_holes
 from skimage.transform import rescale, resize
 from torch_em.util.prediction import predict_with_halo
 from tqdm import tqdm
@@ -388,7 +391,7 @@ def get_default_tiling():
             tile = {"x": 352, "y": 352, "z": 48}
         else:
             # TODO determine tilings for smaller VRAM
-            raise NotImplementedError
+            raise NotImplementedError(f"Estimating the tile size for a GPU with {vram} GB is not yet supported.")
 
         print(f"Determined tile size: {tile}")
         tiling = {"tile": tile, "halo": halo}
@@ -455,9 +458,34 @@ def apply_size_filter(
     if min_size == 0:
         return segmentation
     t0 = time.time()
-    ids, sizes = parallel.unique(segmentation, return_counts=True, block_shape=block_shape, verbose=verbose)
+    if segmentation.ndim == 2 and len(block_shape) == 3:
+        block_shape_ = block_shape[1:]
+    else:
+        block_shape_ = block_shape
+    ids, sizes = parallel.unique(segmentation, return_counts=True, block_shape=block_shape_, verbose=verbose)
     filter_ids = ids[sizes < min_size]
     segmentation[np.isin(segmentation, filter_ids)] = 0
     if verbose:
         print("Size filter in", time.time() - t0, "s")
     return segmentation
+
+
+def _postprocess_seg_3d(seg):
+    # Structure lement for 2d dilation in 3d.
+    structure_element = np.ones((3, 3))  # 3x3 structure for XY plane
+    structure_3d = np.zeros((1, 3, 3))  # Only applied in the XY plane
+    structure_3d[0] = structure_element
+
+    props = regionprops(seg)
+    for prop in props:
+        # Get bounding box and mask.
+        bb = tuple(slice(start, stop) for start, stop in zip(prop.bbox[:2], prop.bbox[2:]))
+        mask = seg[bb] == prop.label
+
+        # Fill small holes and apply closing.
+        mask = remove_small_holes(mask, area_threshold=1000)
+        mask = np.logical_or(binary_closing(mask, iterations=4), mask)
+        mask = np.logical_or(binary_closing(mask, iterations=8, structure=structure_3d), mask)
+        seg[bb][mask] = prop.label
+
+    return seg
