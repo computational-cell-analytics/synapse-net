@@ -6,7 +6,7 @@ import numpy as np
 import torch
 
 from synaptic_reconstruction.inference.util import get_prediction, _Scaler
-
+from synaptic_reconstruction.inference.postprocessing.postprocess_AZ import find_intersection_boundary
 
 def _run_segmentation(
     foreground, verbose, min_size,
@@ -40,6 +40,7 @@ def segment_AZ(
     return_predictions: bool = False,
     scale: Optional[List[float]] = None,
     mask: Optional[np.ndarray] = None,
+    compartment: Optional[np.ndarray] = None,
 ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
     """
     Segment mitochondria in an input volume.
@@ -75,8 +76,14 @@ def segment_AZ(
 
     segmentation = _run_segmentation(foreground, verbose=verbose, min_size=min_size)
 
+    #returning prediciton and intersection not possible atm, but currently do not need prediction anyways
     if return_predictions:
         pred = scaler.rescale_output(pred, is_segmentation=False)
         return segmentation, pred
+
+    if compartment is not None:
+        intersection = find_intersection_boundary(segmentation, compartment)
+        return segmentation, intersection
+        
     return segmentation
 

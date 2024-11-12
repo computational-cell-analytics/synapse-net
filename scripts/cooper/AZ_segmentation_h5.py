@@ -34,7 +34,7 @@ def get_volume(input_path):
         input_volume = f[key][:]
     return input_volume
 
-def run_AZ_segmentation(input_path, output_path, model_path, mask_path, mask_key,tile_shape, halo, key_label):
+def run_AZ_segmentation(input_path, output_path, model_path, mask_path, mask_key,tile_shape, halo, key_label, compartment_seg):
     tiling = parse_tiling(tile_shape, halo)
     print(f"using tiling {tiling}")
     input = get_volume(input_path)
@@ -46,7 +46,14 @@ def run_AZ_segmentation(input_path, output_path, model_path, mask_path, mask_key
     else:
         mask = None
 
-    foreground = segment_AZ(input_volume=input, model_path=model_path, verbose=False, tiling=tiling, mask = mask)
+    #check if intersection with compartment is necessary
+    if compartment_seg is None:
+        foreground = segment_AZ(input_volume=input, model_path=model_path, verbose=False, tiling=tiling, mask = mask)
+        intersection = None
+    else:
+        with open_file(compartment_seg, "r") as f:
+            compartment = f["/compartments/segment_from_3Dmodel_v1"][:]
+        foreground, intersection = segment_AZ(input_volume=input, model_path=model_path, verbose=False, tiling=tiling, mask = mask, compartment=compartment)
 
     seg_output = _require_output_folders(output_path)
     file_name = Path(input_path).stem
@@ -73,6 +80,13 @@ def run_AZ_segmentation(input_path, output_path, model_path, mask_path, mask_key
                 print("mask image already saved")
             else:
                 f.create_dataset(mask_key, data = mask, compression = "gzip")
+
+        if intersection is not None:
+            intersection_key = "AZ/compartment_AZ_intersection"
+            if intersection_key in f:
+                print("intersection already saved")
+            else:
+                f.create_dataset(intersection_key, data = intersection, compression = "gzip")
         
         
 
@@ -93,8 +107,15 @@ def segment_folder(args):
         except:
             print(f"Mask file not found for {input_path}")
             mask_path = None
+        
+        if args.compartment_seg is not None:
+            try:
+                compartment_seg = os.path.join(args.compartment_seg, os.path.splitext(filename)[0] + '.h5')
+            except:
+                print(f"compartment file not found for {input_path}")
+                compartment_seg = None
 
-        run_AZ_segmentation(input_path, args.output_path, args.model_path, mask_path, args.mask_key, args.tile_shape, args.halo, args.key_label)
+        run_AZ_segmentation(input_path, args.output_path, args.model_path, mask_path, args.mask_key, args.tile_shape, args.halo, args.key_label, compartment_seg)
 
 def main():
     parser = argparse.ArgumentParser(description="Segment vesicles in EM tomograms.")
@@ -131,6 +152,12 @@ def main():
         "--data_ext", "-d", default = ".h5",
         help="Format extension of data to be segmented, default is .h5."
     )
+    parser.add_argument(
+        "--compartment_seg", "-c", 
+        help="Path to compartment segmentation."
+        "If the compartment segmentation was executed before, this will add a key to output file that stores the intersection between compartment boundary and AZ."
+        "Maybe need to adjust the compartment key that the segmentation is stored under"
+    )
     args = parser.parse_args()
 
     input_ = args.input_path
@@ -138,7 +165,7 @@ def main():
     if os.path.isdir(input_):
         segment_folder(args)
     else:
-        run_AZ_segmentation(input_, args.output_path, args.model_path, args.mask_path, args.mask_key, args.tile_shape, args.halo, args.key_label)
+        run_AZ_segmentation(input_, args.output_path, args.model_path, args.mask_path, args.mask_key, args.tile_shape, args.halo, args.key_label, args.compartment_seg)
 
     print("Finished segmenting!")
 

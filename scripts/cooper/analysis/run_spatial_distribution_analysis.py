@@ -16,7 +16,7 @@ RESULT_FOLDER = "./analysis_results"
 def compute_sizes_for_all_tomorams():
     os.makedirs(RESULT_FOLDER, exist_ok=True)
     
-    resolution = (0.8681,) * 3  # Change for each dataset
+    resolution = (1.554,) * 3  # Change for each dataset #1.554 for Munc and snap #0.8681 for 04 dataset
     
     # Dictionary to hold the results for each dataset
     dataset_results = {}
