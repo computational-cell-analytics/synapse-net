@@ -77,6 +77,12 @@ def _segment_compartments_2d(
         mask = np.logical_or(binary_closing(mask, iterations=4), mask)
         segmentation[bb][mask] = prop.label
 
+    # import napari
+    # v = napari.Viewer()
+    # v.add_image(boundaries)
+    # v.add_labels(segmentation)
+    # napari.run()
+
     return segmentation
 
 
@@ -117,6 +123,7 @@ def _segment_compartments_3d(
     boundary_threshold=0.4,
     n_slices_exclude=0,
     min_z_extent=10,
+    postprocess_segments=False,
 ):
     distances = distance_transform_edt(prediction < boundary_threshold).astype("float32")
     seg_2d = np.zeros(prediction.shape, dtype="uint32")
@@ -132,7 +139,8 @@ def _segment_compartments_3d(
         seg_2d[z] = seg_z
 
     seg = _merge_segmentation_3d(seg_2d, min_z_extent)
-    seg = _postprocess_seg_3d(seg)
+    if postprocess_segments:
+        seg = _postprocess_seg_3d(seg)
 
     # import napari
     # v = napari.Viewer()
@@ -155,6 +163,9 @@ def segment_compartments(
     scale: Optional[List[float]] = None,
     mask: Optional[np.ndarray] = None,
     n_slices_exclude: int = 0,
+    boundary_threshold: float = 0.4,
+    min_z_extent: int = 10,
+    postprocess_segments: bool = False,
     **kwargs,
 ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
     """
@@ -194,9 +205,14 @@ def segment_compartments(
     # We may want to expose some of the parameters here.
     t0 = time.time()
     if input_volume.ndim == 2:
-        seg = _segment_compartments_2d(pred)
+        seg = _segment_compartments_2d(pred, boundary_threshold=boundary_threshold)
     else:
-        seg = _segment_compartments_3d(pred, n_slices_exclude=n_slices_exclude)
+        seg = _segment_compartments_3d(
+            pred,
+            boundary_threshold=boundary_threshold,
+            n_slices_exclude=n_slices_exclude,
+            postprocess_segments=postprocess_segments,
+        )
     if verbose:
         print("Run segmentation in", time.time() - t0, "s")
 
