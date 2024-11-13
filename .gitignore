@@ -8,6 +8,7 @@ models/*/
 run_sbatch.sbatch
 slurm/
 scripts/cooper/evaluation_results/
+analysis_results/
 scripts/cooper/training/copy_testset.py
 scripts/rizzoli/upsample_data.py
 scripts/cooper/training/find_rec_testset.py

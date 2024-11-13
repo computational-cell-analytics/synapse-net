@@ -36,7 +36,7 @@ def run_compartment_segmentation(input_path, output_path, model_path, tile_shape
     print(f"using tiling {tiling}")
     input = get_volume(input_path)
 
-    segmentation, prediction = segment_compartments(input_volume=input, model_path=model_path, verbose=False, tiling=tiling, return_predictions=True, scale=[0.25, 0.25, 0.25])
+    segmentation, prediction = segment_compartments(input_volume=input, model_path=model_path, verbose=False, tiling=tiling, return_predictions=True, scale=[0.25, 0.25, 0.25],boundary_threshold=0.2, postprocess_segments=False)
 
     seg_output = _require_output_folders(output_path)
     file_name = Path(input_path).stem

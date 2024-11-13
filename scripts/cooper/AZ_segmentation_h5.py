@@ -52,7 +52,7 @@ def run_AZ_segmentation(input_path, output_path, model_path, mask_path, mask_key
         intersection = None
     else:
         with open_file(compartment_seg, "r") as f:
-            compartment = f["/compartments/segment_from_3Dmodel_v1"][:]
+            compartment = f["/labels/compartment"][:]
         foreground, intersection = segment_AZ(input_volume=input, model_path=model_path, verbose=False, tiling=tiling, mask = mask, compartment=compartment)
 
     seg_output = _require_output_folders(output_path)
