@@ -6,9 +6,9 @@ from tqdm import tqdm
 from synaptic_reconstruction.distance_measurements import measure_segmentation_to_object_distances
 import numpy as np
 
-DATA_ROOT = "/mnt/lustre-emmy-hdd/projects/nim00007/data/synaptic-reconstruction/cooper/20241102_TOMO_DATA_Imig2014/exported/"  # noqa
-PREDICTION_ROOT = "/mnt/lustre-emmy-hdd/usr/u12095/synaptic_reconstruction/segmentation/for_spatial_distribution_analysis/final_Imig2014_seg_manComp"  # noqa
-RESULT_FOLDER = "./analysis_results/AZ_intersect_manualCompartment"
+DATA_ROOT = "/mnt/lustre-emmy-hdd/usr/u12095/synaptic_reconstruction/segmentation/for_spatial_distribution_analysis/final_Imig2014_seg/"  # noqa
+PREDICTION_ROOT = "/mnt/lustre-emmy-hdd/usr/u12095/synaptic_reconstruction/segmentation/for_spatial_distribution_analysis/final_Imig2014_seg/"  # noqa
+RESULT_FOLDER = "./analysis_results/AZ_filtered_autoComp"
 
 
 def get_compartment_with_max_overlap(compartments, vesicles):
@@ -55,7 +55,7 @@ def get_compartment_with_max_overlap(compartments, vesicles):
 # We compute the distances for all vesicles in the compartment masks to the AZ.
 # We use the same different resolution, depending on dataset.
 # The closest distance is calculated, i.e., the closest point on the outer membrane of the vesicle to the AZ.
-def compute_sizes_for_all_tomorams():
+def compute_per_vesicle_distance_to_AZ():
     os.makedirs(RESULT_FOLDER, exist_ok=True)
     
     resolution = (1.554,) * 3  # Change for each dataset #1.554 for Munc and snap #0.8681 for 04 dataset
@@ -116,8 +116,80 @@ def compute_sizes_for_all_tomorams():
         # Save the DataFrame to CSV
         result_df.to_csv(output_path, index=False)
 
+def compute_per_vesicle_distance_to_filteredAZ():
+    filtered_AZ_path = "/mnt/lustre-emmy-hdd/projects/nim00007/data/synaptic-reconstruction/cooper/20241102_TOMO_DATA_Imig2014/az_seg_filtered"
+    os.makedirs(RESULT_FOLDER, exist_ok=True)
+    
+    resolution = (1.554,) * 3  # Change for each dataset #1.554 for Munc and snap #0.8681 for 04 dataset
+    
+    # Dictionary to hold the results for each dataset and category (CTRL or DKO)
+    dataset_results = {}
 
-def compute_sizes_for_all_tomorams_manComp():
+    tomograms = sorted(glob(os.path.join(PREDICTION_ROOT, "**/*.h5"), recursive=True))
+    for tomo in tqdm(tomograms):
+        ds_name, fname = os.path.split(tomo)
+        ds_name = os.path.split(ds_name)[1]
+        fname = os.path.splitext(fname)[0]
+        
+        # Determine if the tomogram is 'CTRL' or 'DKO'
+        category = "CTRL" if "CTRL" in fname else "DKO"
+        
+        # Initialize a new dictionary entry for each dataset and category if not already present
+        if ds_name not in dataset_results:
+            dataset_results[ds_name] = {'CTRL': {}, 'DKO': {}}
+        
+        # Skip if this tomogram already exists in the dataset dictionary
+        if fname in dataset_results[ds_name][category]:
+            continue
+
+        #Load the AZ segmentations
+        AZ_path = os.path.join(filtered_AZ_path, ds_name, f"{fname}.h5")
+        with h5py.File(AZ_path, "r") as f:
+            segmented_object = f["/filtered_az"][:]
+
+        # Load the vesicle segmentation from the predictions
+        with h5py.File(tomo, "r") as f:
+            segmentation = f["/vesicles/segment_from_combined_vesicles"][:]
+            
+            #if AZ intersect is small, compartment seg didn't align with AZ so we use the normal AZ and not intersect
+            if (segmented_object == 0).all() or np.sum(segmented_object == 1) < 2000:
+                segmented_object = f["/AZ/segment_from_AZmodel_v3"][:]
+
+        input_path = os.path.join(DATA_ROOT, ds_name, f"{fname}.h5")
+        assert os.path.exists(input_path), input_path
+
+        # Load the compartment mask from the tomogram
+        with h5py.File(input_path, "r") as f:
+            compartments  = f["/compartments/segment_from_3Dmodel_v2"][:]
+        mask = get_compartment_with_max_overlap(compartments, segmentation)
+        
+        #if more than half of the vesicles (approximation, its checking pixel and not label) would get filtered by mask it means the compartment seg didn't work and thus we won't use the mask
+        if np.sum(segmentation[mask == 0] > 0) > (0.5 * np.sum(segmentation > 0)):
+            print("using no mask")
+        else:
+            segmentation[mask == 0] = 0
+        distances, _, _, _ = measure_segmentation_to_object_distances(
+            segmentation, segmented_object=segmented_object, resolution=resolution
+        )
+
+        # Add distances to the dataset dictionary under the appropriate category
+        dataset_results[ds_name][category][fname] = distances
+
+    # Save each dataset's results into separate CSV files for CTRL and DKO tomograms
+    for ds_name, categories in dataset_results.items():
+        for category, tomogram_data in categories.items():
+            # Sort tomograms by name within the category
+            sorted_data = dict(sorted(tomogram_data.items()))  # Sort by tomogram names
+            result_df = pd.DataFrame.from_dict(sorted_data, orient='index').transpose()
+            
+            # Define the output file path
+            output_path = os.path.join(RESULT_FOLDER, f"spatial_distribution_analysis_for_{ds_name}_{category}.csv")
+            
+            # Save the DataFrame to CSV
+            result_df.to_csv(output_path, index=False)
+
+
+def compute_per_vesicle_distance_to_AZ_manComp():
     os.makedirs(RESULT_FOLDER, exist_ok=True)
     
     resolution = (1.554,) * 3  # Change for each dataset #1.554 for Munc and snap #0.8681 for 04 dataset
@@ -171,8 +243,9 @@ def compute_sizes_for_all_tomorams_manComp():
         result_df.to_csv(output_path, index=False)
 
 def main():
-    #compute_sizes_for_all_tomorams()
-    compute_sizes_for_all_tomorams_manComp()
+    #compute_per_vesicle_distance_to_AZ()
+    #compute_per_vesicle_distance_to_AZ_manComp()
+    compute_per_vesicle_distance_to_filteredAZ()
 
 
 if __name__ == "__main__":

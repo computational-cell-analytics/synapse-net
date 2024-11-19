@@ -76,7 +76,8 @@ def calculate_AZ_area_simple(tomo_path, pixel_size_nm=1.554):
 
 def calculate_AZ_surface(tomo_path, pixel_size_nm=1.554):
     with h5py.File(tomo_path, "r") as f:
-        AZ_seg = f["/AZ/segment_from_AZmodel_v3"][:]
+        #AZ_seg = f["/AZ/segment_from_AZmodel_v3"][:]
+        AZ_seg = f["/filtered_az"][:]
     
     # Apply binary closing to smooth the segmented regions
     struct_elem = ball(1)  # Use a small 3D structuring element
@@ -98,6 +99,16 @@ def calculate_AZ_surface(tomo_path, pixel_size_nm=1.554):
         AZ_seg_filtered = np.zeros_like(AZ_seg_interp, dtype=np.uint8)
     
     morphology_data = compute_object_morphology(AZ_seg_filtered, "AZ Structure", resolution=(pixel_size_nm, pixel_size_nm, pixel_size_nm))
+    surface_column = "surface [nm^2]" #if resolution is not None else "surface [pixel^2]"
+    surface_area = morphology_data[surface_column].iloc[0]
+
+    return surface_area
+
+def calculate_AZ_surface_simple(tomo_path, pixel_size_nm=1.554):
+    with h5py.File(tomo_path, "r") as f:
+        AZ_seg = f["/labels/AZ"][:]
+    
+    morphology_data = compute_object_morphology(AZ_seg, "AZ Structure", resolution=(pixel_size_nm, pixel_size_nm, pixel_size_nm))
     surface_column = "surface [nm^2]" #if resolution is not None else "surface [pixel^2]"
     surface_area = morphology_data[surface_column].iloc[0]
 
@@ -194,7 +205,8 @@ def process_datasets(folder_path, output_csv="AZ_areas.csv", pixel_size_nm=1.554
                     #AZ_area = calculate_total_AZ_area(tomo_path, pixel_size_nm)
                     #AZ_area = calculate_AZ_area_simple(tomo_path, pixel_size_nm)
                     #AZ_surface_area = calculate_AZ_surface(tomo_path, pixel_size_nm)
-                    AZ_surface_area = calculate_AZ_surface_convexHull(tomo_path, pixel_size_nm)
+                    #AZ_surface_area = calculate_AZ_surface_convexHull(tomo_path, pixel_size_nm)
+                    AZ_surface_area = calculate_AZ_surface_simple(tomo_path, pixel_size_nm)
                     # Append results to list
                     results.append({
                         "Dataset": dataset_name,
@@ -217,8 +229,8 @@ def process_datasets(folder_path, output_csv="AZ_areas.csv", pixel_size_nm=1.554
 
 def main():
     # Define the path to the folder containing dataset folders
-    folder_path = "/mnt/lustre-emmy-hdd/usr/u12095/synaptic_reconstruction/segmentation/for_spatial_distribution_analysis/final_Imig2014_seg_manComp"
-    output_csv = "./analysis_results/AZ_intersect_manualCompartment/AZ_surface_area.csv"
+    folder_path = "/mnt/lustre-emmy-hdd/projects/nim00007/data/synaptic-reconstruction/cooper/20241102_TOMO_DATA_Imig2014/exported/"
+    output_csv = "./analysis_results/manual_AZ_exported/AZ_surface_area.csv"
     # Call the function to process datasets and save results
     process_datasets(folder_path, output_csv = output_csv)
 
