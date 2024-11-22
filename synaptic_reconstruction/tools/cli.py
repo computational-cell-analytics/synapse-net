@@ -5,6 +5,16 @@ from .util import run_segmentation, get_model
 from ..inference.util import inference_helper, parse_tiling
 
 
+def training_cli():
+    parser = argparse.ArgumentParser(description="")
+    args = parser.parse_args()
+
+
+def domain_adaptation_cli():
+    parser = argparse.ArgumentParser(description="")
+    args = parser.parse_args()
+
+
 # TODO: handle kwargs
 def segmentation_cli():
     parser = argparse.ArgumentParser(description="Run segmentation.")
