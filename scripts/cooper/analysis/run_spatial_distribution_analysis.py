@@ -188,7 +188,6 @@ def compute_per_vesicle_distance_to_filteredAZ():
             # Save the DataFrame to CSV
             result_df.to_csv(output_path, index=False)
 
-
 def compute_per_vesicle_distance_to_AZ_manComp():
     os.makedirs(RESULT_FOLDER, exist_ok=True)
     
@@ -246,6 +245,7 @@ def main():
     #compute_per_vesicle_distance_to_AZ()
     #compute_per_vesicle_distance_to_AZ_manComp()
     compute_per_vesicle_distance_to_filteredAZ()
+
 
 
 if __name__ == "__main__":

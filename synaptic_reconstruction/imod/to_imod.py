@@ -121,6 +121,37 @@ def convert_segmentation_to_spheres(
     rads = [re[1] for re in res]
     return np.array(coords), np.array(rads)
 
+    def coords_and_rads(prop):
+        seg_id = prop.label
+
+        bbox = prop.bbox
+        bb = np.s_[bbox[0]:bbox[3], bbox[1]:bbox[4], bbox[2]:bbox[5]]
+        mask = segmentation[bb] == seg_id
+
+        if estimate_radius_2d:
+            dists = np.array([distance_transform_edt(ma, sampling=resolution[1:]) for ma in mask])
+        else:
+            dists = distance_transform_edt(mask, sampling=resolution)
+
+        max_coord = np.unravel_index(np.argmax(dists), mask.shape)
+        radius = dists[max_coord] * radius_factor
+
+        offset = np.array(bbox[:3])
+        coord = np.array(max_coord) + offset
+        return coord, radius, seg_id
+
+    with futures.ThreadPoolExecutor(num_workers) as tp:
+        res = list(tqdm(
+            tp.map(coords_and_rads, props), disable=not verbose, total=len(props),
+            desc="Compute coordinates and radii"
+        ))
+
+    coords = [re[0] for re in res]
+    rads = [re[1] for re in res]
+    label_indxes = [re[2] for re in res]
+    return np.array(coords), np.array(rads), np.array(label_indxes)
+
+
 
 def write_points_to_imod(
     coordinates: np.ndarray,

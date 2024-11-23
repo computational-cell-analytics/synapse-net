@@ -11,9 +11,9 @@ import h5py
 from tqdm import tqdm
 from synaptic_reconstruction.imod.to_imod import convert_segmentation_to_spheres
 
-DATA_ROOT = "/mnt/lustre-emmy-hdd/projects/nim00007/data/synaptic-reconstruction/cooper/20241102_TOMO_DATA_Imig2014/exported/"  # noqa
-PREDICTION_ROOT = "/mnt/lustre-emmy-hdd/usr/u12095/synaptic_reconstruction/segmentation/for_spatial_distribution_analysis/final_Imig2014_seg_manComp"  # noqa
-RESULT_FOLDER = "./analysis_results/AZ_intersect_manualCompartment"
+DATA_ROOT = "/mnt/lustre-emmy-hdd/usr/u12095/synaptic_reconstruction/segmentation/for_spatial_distribution_analysis/final_Imig2014_seg/"  # noqa
+PREDICTION_ROOT = "/mnt/lustre-emmy-hdd/usr/u12095/synaptic_reconstruction/segmentation/for_spatial_distribution_analysis/final_Imig2014_seg/"  # noqa
+RESULT_FOLDER = "./analysis_results/AZ_filtered_autoComp"
 
 def get_compartment_with_max_overlap(compartments, vesicles):
     """
@@ -182,9 +182,8 @@ def compute_sizes_for_all_tomorams_autoComp():
             result_df.to_csv(output_path, index=False)
 
 def main():
-    compute_sizes_for_all_tomorams_manComp()
-    #compute_sizes_for_all_tomorams_autoComp()
-
+    #compute_sizes_for_all_tomorams_manComp()
+    compute_sizes_for_all_tomorams_autoComp()
 
 if __name__ == "__main__":
     main()
