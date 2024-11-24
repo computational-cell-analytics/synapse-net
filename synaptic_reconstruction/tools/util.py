@@ -11,7 +11,13 @@ from ..inference.mitochondria import segment_mitochondria
 
 
 def get_model_path(model_type: str) -> str:
-    """
+    """Get the local path to a given model.
+
+    Args:
+        The model type.
+
+    Returns:
+        The local path to the model.
     """
     model_registry = get_model_registry()
     model_path = model_registry.fetch(model_type)
