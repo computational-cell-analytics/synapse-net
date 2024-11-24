@@ -19,9 +19,8 @@ def main():
     # This is the folder that contains your training data.
     # The example was designed so that it runs for the sample data downloaded to './data'.
     # If you want to train on your own data than change this filepath accordingly.
-    # TODO
-    # data_root_folder = "./data
-    data_root_folder = "/home/pape/Work/my_projects/synaptic-reconstruction/scripts/data_summary/for_zenodo/vesicles/train"  # noqa
+    # TODO update to match zenodo download
+    data_root_folder = "./data/vesicles/train"
 
     # The training data should be saved as .h5 files, with:
     # an internal dataset called 'raw' that contains the image data
@@ -60,7 +59,7 @@ def main():
     check_loader = False
 
     # This function runs the training. Check out its documentation for
-    # advanced setting to update the training procedure.
+    # advanced settings to update the training procedure.
     supervised_training(
         name=model_name,
         train_paths=train_paths,
