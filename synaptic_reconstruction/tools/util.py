@@ -10,6 +10,14 @@ from ..inference.vesicles import segment_vesicles
 from ..inference.mitochondria import segment_mitochondria
 
 
+def get_model_path(model_type: str) -> str:
+    """
+    """
+    model_registry = get_model_registry()
+    model_path = model_registry.fetch(model_type)
+    return model_path
+
+
 def get_model(model_type: str, device: Optional[Union[str, torch.device]] = None) -> torch.nn.Module:
     """Get the model for the given segmentation type.
 
@@ -22,8 +30,7 @@ def get_model(model_type: str, device: Optional[Union[str, torch.device]] = None
         The model.
     """
     device = get_device(device)
-    model_registry = get_model_registry()
-    model_path = model_registry.fetch(model_type)
+    model_path = get_model_path(model_type)
     warnings.filterwarnings(
         "ignore",
         message="You are using `torch.load` with `weights_only=False`",

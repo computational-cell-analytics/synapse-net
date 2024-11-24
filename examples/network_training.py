@@ -19,8 +19,9 @@ def main():
     # This is the folder that contains your training data.
     # The example was designed so that it runs for the sample data downloaded to
     # the folder './data'. If you want to train on your own data than change this filepath accordingily.
-    # TODO take care of test split for the sample data?
-    data_root_folder = "./data"
+
+    # data_root_folder = "./data
+    data_root_folder = "/home/pape/Work/my_projects/synaptic-reconstruction/scripts/data_summary/for_zenodo/vesicles/train"  # noqa
 
     # The training data should be saved as .h5 files, with:
     # an internal dataset called 'raw' that contains the image data
@@ -28,18 +29,23 @@ def main():
     label_key = "labels/vesicles"
 
     # Get all files with ending .h5 in the training folder.
-    files = sorted(glob(os.path.join(data_root_folder, "**", "*.h5"), nested=True))
+    files = sorted(glob(os.path.join(data_root_folder, "**", "*.h5"), recursive=True))
 
-    # Train / val split
+    # Crate a train / val split.
     train_ratio = 0.85
-    train_paths, val_paths = train_test_split(files, test_size=1 - train_ratio, shuffle=True, seed=42)
+    train_paths, val_paths = train_test_split(files, test_size=1 - train_ratio, shuffle=True, random_state=42)
 
-    # TODO set and explain
-    model_name = ""
-    batch_size = ""
-    patch_shape = ""
-
+    # TODO explain
     # TODO 2d vs 3d training
+    train_2d_model = True
+    if train_2d_model:
+        batch_size = 2
+        model_name = "example-2d-vesicle-model"
+        patch_shape = (1, 384, 384)
+    else:
+        batch_size = 1
+        model_name = "example-3d-vesicle-model"
+        patch_shape = (48, 256, 256)
 
     # TODO explain loader check
     check_loader = False

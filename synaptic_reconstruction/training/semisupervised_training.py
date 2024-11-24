@@ -6,7 +6,7 @@ import torch_em
 import torch_em.self_training as self_training
 from torchvision import transforms
 
-from .supervised_training import get_2d_model, get_3d_model, get_supervised_loader
+from .supervised_training import get_2d_model, get_3d_model, get_supervised_loader, determine_ndim
 
 
 def weak_augmentations(p: float = 0.75) -> callable:
@@ -61,14 +61,7 @@ def get_unsupervised_loader(
     else:
         roi = None
 
-    if len(patch_shape) == 2:
-        ndim = 2
-    else:
-        assert len(patch_shape) == 3
-        z, y, x = patch_shape
-        ndim = 2 if z == 1 else 3
-    print("ndim is: ", ndim)
-
+    _, ndim = determine_ndim(patch_shape)
     raw_transform = torch_em.transform.get_raw_transform()
     transform = torch_em.transform.get_augmentations(ndim=ndim)
 

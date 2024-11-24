@@ -67,6 +67,18 @@ def adjust_patch_shape(data_shape, patch_shape):
     return patch_shape  # Return the original patch_shape for 3D data
 
 
+def determine_ndim(patch_shape):
+    # Check for 2D or 3D training
+    try:
+        z, y, x = patch_shape
+    except ValueError:
+        y, x = patch_shape
+        z = 1
+    is_2d = z == 1
+    ndim = 2 if is_2d else 3
+    return is_2d, ndim
+
+
 def get_supervised_loader(
     data_paths: Tuple[str],
     raw_key: str,
@@ -108,16 +120,7 @@ def get_supervised_loader(
     Returns:
         The PyTorch dataloader.
     """
-
-    # Check for 2D or 3D training
-    try:
-        z, y, x = patch_shape
-        ndim = 2 if z == 1 else 3
-    except ValueError:
-        y, x = patch_shape
-        ndim = 2
-    print("ndim is: ", ndim)
-
+    _, ndim = determine_ndim(patch_shape)
     if label_transform is not None:  # A specific label transform was passed, do nothing.
         pass
     elif add_boundary_transform:
@@ -166,7 +169,7 @@ def supervised_training(
     val_paths: Tuple[str],
     label_key: str,
     patch_shape: Tuple[int, int, int],
-    save_root: str,
+    save_root: Optional[str] = None,
     raw_key: str = "raw",
     batch_size: int = 1,
     lr: float = 1e-4,
@@ -236,14 +239,7 @@ def supervised_training(
         check_loader(val_loader, n_samples=4)
         return
 
-    # Check for 2D or 3D training
-    try:
-        z, y, x = patch_shape
-    except ValueError:
-        y, x = patch_shape
-        z = 1
-    is_2d = z == 1
-
+    is_2d, _ = determine_ndim(patch_shape)
     if is_2d:
         model = get_2d_model(out_channels=out_channels)
     else:
