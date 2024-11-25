@@ -1,1 +1,0 @@
-sr_tools.correct_segmentation -i /home/pape/Work/data/moser/lipids-julia/corrected_tomos_mrc/TS20.mrc_10.00Apx_corrected.mrc -s /home/pape/Work/data/moser/lipids-julia/results/v1/prediction-center-membrane/TS20.mrc_10.00Apx_corrected.tif 

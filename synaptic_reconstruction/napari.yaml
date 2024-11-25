@@ -1,0 +1,29 @@
+name: synaptic_reconstruction
+display_name: Synaptic Reconstruction
+# see https://napari.org/stable/plugins/manifest.html for valid categories
+categories: ["Image Processing", "Annotation"]
+contributions:
+  commands:
+    - id: synaptic_reconstruction.segment
+      python_name: synaptic_reconstruction.tools.segmentation_widget:SegmentationWidget
+      title: Segment
+    - id: synaptic_reconstruction.distance_measure
+      python_name: synaptic_reconstruction.tools.distance_measure_widget:DistanceMeasureWidget
+      title: Distance Measurement
+    - id: synaptic_reconstruction.file_reader
+      title: Read volumetric data
+      python_name: synaptic_reconstruction.tools.volume_reader:get_reader
+
+  readers:
+    - command: synaptic_reconstruction.file_reader
+      filename_patterns:
+      - '*.mrc'
+      - '*.rec'
+      - '*.h5'
+      accepts_directories: false
+
+  widgets:
+    - command: synaptic_reconstruction.segment
+      display_name: Segmentation
+    - command: synaptic_reconstruction.distance_measure
+      display_name: Distance Measurement

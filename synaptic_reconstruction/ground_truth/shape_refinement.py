@@ -1,11 +1,15 @@
-from typing import List, Dict
+import multiprocessing as mp
 from concurrent import futures
+from functools import partial
+from typing import List, Dict, Optional
 
 import numpy as np
 
 from scipy.ndimage import binary_erosion, binary_dilation
-from skimage.filters import gaussian, sobel
+from skimage import img_as_ubyte
+from skimage.filters import gaussian, rank, sato, sobel
 from skimage.measure import regionprops
+from skimage.morphology import disk
 from skimage.segmentation import watershed
 from tqdm import tqdm
 
@@ -14,14 +18,26 @@ try:
 except ImportError:
     vigra = None
 
-FILTERS = ("sobel", "laplace", "ggm", "structure-tensor")
+FILTERS = ("sobel", "laplace", "ggm", "structure-tensor", "sato")
+
+
+def _sato_filter(raw, sigma, max_window=16):
+    if raw.ndim != 2:
+        raise NotImplementedError("The sato filter is only implemented for 2D data.")
+    hmap = sato(raw)
+    hmap = gaussian(hmap, sigma=sigma)
+    hmap -= hmap.min()
+    hmap /= hmap.max()
+    hmap = rank.autolevel(img_as_ubyte(hmap), disk(max_window)).astype("float") / 255
+    return hmap
 
 
 def edge_filter(
     data: np.ndarray,
     sigma: float,
-    method: str = "sobel",
-    per_slice: bool = False,
+    method: str = "sato",
+    per_slice: bool = True,
+    n_threads: Optional[int] = None,
 ) -> np.ndarray:
     """Find edges in the image data.
 
@@ -33,7 +49,9 @@ def edge_filter(
             - "laplace": Edges are found with a laplacian of gaussian filter.
             - "ggm": Edges are found with a gaussian gradient magnitude filter.
             - "structure-tensor": Edges are found based on the 2nd eigenvalue of the structure tensor.
+            - "sato": Edges are found with a sato-filter, followed by smoothing and leveling.
         per_slice: Compute the filter per slice instead of for the whole volume.
+        n_threads: Number of threads for parallel computation over the slices.
     Returns:
         Volume with edge strength.
     """
@@ -42,10 +60,12 @@ def edge_filter(
     if method in FILTERS[1:] and vigra is None:
         raise ValueError(f"Filter {method} requires vigra.")
 
-    if per_slice:
-        edge_map = np.zeros(data.shape, dtype="float32")
-        for z in range(data.shape[0]):
-            edge_map[z] = edge_filter(data[z], sigma=sigma, method=method)
+    if per_slice and data.ndim == 3:
+        n_threads = mp.cpu_count() if n_threads is None else n_threads
+        filter_func = partial(edge_filter, sigma=sigma, method=method, per_slice=False)
+        with futures.ThreadPoolExecutor(n_threads) as tp:
+            edge_map = list(tp.map(filter_func, data))
+        edge_map = np.stack(edge_map)
         return edge_map
 
     if method == "sobel":
@@ -60,6 +80,8 @@ def edge_filter(
         edge_map = vigra.filters.structureTensorEigenvalues(
             data.astype("float32"), innerScale=inner_scale, outerScale=outer_scale
         )[..., 1]
+    elif method == "sato":
+        edge_map = _sato_filter(data, sigma)
 
     return edge_map
 

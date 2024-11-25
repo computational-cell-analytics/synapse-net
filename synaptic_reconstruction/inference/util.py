@@ -255,21 +255,23 @@ def _get_file_paths(input_path, ext=".mrc"):
 
 
 def _load_input(img_path, extra_files, i):
-    # Load the input data data
-    with open_file(img_path, "r") as f:
+    # Load the input data.
+    if os.path.splitext(img_path)[-1] == ".tif":
+        input_volume = imageio.imread(img_path)
 
-        # Try to automatically derive the key with the raw data.
-        keys = list(f.keys())
-        if len(keys) == 1:
-            key = keys[0]
-        elif "data" in keys:
-            key = "data"
-        elif "raw" in keys:
-            key = "raw"
+    else:
+        with open_file(img_path, "r") as f:
+            # Try to automatically derive the key with the raw data.
+            keys = list(f.keys())
+            if len(keys) == 1:
+                key = keys[0]
+            elif "data" in keys:
+                key = "data"
+            elif "raw" in keys:
+                key = "raw"
+            input_volume = f[key][:]
 
-        input_volume = f[key][:]
-    assert input_volume.ndim == 3
-
+    assert input_volume.ndim in (2, 3)
     # For now we assume this is always tif.
     if extra_files is not None:
         extra_input = imageio.imread(extra_files[i])
@@ -470,7 +472,7 @@ def apply_size_filter(
     return segmentation
 
 
-def _postprocess_seg_3d(seg):
+def _postprocess_seg_3d(seg, area_threshold=1000, iterations=4, iterations_3d=8):
     # Structure lement for 2d dilation in 3d.
     structure_element = np.ones((3, 3))  # 3x3 structure for XY plane
     structure_3d = np.zeros((1, 3, 3))  # Only applied in the XY plane
@@ -483,9 +485,9 @@ def _postprocess_seg_3d(seg):
         mask = seg[bb] == prop.label
 
         # Fill small holes and apply closing.
-        mask = remove_small_holes(mask, area_threshold=1000)
-        mask = np.logical_or(binary_closing(mask, iterations=4), mask)
-        mask = np.logical_or(binary_closing(mask, iterations=8, structure=structure_3d), mask)
+        mask = remove_small_holes(mask, area_threshold=area_threshold)
+        mask = np.logical_or(binary_closing(mask, iterations=iterations), mask)
+        mask = np.logical_or(binary_closing(mask, iterations=iterations_3d, structure=structure_3d), mask)
         seg[bb][mask] = prop.label
 
     return seg

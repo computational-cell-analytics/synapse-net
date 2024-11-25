@@ -16,51 +16,60 @@ from skimage.measure import regionprops
 from tqdm import tqdm
 
 
-# FIXME how to bring the data to the IMOD axis convention?
-def _to_imod_order(data):
-    # data = np.swapaxes(data, 0, -1)
-    # data = np.fliplr(data)
-    # data = np.swapaxes(data, 0, -1)
-    return data
-
-
+# TODO: this has still some issues with some tomograms that has an offset info.
+# For now, this occurs for the inner ear data tomograms; it works for Fidi's STEM tomograms.
+# Ben's theory is that this might be due to data form JEOL vs. ThermoFischer microscopes.
+# To test this I can check how it works for data from Maus et al. / Imig et al., which were taken on a JEOL.
+# Can also check out the mrc documentation here: https://www.ccpem.ac.uk/mrc_format/mrc2014.php
 def write_segmentation_to_imod(
     mrc_path: str,
-    segmentation_path: str,
+    segmentation: Union[str, np.ndarray],
     output_path: str,
 ) -> None:
-    """Write a segmentation to a mod file as contours.
+    """Write a segmentation to a mod file as closed contour objects.
 
     Args:
-        mrc_path: a
-        segmentation_path: a
-        output_path: a
+        mrc_path: The filepath to the mrc file from which the segmentation was derived.
+        segmentation: The segmentation (either as numpy array or filepath to a .tif file).
+        output_path: The output path where the mod file will be saved.
     """
     cmd = "imodauto"
     cmd_path = shutil.which(cmd)
     assert cmd_path is not None, f"Could not find the {cmd} imod command."
 
-    assert os.path.exists(mrc_path)
-    with mrcfile.open(mrc_path, mode="r+") as f:
-        voxel_size = f.voxel_size
+    # Load the segmentation from a tif file in case a filepath was passed.
+    if isinstance(segmentation, str):
+        assert os.path.exists(segmentation)
+        segmentation = imageio.imread(segmentation)
 
+    # Binarize the segmentation and flip its axes to match the IMOD axis convention.
+    segmentation = (segmentation > 0).astype("uint8")
+    segmentation = np.flip(segmentation, axis=1)
+
+    # Read the voxel size and origin information from the mrc file.
+    assert os.path.exists(mrc_path)
+    with mrcfile.open(mrc_path, mode="r") as f:
+        voxel_size = f.voxel_size
+        nx, ny, nz = f.header.nxstart, f.header.nystart, f.header.nzstart
+        origin = f.header.origin
+
+    # Write the input for imodauto to a temporary mrc file.
     with tempfile.NamedTemporaryFile(suffix=".mrc") as f:
         tmp_path = f.name
 
-        seg = (imageio.imread(segmentation_path) > 0).astype("uint8")
-        seg_ = _to_imod_order(seg)
-
-        # import napari
-        # v = napari.Viewer()
-        # v.add_image(seg)
-        # v.add_labels(seg_)
-        # napari.run()
-
-        mrcfile.new(tmp_path, data=seg_, overwrite=True)
+        mrcfile.new(tmp_path, data=segmentation, overwrite=True)
+        # Write the voxel_size and origin infomration.
         with mrcfile.open(tmp_path, mode="r+") as f:
             f.voxel_size = voxel_size
+
+            f.header.nxstart = nx
+            f.header.nystart = ny
+            f.header.nzstart = nz
+            f.header.origin = (0.0, 0.0, 0.0) * 3 if origin is None else origin
+
             f.update_header_from_data()
 
+        # Run the command.
         cmd_list = [cmd, "-E", "1", "-u", tmp_path, output_path]
         run(cmd_list)
 

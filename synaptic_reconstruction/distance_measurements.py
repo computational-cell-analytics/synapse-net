@@ -1,4 +1,6 @@
+import os
 import multiprocessing as mp
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -42,7 +44,7 @@ def compute_geodesic_distances(segmentation, distance_to, resolution=None, unsig
 
 
 # TODO update this
-def compute_centroid_distances(segmentation, resolution, n_neighbors):
+def _compute_centroid_distances(segmentation, resolution, n_neighbors):
     # TODO enable eccentricity centers instead
     props = regionprops(segmentation)
     centroids = np.array([prop.centroid for prop in props])
@@ -53,14 +55,15 @@ def compute_centroid_distances(segmentation, resolution, n_neighbors):
     return pair_distances
 
 
-def compute_boundary_distances(segmentation, resolution, n_threads):
+def _compute_boundary_distances(segmentation, resolution, n_threads):
 
     seg_ids = np.unique(segmentation)[1:]
     n = len(seg_ids)
 
     pairwise_distances = np.zeros((n, n))
-    end_points1 = np.zeros((n, n, 3), dtype="int")
-    end_points2 = np.zeros((n, n, 3), dtype="int")
+    ndim = segmentation.ndim
+    end_points1 = np.zeros((n, n, ndim), dtype="int")
+    end_points2 = np.zeros((n, n, ndim), dtype="int")
 
     properties = regionprops(segmentation)
     properties = {prop.label: prop for prop in properties}
@@ -78,8 +81,11 @@ def compute_boundary_distances(segmentation, resolution, n_threads):
             prop = properties[ngb_id]
 
             bb = prop.bbox
-            offset = np.array(bb[:3])
-            bb = np.s_[bb[0]:bb[3], bb[1]:bb[4], bb[2]:bb[5]]
+            offset = np.array(bb[:ndim])
+            if ndim == 2:
+                bb = np.s_[bb[0]:bb[2], bb[1]:bb[3]]
+            else:
+                bb = np.s_[bb[0]:bb[3], bb[1]:bb[4], bb[2]:bb[5]]
 
             mask = segmentation[bb] == ngb_id
             ngb_dist, ngb_index = distances[bb].copy(), indices[(slice(None),) + bb]
@@ -105,20 +111,37 @@ def compute_boundary_distances(segmentation, resolution, n_threads):
 
 
 def measure_pairwise_object_distances(
-    segmentation,
-    distance_type="boundary",
-    resolution=None,
-    n_threads=None,
-    save_path=None,
-):
+    segmentation: np.ndarray,
+    distance_type: str = "boundary",
+    resolution: Optional[Tuple[int, int, int]] = None,
+    n_threads: Optional[int] = None,
+    save_path: Optional[os.PathLike] = None,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Compute the pairwise distances between all objects within a segmentation.
+
+    Args:
+        segmentation: The input segmentation.
+        distance_type: The type of distance to compute, can either be 'boundary' to
+            compute the distance between the boundary / surface of the objects or 'centroid'
+            to compute the distance between centroids.
+        resolution: The resolution / pixel size of the data.
+        n_threads: The number of threads for parallelizing the distance computation.
+        save_path: Path for saving the measurement results in numpy zipped format.
+
+    Returns:
+        The pairwise object distances.
+        The 'left' endpoint coordinates of the distances.
+        The 'right' endpoint coordinates of the distances.
+        The segmentation id pairs of the distances.
+    """
     supported_distances = ("boundary", "centroid")
     assert distance_type in supported_distances
     if distance_type == "boundary":
-        distances, endpoints1, endpoints2, seg_ids = compute_boundary_distances(segmentation, resolution, n_threads)
+        distances, endpoints1, endpoints2, seg_ids = _compute_boundary_distances(segmentation, resolution, n_threads)
     elif distance_type == "centroid":
         raise NotImplementedError
         # TODO has to be adapted
-        # distances, neighbors = compute_centroid_distances(segmentation, resolution)
+        # distances, neighbors = _compute_centroid_distances(segmentation, resolution)
 
     if save_path is not None:
         np.savez(
@@ -132,23 +155,27 @@ def measure_pairwise_object_distances(
     return distances, endpoints1, endpoints2, seg_ids
 
 
-def compute_seg_object_distances(segmentation, segmented_object, resolution, verbose):
+def _compute_seg_object_distances(segmentation, segmented_object, resolution, verbose):
     distance_map, indices = distance_transform_edt(segmented_object == 0, return_indices=True, sampling=resolution)
 
     seg_ids = np.unique(segmentation)[1:].tolist()
     n = len(seg_ids)
 
     distances = np.zeros(n)
-    endpoints1 = np.zeros((n, 3), dtype="int")
-    endpoints2 = np.zeros((n, 3), dtype="int")
+    ndim = segmentation.ndim
+    endpoints1 = np.zeros((n, ndim), dtype="int")
+    endpoints2 = np.zeros((n, ndim), dtype="int")
 
     object_ids = []
     # We use this so often, it should be refactored.
     props = regionprops(segmentation)
     for prop in tqdm(props, disable=not verbose):
         bb = prop.bbox
-        offset = np.array(bb[:3])
-        bb = np.s_[bb[0]:bb[3], bb[1]:bb[4], bb[2]:bb[5]]
+        offset = np.array(bb[:ndim])
+        if ndim == 2:
+            bb = np.s_[bb[0]:bb[2], bb[1]:bb[3]]
+        else:
+            bb = np.s_[bb[0]:bb[3], bb[1]:bb[4], bb[2]:bb[5]]
 
         label = prop.label
         mask = segmentation[bb] == label
@@ -177,15 +204,33 @@ def compute_seg_object_distances(segmentation, segmented_object, resolution, ver
 
 
 def measure_segmentation_to_object_distances(
-    segmentation,
-    segmented_object,
-    distance_type="boundary",
-    resolution=None,
-    save_path=None,
-    verbose=False,
-):
+    segmentation: np.ndarray,
+    segmented_object: np.ndarray,
+    distance_type: str = "boundary",
+    resolution: Optional[Tuple[int, int, int]] = None,
+    save_path: Optional[os.PathLike] = None,
+    verbose: bool = False,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Compute the distance betwen all objects in a segmentation and another object.
+
+    Args:
+        segmentation: The input segmentation.
+        segmented_object: The segmented object.
+        distance_type: The type of distance to compute, can either be 'boundary' to
+            compute the distance between the boundary / surface of the objects or 'centroid'
+            to compute the distance between centroids.
+        resolution: The resolution / pixel size of the data.
+        save_path: Path for saving the measurement results in numpy zipped format.
+        verbose: Whether to print the progress of the distance computation.
+
+    Returns:
+        The segmentation to object distances.
+        The 'left' endpoint coordinates of the distances.
+        The 'right' endpoint coordinates of the distances.
+        The segmentation ids corresponding to the distances.
+    """
     if distance_type == "boundary":
-        distances, endpoints1, endpoints2, seg_ids, object_ids = compute_seg_object_distances(
+        distances, endpoints1, endpoints2, seg_ids, object_ids = _compute_seg_object_distances(
             segmentation, segmented_object, resolution, verbose
         )
         assert len(distances) == len(endpoints1) == len(endpoints2) == len(seg_ids) == len(object_ids)
@@ -204,7 +249,7 @@ def measure_segmentation_to_object_distances(
     return distances, endpoints1, endpoints2, seg_ids
 
 
-def extract_nearest_neighbors(pairwise_distances, seg_ids, n_neighbors, remove_duplicates=True):
+def _extract_nearest_neighbors(pairwise_distances, seg_ids, n_neighbors, remove_duplicates=True):
     distance_matrix = pairwise_distances.copy()
 
     # Set the diagonal (distance to self) to infinity.
@@ -230,19 +275,58 @@ def extract_nearest_neighbors(pairwise_distances, seg_ids, n_neighbors, remove_d
     return pairs
 
 
-# TODO update this for extracting only up to a max distance
-def create_distance_lines(measurement_path, n_neighbors=None, pairs=None, bb=None, scale=None, remove_duplicates=True):
+def load_distances(
+    measurement_path: os.PathLike
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Load the saved distacnes from a zipped numpy file.
 
+    Args:
+        measurement_path: The path where the distances where saved.
+
+    Returns:
+        The segmentation to object distances.
+        The 'left' endpoint coordinates of the distances.
+        The 'right' endpoint coordinates of the distances.
+        The segmentation ids corresponding to the distances.
+    """
     auto_dists = np.load(measurement_path)
     distances, seg_ids = auto_dists["distances"], list(auto_dists["seg_ids"])
-    start_points, end_points = auto_dists["endpoints1"], auto_dists["endpoints2"]
+    endpoints1, endpoints2 = auto_dists["endpoints1"], auto_dists["endpoints2"]
+    return distances, endpoints1, endpoints2, seg_ids
 
+
+def create_pairwise_distance_lines(
+    distances: np.ndarray,
+    endpoints1: np.ndarray,
+    endpoints2: np.ndarray,
+    seg_ids: List[List[int]],
+    n_neighbors: Optional[int] = None,
+    pairs: Optional[np.ndarray] = None,
+    bb: Optional[Tuple[slice]] = None,
+    scale: Optional[float] = None,
+    remove_duplicates: bool = True
+) -> Tuple[np.ndarray, Dict]:
+    """Create a line representation of pair-wise object distances for display in napari.
+
+    Args:
+        distances: The pairwise distances.
+        endpoints1: One set of distance end points.
+        endpoints2: The other set of distance end points.
+        seg_ids: The segmentation pair corresponding to each distance.
+        n_neighbors: ...
+        pairs: ...
+        bb: ....
+        scale: ...
+        remove_duplicates: ...
+
+    Returns:
+        The lines for plotting in napari.
+        Additional attributes for the line layer in napari.
+    """
     if pairs is None and n_neighbors is not None:
-        pairs = extract_nearest_neighbors(distances, seg_ids, n_neighbors, remove_duplicates=remove_duplicates)
+        pairs = _extract_nearest_neighbors(distances, seg_ids, n_neighbors, remove_duplicates=remove_duplicates)
     elif pairs is None:
-        pairs = [
-            [id1, id2] for id1 in seg_ids for id2 in seg_ids if id1 < id2
-        ]
+        pairs = [[id1, id2] for id1 in seg_ids for id2 in seg_ids if id1 < id2]
 
     assert pairs is not None
     pair_indices = (
@@ -252,27 +336,27 @@ def create_distance_lines(measurement_path, n_neighbors=None, pairs=None, bb=Non
 
     pairs = np.array(pairs)
     distances = distances[pair_indices]
-    start_points = start_points[pair_indices]
-    end_points = end_points[pair_indices]
+    endpoints1 = endpoints1[pair_indices]
+    endpoints2 = endpoints2[pair_indices]
 
     if bb is not None:
         in_bb = np.where(
-            (start_points[:, 0] > bb[0].start) & (start_points[:, 0] < bb[0].stop) &
-            (start_points[:, 1] > bb[1].start) & (start_points[:, 1] < bb[1].stop) &
-            (start_points[:, 2] > bb[2].start) & (start_points[:, 2] < bb[2].stop) &
-            (end_points[:, 0] > bb[0].start) & (end_points[:, 0] < bb[0].stop) &
-            (end_points[:, 1] > bb[1].start) & (end_points[:, 1] < bb[1].stop) &
-            (end_points[:, 2] > bb[2].start) & (end_points[:, 2] < bb[2].stop)
+            (endpoints1[:, 0] > bb[0].start) & (endpoints1[:, 0] < bb[0].stop) &
+            (endpoints1[:, 1] > bb[1].start) & (endpoints1[:, 1] < bb[1].stop) &
+            (endpoints1[:, 2] > bb[2].start) & (endpoints1[:, 2] < bb[2].stop) &
+            (endpoints2[:, 0] > bb[0].start) & (endpoints2[:, 0] < bb[0].stop) &
+            (endpoints2[:, 1] > bb[1].start) & (endpoints2[:, 1] < bb[1].stop) &
+            (endpoints2[:, 2] > bb[2].start) & (endpoints2[:, 2] < bb[2].stop)
         )
 
         pairs = pairs[in_bb]
-        distances, start_points, end_points = distances[in_bb], start_points[in_bb], end_points[in_bb]
+        distances, endpoints1, endpoints2 = distances[in_bb], endpoints1[in_bb], endpoints2[in_bb]
 
         offset = np.array([b.start for b in bb])[None]
-        start_points -= offset
-        end_points -= offset
+        endpoints1 -= offset
+        endpoints2 -= offset
 
-    lines = np.array([[start, end] for start, end in zip(start_points, end_points)])
+    lines = np.array([[start, end] for start, end in zip(endpoints1, endpoints2)])
 
     if scale is not None:
         scale_factor = np.array(3 * [scale])[None, None]
@@ -286,25 +370,43 @@ def create_distance_lines(measurement_path, n_neighbors=None, pairs=None, bb=Non
     return lines, properties
 
 
-def create_object_distance_lines(measurement_path, max_distance=None, seg_ids=None, scale=None):
-    auto_dists = np.load(measurement_path)
-    distances, all_seg_ids = auto_dists["distances"], auto_dists["seg_ids"]
-    start_points, end_points = auto_dists["endpoints1"], auto_dists["endpoints2"]
+def create_object_distance_lines(
+    distances: np.ndarray,
+    endpoints1: np.ndarray,
+    endpoints2: np.ndarray,
+    seg_ids: np.ndarray,
+    max_distance: Optional[float] = None,
+    filter_seg_ids: Optional[np.ndarray] = None,
+    scale: Optional[float] = None,
+) -> Tuple[np.ndarray, Dict]:
+    """Create a line representation of object distances for display in napari.
 
-    if seg_ids is None:
-        seg_ids = all_seg_ids
-    else:
-        id_mask = np.isin(all_seg_ids, seg_ids)
+    Args:
+        distances: The measurd distances.
+        endpoints1: One set of distance end points.
+        endpoints2: The other set of distance end points.
+        seg_ids: The segmentation ids corresponding to each distance.
+        max_distance: ...
+        scale: ...
+
+    Returns:
+        The lines for plotting in napari.
+        Additional attributes for the line layer in napari.
+    """
+
+    if filter_seg_ids is not None:
+        id_mask = np.isin(seg_ids, filter_seg_ids)
         distances = distances[id_mask]
-        start_points, end_points = start_points[id_mask], end_points[id_mask]
+        endpoints1, endpoints2 = endpoints1[id_mask], endpoints2[id_mask]
+        seg_ids = filter_seg_ids
 
     if max_distance is not None:
         distance_mask = distances <= max_distance
         distances, seg_ids = distances[distance_mask], seg_ids[distance_mask]
-        start_points, end_points = start_points[distance_mask], end_points[distance_mask]
+        endpoints1, endpoints2 = endpoints1[distance_mask], endpoints2[distance_mask]
 
-    assert len(distances) == len(seg_ids) == len(start_points) == len(end_points)
-    lines = np.array([[start, end] for start, end in zip(start_points, end_points)])
+    assert len(distances) == len(seg_ids) == len(endpoints1) == len(endpoints2)
+    lines = np.array([[start, end] for start, end in zip(endpoints1, endpoints2)])
 
     if scale is not None and len(lines > 0):
         scale_factor = np.array(3 * [scale])[None, None]
@@ -318,7 +420,9 @@ def keep_direct_distances(segmentation, measurement_path, line_dilation=0, scale
     """Filter out all distances that are not direct.
     I.e. distances that cross another segmented object.
     """
-    distance_lines, properties = create_distance_lines(measurement_path, scale=scale)
+
+    distances, ep1, ep2, seg_ids = load_distances(measurement_path)
+    distance_lines, properties = create_object_distance_lines(distances, ep1, ep2, seg_ids, scale=scale)
 
     ids_a, ids_b = properties["id_a"], properties["id_b"]
     filtered_ids_a, filtered_ids_b = [], []
@@ -357,7 +461,8 @@ def keep_direct_distances(segmentation, measurement_path, line_dilation=0, scale
 def filter_blocked_segmentation_to_object_distances(
     segmentation, measurement_path, line_dilation=0, scale=None, seg_ids=None, verbose=False,
 ):
-    distance_lines, properties = create_object_distance_lines(measurement_path, seg_ids=seg_ids, scale=scale)
+    distances, ep1, ep2, seg_ids = load_distances(measurement_path)
+    distance_lines, properties = create_object_distance_lines(distances, ep1, ep2, seg_ids, scale=scale)
     all_seg_ids = properties["id"]
 
     filtered_ids = []

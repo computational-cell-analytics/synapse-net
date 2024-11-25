@@ -14,30 +14,43 @@ def _run_segmentation(
     block_shape=(128, 256, 256),
     halo=(48, 48, 48)
 ):
-
-    # get the segmentation via seeded watershed
     t0 = time.time()
-    seeds = parallel.label((foreground - boundaries) > 0.5, block_shape=block_shape, verbose=verbose)
-    if verbose:
-        print("Compute connected components in", time.time() - t0, "s")
-
-    t0 = time.time()
-    dist = parallel.distance_transform(seeds == 0, halo=halo, verbose=verbose, block_shape=block_shape)
+    boundary_threshold = 0.25
+    dist = parallel.distance_transform(
+        boundaries < boundary_threshold, halo=halo, verbose=verbose, block_shape=block_shape
+    )
     if verbose:
         print("Compute distance transform in", time.time() - t0, "s")
 
+    # Get the segmentation via seeded watershed.
     t0 = time.time()
+    seed_distance = 6
+    seeds = np.logical_and(foreground > 0.5, dist > seed_distance)
+    seeds = parallel.label(seeds, block_shape=block_shape, verbose=verbose)
+    if verbose:
+        print("Compute connected components in", time.time() - t0, "s")
+
+    # import napari
+    # v = napari.Viewer()
+    # v.add_image(boundaries)
+    # v.add_image(dist)
+    # v.add_labels(seeds)
+    # napari.run()
+
+    t0 = time.time()
+    hmap = boundaries + ((dist.max() - dist) / dist.max())
     mask = (foreground + boundaries) > 0.5
+
     seg = np.zeros_like(seeds)
     seg = parallel.seeded_watershed(
-        dist, seeds, block_shape=block_shape,
+        hmap, seeds, block_shape=block_shape,
         out=seg, mask=mask, verbose=verbose, halo=halo,
     )
     if verbose:
         print("Compute watershed in", time.time() - t0, "s")
 
     seg = apply_size_filter(seg, min_size, verbose=verbose, block_shape=block_shape)
-    seg = _postprocess_seg_3d(seg)
+    seg = _postprocess_seg_3d(seg, area_threshold=5000)
     return seg
 
 

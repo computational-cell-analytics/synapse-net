@@ -16,7 +16,7 @@ except ImportError:
 from skimage.transform import rescale, resize
 
 from ..distance_measurements import (
-    create_distance_lines,
+    create_object_distance_lines,
     measure_pairwise_object_distances,
     keep_direct_distances,
 )
@@ -68,7 +68,7 @@ def measurement_widget(
         n_neighbors = compute_neighbor_distances
         pairs = None
 
-    lines, properties = create_distance_lines(
+    lines, properties = create_object_distance_lines(
         DISTANCE_MEASUREMENT_PATH, n_neighbors=n_neighbors, scale=VIEW_SCALE, pairs=pairs,
     )
     if "line" in viewer.layers:  # TODO update the line layer

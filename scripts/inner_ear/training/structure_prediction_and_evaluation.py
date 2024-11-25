@@ -143,10 +143,10 @@ def predict_and_evaluate_train_domain():
     print("Run evaluation on", len(paths), "tomos")
 
     name = "train_domain"
-    model_path = "./checkpoints/inner_ear_structure_model"
+    model_path = "./checkpoints/inner_ear_structure_model_v2"
 
     run_prediction(paths, model_path, name, is_nested=True)
-    evaluate(paths, name, is_nested=True, save_path="./results/train_domain.csv")
+    evaluate(paths, name, is_nested=True, save_path="./results/train_domain_v2.csv")
     visualize(paths, name, is_nested=True)
 
 
@@ -187,9 +187,9 @@ def predict_and_evaluate_rat():
 
 
 def main():
-    # predict_and_evaluate_train_domain()
+    predict_and_evaluate_train_domain()
     # predict_and_evaluate_vesicle_pools()
-    predict_and_evaluate_rat()
+    # predict_and_evaluate_rat()
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@ import napari
 import numpy as np
 import pandas
 
-from synaptic_reconstruction.distance_measurements import create_object_distance_lines
+from synaptic_reconstruction.distance_measurements import create_object_distance_lines, load_distances
 from synaptic_reconstruction.file_utils import get_data_path
 from synaptic_reconstruction.tools.distance_measurement import _downsample
 
@@ -21,11 +21,12 @@ sys.path.append("processing")
 def get_distance_visualization(
     tomo, segmentations, distance_paths, vesicle_ids, scale, return_mem_props=False
 ):
-    ribbon_lines, _ = create_object_distance_lines(distance_paths["ribbon"], seg_ids=vesicle_ids, scale=scale)
-    pd_lines, _ = create_object_distance_lines(distance_paths["PD"], seg_ids=vesicle_ids, scale=scale)
-    membrane_lines, mem_props = create_object_distance_lines(
-        distance_paths["membrane"], seg_ids=vesicle_ids, scale=scale
-    )
+    d, e1, e2, ids = load_distances(distance_paths["ribbon"])
+    ribbon_lines, _ = create_object_distance_lines(d, e1, e2, ids, filter_seg_ids=vesicle_ids, scale=scale)
+    d, e1, e2, ids = load_distances(distance_paths["PD"])
+    pd_lines, _ = create_object_distance_lines(d, e1, e2, ids, filter_seg_ids=vesicle_ids, scale=scale)
+    d, e1, e2, ids = load_distances(distance_paths["membrane"])
+    membrane_lines, mem_props = create_object_distance_lines(d, e1, e2, ids, filter_seg_ids=vesicle_ids, scale=scale)
 
     distance_lines = {
         "ribbon_distances": ribbon_lines,

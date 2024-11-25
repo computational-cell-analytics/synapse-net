@@ -52,7 +52,7 @@ def _load_segmentation(seg_path, tomo_shape):
     return seg
 
 
-def compute_distances(segmentation_paths, save_folder, resolution, force, tomo_shape):
+def compute_distances(segmentation_paths, save_folder, resolution, force, tomo_shape, use_corrected_vesicles=True):
     os.makedirs(save_folder, exist_ok=True)
 
     vesicles = None
@@ -61,9 +61,10 @@ def compute_distances(segmentation_paths, save_folder, resolution, force, tomo_s
         vesicle_path = segmentation_paths["vesicles"]
 
         if vesicles is None:
-            vesicle_pool_path = os.path.join(os.path.split(save_folder)[0], "vesicle_pools.tif")
-            if os.path.exists(vesicle_pool_path):
-                vesicle_path = vesicle_pool_path
+            if use_corrected_vesicles:
+                vesicle_pool_path = os.path.join(os.path.split(save_folder)[0], "vesicle_pools.tif")
+                if os.path.exists(vesicle_pool_path):
+                    vesicle_path = vesicle_pool_path
             return _load_segmentation(vesicle_path, tomo_shape)
 
         else:
@@ -334,8 +335,7 @@ def _insert_missing_vesicles(vesicle_path, original_vesicle_path, pool_correctio
     imageio.imwrite(vesicle_path, vesicles)
 
 
-# TODO adapt to segmentation without PD
-def analyze_folder(folder, version, n_ribbons, force):
+def analyze_folder(folder, version, n_ribbons, force, use_corrected_vesicles):
     data_path = get_data_path(folder)
     output_folder = os.path.join(folder, "automatisch", f"v{version}")
 
@@ -352,12 +352,20 @@ def analyze_folder(folder, version, n_ribbons, force):
     correction_folder = _match_correction_folder(folder)
     if os.path.exists(correction_folder):
         output_folder = correction_folder
-        result_path = os.path.join(output_folder, "measurements.xlsx")
+
+        if use_corrected_vesicles:
+            result_path = os.path.join(output_folder, "measurements.xlsx")
+        else:
+            result_path = os.path.join(output_folder, "measurements_uncorrected_assignments.xlsx")
+
         if os.path.exists(result_path) and not force:
             return
 
         print("Analyse the corrected segmentations from", correction_folder)
         for seg_name in segmentation_names:
+            if seg_name == "vesicles" and not use_corrected_vesicles:
+                continue
+
             seg_path = _match_correction_file(correction_folder, seg_name)
             if os.path.exists(seg_path):
 
@@ -371,7 +379,10 @@ def analyze_folder(folder, version, n_ribbons, force):
 
                 segmentation_paths[seg_name] = seg_path
 
-    result_path = os.path.join(output_folder, "measurements.xlsx")
+    if use_corrected_vesicles:
+        result_path = os.path.join(output_folder, "measurements.xlsx")
+    else:
+        result_path = os.path.join(output_folder, "measurements_uncorrected_assignments.xlsx")
     if os.path.exists(result_path) and not force:
         return
 
@@ -384,21 +395,29 @@ def analyze_folder(folder, version, n_ribbons, force):
     with open_file(data_path, "r") as f:
         tomo_shape = f["data"].shape
 
-    out_distance_folder = os.path.join(output_folder, "distances")
+    if use_corrected_vesicles:
+        out_distance_folder = os.path.join(output_folder, "distances")
+    else:
+        out_distance_folder = os.path.join(output_folder, "distances_uncorrected")
     distance_paths, skip = compute_distances(
         segmentation_paths, out_distance_folder, resolution, force=force, tomo_shape=tomo_shape,
+        use_corrected_vesicles=use_corrected_vesicles
     )
     if skip:
         return
 
     if force or not os.path.exists(result_path):
+
+        if not use_corrected_vesicles:
+            pool_correction_path = None
+
         analyze_distances(
             segmentation_paths, distance_paths, resolution, result_path, tomo_shape,
             pool_correction_path=pool_correction_path
         )
 
 
-def run_analysis(table, version, force=False, val_table=None):
+def run_analysis(table, version, force=False, val_table=None, use_corrected_vesicles=True):
     for i, row in tqdm(table.iterrows(), total=len(table)):
         folder = row["Local Path"]
         if folder == "":
@@ -426,19 +445,19 @@ def run_analysis(table, version, force=False, val_table=None):
 
         micro = row["EM alt vs. Neu"]
         if micro == "beides":
-            analyze_folder(folder, version, n_ribbons, force=force)
+            analyze_folder(folder, version, n_ribbons, force=force, use_corrected_vesicles=use_corrected_vesicles)
 
             folder_new = os.path.join(folder, "Tomo neues EM")
             if not os.path.exists(folder_new):
                 folder_new = os.path.join(folder, "neues EM")
             assert os.path.exists(folder_new), folder_new
-            analyze_folder(folder_new, version, n_ribbons, force=force)
+            analyze_folder(folder_new, version, n_ribbons, force=force, use_corrected_vesicles=use_corrected_vesicles)
 
         elif micro == "alt":
-            analyze_folder(folder, version, n_ribbons, force=force)
+            analyze_folder(folder, version, n_ribbons, force=force, use_corrected_vesicles=use_corrected_vesicles)
 
         elif micro == "neu":
-            analyze_folder(folder, version, n_ribbons, force=force)
+            analyze_folder(folder, version, n_ribbons, force=force, use_corrected_vesicles=use_corrected_vesicles)
 
 
 def main():
@@ -447,13 +466,16 @@ def main():
     table = parse_table(table_path, data_root)
 
     version = 2
-    force = True
+    force = False
+    use_corrected_vesicles = False
 
-    val_table_path = os.path.join(data_root, "Electron-Microscopy-Susi", "Validierungs-Tabelle-v3.xlsx")
-    val_table = pandas.read_excel(val_table_path)
-    # val_table = None
+    # val_table_path = os.path.join(data_root, "Electron-Microscopy-Susi", "Validierungs-Tabelle-v3.xlsx")
+    # val_table = pandas.read_excel(val_table_path)
+    val_table = None
 
-    run_analysis(table, version, force=force, val_table=val_table)
+    run_analysis(
+        table, version, force=force, val_table=val_table, use_corrected_vesicles=use_corrected_vesicles
+    )
 
 
 if __name__ == "__main__":

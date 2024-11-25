@@ -1,3 +1,4 @@
+import os
 from typing import Optional, Tuple
 
 import torch
@@ -5,7 +6,7 @@ import torch_em
 import torch_em.self_training as self_training
 
 from .semisupervised_training import get_unsupervised_loader
-from .supervised_training import get_2d_model, get_3d_model, get_supervised_loader
+from .supervised_training import get_2d_model, get_3d_model, get_supervised_loader, determine_ndim
 
 
 def mean_teacher_adaptation(
@@ -13,7 +14,7 @@ def mean_teacher_adaptation(
     unsupervised_train_paths: Tuple[str],
     unsupervised_val_paths: Tuple[str],
     patch_shape: Tuple[int, int, int],
-    save_root: str,
+    save_root: Optional[str] = None,
     source_checkpoint: Optional[str] = None,
     supervised_train_paths: Optional[Tuple[str]] = None,
     supervised_val_paths: Optional[Tuple[str]] = None,
@@ -70,14 +71,13 @@ def mean_teacher_adaptation(
             based on the patch_shape and size of the volumes used for validation.
     """
     assert (supervised_train_paths is None) == (supervised_val_paths is None)
+    is_2d, _ = determine_ndim(patch_shape)
 
     if source_checkpoint is None:
         # training from scratch only makes sense if we have supervised training data
         # that's why we have the assertion here.
         assert supervised_train_paths is not None
         print("Mean teacher training from scratch (AdaMT)")
-        # TODO determine 2d vs 3d
-        is_2d = False
         if is_2d:
             model = get_2d_model(out_channels=2)
         else:
@@ -85,7 +85,10 @@ def mean_teacher_adaptation(
         reinit_teacher = True
     else:
         print("Mean teacehr training initialized from source model:", source_checkpoint)
-        model = torch_em.util.load_model(source_checkpoint)
+        if os.path.isdir(source_checkpoint):
+            model = torch_em.util.load_model(source_checkpoint)
+        else:
+            model = torch.load(source_checkpoint)
         reinit_teacher = False
 
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
