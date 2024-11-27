@@ -26,7 +26,37 @@ def evaluate(labels, segmentation):
     score = dice_score(segmentation, labels)
     return score
 
-def evaluate_file(labels_path, segmentation_path, model_name, crop= False):
+def compute_precision(ground_truth, segmentation):
+    """
+    Computes the Precision score for 3D arrays representing the ground truth and segmentation.
+
+    Parameters:
+    - ground_truth (np.ndarray): 3D binary array where 1 represents the ground truth region.
+    - segmentation (np.ndarray): 3D binary array where 1 represents the predicted segmentation region.
+
+    Returns:
+    - precision (float): The precision score, or 0 if the segmentation is empty.
+    """
+    assert ground_truth.shape == segmentation.shape
+    # Ensure inputs are binary arrays
+    ground_truth = (ground_truth > 0).astype(np.int32)
+    segmentation = (segmentation > 0).astype(np.int32)
+    
+    # Compute intersection: overlap between segmentation and ground truth
+    intersection = np.sum(segmentation * ground_truth)
+    
+    # Compute total predicted (segmentation region)
+    total_predicted = np.sum(segmentation)
+    
+    # Handle case where there are no predictions
+    if total_predicted == 0:
+        return 0.0  # Precision is undefined; returning 0
+    
+    # Calculate precision
+    precision = intersection / total_predicted
+    return precision
+
+def evaluate_file(labels_path, segmentation_path, model_name, crop= False, precision_score=False):
     print(f"Evaluate labels {labels_path} and vesicles {segmentation_path}")
 
     ds_name = os.path.basename(os.path.dirname(labels_path))
@@ -34,22 +64,25 @@ def evaluate_file(labels_path, segmentation_path, model_name, crop= False):
 
     #get the labels and segmentation
     with h5py.File(labels_path) as label_file:
-        gt = label_file["/labels/AZ"][:]
+        gt = label_file["/labels/thin_az"][:]
         
     with h5py.File(segmentation_path) as seg_file:
-        segmentation = seg_file["/AZ/segment_from_AZmodel_v3"][:]
+        segmentation = seg_file["/AZ/thin_az"][:]
 
     if crop:
         print("cropping the annotation and segmentation")
         segmentation, gt = extract_gt_bounding_box(segmentation, gt)
 
     # Evaluate the match of ground truth and segmentation
-    dice_score = evaluate(gt, segmentation)
+    if precision_score:
+        precision = compute_precision(gt, segmentation)
+    else:
+        dice_score = evaluate(gt, segmentation)
 
     # Store results
     result_folder = "/user/muth9/u12095/synaptic-reconstruction/scripts/cooper/evaluation_results"
     os.makedirs(result_folder, exist_ok=True)
-    result_path = os.path.join(result_folder, f"evaluation_{model_name}.csv")
+    result_path = os.path.join(result_folder, f"evaluation_{model_name}_dice_thinpred_thinanno.csv")
     print("Evaluation results are saved to:", result_path)
 
     # Load existing results if the file exists
@@ -59,9 +92,14 @@ def evaluate_file(labels_path, segmentation_path, model_name, crop= False):
         results = None
 
     # Create a new DataFrame for the current evaluation
-    res = pd.DataFrame(
-        [[ds_name, tomo, dice_score]], columns=["dataset", "tomogram", "dice_score"]
-    )
+    if precision_score:
+        res = pd.DataFrame(
+            [[ds_name, tomo, precision]], columns=["dataset", "tomogram", "precision"]
+        )
+    else:
+        res = pd.DataFrame(
+            [[ds_name, tomo, dice_score]], columns=["dataset", "tomogram", "dice_score"]
+        )
 
     # Combine with existing results or initialize with the new results
     if results is None:
@@ -72,7 +110,7 @@ def evaluate_file(labels_path, segmentation_path, model_name, crop= False):
     # Save the results to the CSV file
     results.to_csv(result_path, index=False)
 
-def evaluate_folder(labels_path, segmentation_path, model_name, crop = False):
+def evaluate_folder(labels_path, segmentation_path, model_name, crop = False, precision_score=False):
     print(f"Evaluating folder {segmentation_path}")
     print(f"Using labels stored in {labels_path}")
 
@@ -82,7 +120,7 @@ def evaluate_folder(labels_path, segmentation_path, model_name, crop = False):
     for vesicle_file in vesicles_files:
         if vesicle_file in label_files:
 
-            evaluate_file(os.path.join(labels_path, vesicle_file), os.path.join(segmentation_path, vesicle_file), model_name, crop)
+            evaluate_file(os.path.join(labels_path, vesicle_file), os.path.join(segmentation_path, vesicle_file), model_name, crop, precision_score)
 
 
 
@@ -93,13 +131,14 @@ def main():
     parser.add_argument("-v", "--segmentation_path", required=True)
     parser.add_argument("-n", "--model_name", required=True)
     parser.add_argument("--crop", action="store_true", help="Crop around the annotation.")
+    parser.add_argument("--precision", action="store_true", help="Calculate precision score.")
     args = parser.parse_args()
 
     segmentation_path = args.segmentation_path
     if os.path.isdir(segmentation_path):
-        evaluate_folder(args.labels_path, segmentation_path, args.model_name, args.crop)
+        evaluate_folder(args.labels_path, segmentation_path, args.model_name, args.crop, args.precision)
     else:
-        evaluate_file(args.labels_path, segmentation_path, args.model_name, args.crop)
+        evaluate_file(args.labels_path, segmentation_path, args.model_name, args.crop, args.precision)
     
     
 
