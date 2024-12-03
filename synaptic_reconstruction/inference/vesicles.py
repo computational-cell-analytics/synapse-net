@@ -49,6 +49,7 @@ def distance_based_vesicle_segmentation(
 
     # Get the segmentation via seeded watershed of components in the boundary distances.
     t0 = time.time()
+    print(f"using a distance thresholf of {distance_threshold} for distance based segmentation")
     seeds = parallel.label(bd_dist > distance_threshold, block_shape=block_shape, verbose=verbose)
     if verbose:
         print("Compute connected components in", time.time() - t0, "s")
@@ -129,6 +130,7 @@ def segment_vesicles(
     min_size: int = 500,
     verbose: bool = True,
     distance_based_segmentation: bool = True,
+    distance_threshold: int = 8,
     return_predictions: bool = False,
     scale: Optional[List[float]] = None,
     exclude_boundary: bool = False,
@@ -173,7 +175,7 @@ def segment_vesicles(
 
     if distance_based_segmentation:
         seg = distance_based_vesicle_segmentation(
-            foreground, boundaries, verbose=verbose, min_size=min_size, **kwargs
+            foreground, boundaries, verbose=verbose, min_size=min_size, distance_threshold = distance_threshold, **kwargs
         )
     else:
         seg = simple_vesicle_segmentation(

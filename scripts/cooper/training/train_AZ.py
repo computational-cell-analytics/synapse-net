@@ -12,7 +12,7 @@ from synaptic_reconstruction.training import supervised_training
 from synaptic_reconstruction.training import semisupervised_training
 
 TRAIN_ROOT = "/mnt/lustre-emmy-hdd/projects/nim00007/data/synaptic-reconstruction/cooper/exported_imod_objects"
-OUTPUT_ROOT = "/mnt/lustre-emmy-hdd/usr/u12095/synaptic_reconstruction/training_AZ_v1"
+OUTPUT_ROOT = "/mnt/lustre-emmy-hdd/usr/u12095/synaptic_reconstruction/training_AZ_v2"
 
 
 def _require_train_val_test_split(datasets):
@@ -80,8 +80,11 @@ def get_paths(split, datasets, testset=True):
 
 def train(key, ignore_label = None, training_2D = False, testset = True):
 
+    os.makedirs(OUTPUT_ROOT, exist_ok=True)
+
     datasets = [
     "01_hoi_maus_2020_incomplete",
+    "04_hoi_stem_examples",
     "06_hoi_wt_stem750_fm",
     "12_chemical_fix_cryopreparation"
 ]
@@ -93,7 +96,7 @@ def train(key, ignore_label = None, training_2D = False, testset = True):
     print(len(val_paths), "tomograms for validation")
 
     patch_shape = [48, 256, 256]
-    model_name=f"3D-AZ-model-v1"
+    model_name=f"3D-AZ-model-v3"
 
     #checking for 2D training
     if training_2D:
@@ -109,11 +112,11 @@ def train(key, ignore_label = None, training_2D = False, testset = True):
         val_paths=val_paths,
         label_key=f"/labels/{key}",
         patch_shape=patch_shape, batch_size=batch_size,
-        sampler = torch_em.data.sampler.MinInstanceSampler(min_num_instances=1),
+        sampler = torch_em.data.sampler.MinInstanceSampler(min_num_instances=1, p_reject = 0.95),
         n_samples_train=None, n_samples_val=25,
         check=check,
         save_root="/mnt/lustre-emmy-hdd/usr/u12095/synaptic_reconstruction/AZ_models",
-        n_iterations=int(5e3),
+        n_iterations=int(5e4),
         ignore_label= ignore_label,
         label_transform=torch_em.transform.label.labels_to_binary,
         out_channels = 1,

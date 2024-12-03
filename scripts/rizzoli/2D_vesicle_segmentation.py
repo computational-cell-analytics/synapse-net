@@ -7,6 +7,7 @@ from tqdm import tqdm
 import torch
 import torch_em
 import numpy as np
+from elf.io import open_file
 
 from synaptic_reconstruction.inference.vesicles import segment_vesicles
 from synaptic_reconstruction.inference.util import parse_tiling
@@ -57,7 +58,7 @@ def get_volume(input_path):
         input_volume = seg_file["raw"][:]
     return input_volume
 
-def run_vesicle_segmentation(input_path, output_path, model_path, tile_shape, halo, include_boundary, key_label):
+def run_vesicle_segmentation(input_path, output_path, model_path, tile_shape, halo, include_boundary, key_label, scale, mask_path, mask_key):
 
     tiling = get_2D_tiling()
 
@@ -69,23 +70,41 @@ def run_vesicle_segmentation(input_path, output_path, model_path, tile_shape, ha
     tiling = parse_tiling(tile_shape, halo)
     input = get_volume(input_path)
 
+    #check if we have a restricting mask for the segmentation
+    if mask_path is not None:
+        with open_file(mask_path, "r") as f:
+            mask = f[mask_key][:]
+    else:
+        mask = None
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = torch_em.util.load_model(checkpoint=model_path, device=device)
 
-    def process_slices(input_volume):
+    def process_slices(input_volume, scale, mask):
         processed_slices = []
         foreground = []
         boundaries = []
         for z in range(input_volume.shape[0]):
             slice_ = input_volume[z, :, :]
-            segmented_slice, prediction_slice = segment_vesicles(input_volume=slice_, model=model, verbose=False, tiling=tiling, return_predictions=True, exclude_boundary=not include_boundary)
+            #check if we have a restricting mask for the segmentation
+            if mask is not None:
+                mask_slice = mask[z, :, :]
+                segmented_slice, prediction_slice = segment_vesicles(input_volume=slice_, model=model, verbose=False, tiling=tiling, return_predictions=True, scale = scale, exclude_boundary=not include_boundary, mask = mask_slice)
+            else:
+                segmented_slice, prediction_slice = segment_vesicles(input_volume=slice_, model=model, verbose=False, tiling=tiling, return_predictions=True, scale = scale, exclude_boundary=not include_boundary)
+            
             processed_slices.append(segmented_slice)
             foreground_pred_slice, boundaries_pred_slice = prediction_slice[:2]
             foreground.append(foreground_pred_slice)
             boundaries.append(boundaries_pred_slice)
         return processed_slices, foreground, boundaries
 
-    segmentation, foreground, boundaries = process_slices(input)
+    if input.ndim == 2:
+        #TODO: check if we have a restricting mask for the segmentation
+        segmentation, prediction = segment_vesicles(input_volume=input, model=model, verbose=False, tiling=tiling, return_predictions=True, scale = scale, exclude_boundary=not include_boundary)
+        foreground, boundaries = prediction[:2]
+    else:
+        segmentation, foreground, boundaries = process_slices(input, scale, mask)
 
     seg_output = _require_output_folders(output_path)
     file_name = Path(input_path).stem
@@ -121,7 +140,11 @@ def segment_folder(args):
     print(input_files)
     pbar = tqdm(input_files, desc="Run segmentation")
     for input_path in pbar:
-        run_vesicle_segmentation(input_path, args.output_path, args.model_path, args.tile_shape, args.halo, args.include_boundary, args.key_label)
+        if args.mask_path is not None:
+            mask_path_for_file = os.path.join(args.mask_path, os.path.basename(input_path))
+        else:
+            mask_path_for_file = None
+        run_vesicle_segmentation(input_path, args.output_path, args.model_path, args.tile_shape, args.halo, args.include_boundary, args.key_label, args.scale, mask_path_for_file, args.mask_key)
 
 def main():
     parser = argparse.ArgumentParser(description="Segment vesicles in EM tomograms.")
@@ -152,6 +175,16 @@ def main():
         "--key_label", "-k", default = "combined_vesicles",
         help="Give the key name for saving the segmentation in h5."
     )
+    parser.add_argument(
+        "--scale", "-s", type=float, nargs=2,
+        help="Scales the input data."
+    )
+    parser.add_argument(
+        "--mask_path", help="The filepath to a h5 file with a mask that will be used to restrict the segmentation. Needs to be in combination with mask_key."
+    )
+    parser.add_argument(
+        "--mask_key", help="Key name that holds the mask segmentation"
+    )
     args = parser.parse_args()
 
     input_ = args.input_path
@@ -159,7 +192,7 @@ def main():
     if os.path.isdir(input_):
         segment_folder(args)
     else:
-        run_vesicle_segmentation(input_, args.output_path, args.model_path, args.tile_shape, args.halo, args.include_boundary, args.key_label)
+        run_vesicle_segmentation(input_, args.output_path, args.model_path, args.tile_shape, args.halo, args.include_boundary, args.key_label, args.scale, args.mask_path, args.mask_key)
 
     print("Finished segmenting!")
 
