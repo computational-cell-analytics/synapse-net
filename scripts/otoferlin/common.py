@@ -11,20 +11,31 @@ INPUT_ROOT = "/home/ag-wichmann/data/otoferlin/tomograms"
 OUTPUT_ROOT = "/home/ag-wichmann/data/otoferlin/segmentation"
 
 STRUCTURE_NAMES = ("ribbon", "PD", "membrane")
-    
+
+
+def get_folders():
+    if os.path.exists(INPUT_ROOT):
+        return INPUT_ROOT, OUTPUT_ROOT
+    root_in = "./data/tomograms"
+    assert os.path.exists(root_in)
+    root_out = "./data/segmentation"
+    return root_in, root_out
+
 
 def get_all_tomograms():
-    tomograms = glob(os.path.join(INPUT_ROOT, "**", "*.mrc"), recursive=True)
-    tomograms += glob(os.path.join(INPUT_ROOT, "**", "*.rec"), recursive=True)
+    root, _ = get_folders()
+    tomograms = glob(os.path.join(root, "**", "*.mrc"), recursive=True)
+    tomograms += glob(os.path.join(root, "**", "*.rec"), recursive=True)
     tomograms = sorted(tomograms)
     return tomograms
 
 
 def get_seg_path(mrc_path, version=1):
-    rel_path = os.path.relpath(mrc_path, INPUT_ROOT)
+    input_root, output_root = get_folders()
+    rel_path = os.path.relpath(mrc_path, input_root)
     rel_folder, fname = os.path.split(rel_path)
     fname = os.path.splitext(fname)[0]
-    seg_path = os.path.join(OUTPUT_ROOT, f"v{version}", rel_folder, f"{fname}.h5")
+    seg_path = os.path.join(output_root, f"v{version}", rel_folder, f"{fname}.h5")
     return seg_path
 
 

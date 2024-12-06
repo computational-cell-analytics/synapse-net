@@ -5,10 +5,11 @@ import napari
 import numpy as np
 import pandas as pd
 
-from common import get_all_tomograms, get_seg_path, get_colormaps
-from synaptic_reconstruction.file_utils import read_mrc
-
+from synapse_net.file_utils import read_mrc
+from skimage.exposure import equalize_adapthist
 from tqdm import tqdm
+
+from common import get_all_tomograms, get_seg_path, get_colormaps
 
 
 def _get_vesicle_pools(seg, assignment_path):
@@ -27,22 +28,27 @@ def _get_vesicle_pools(seg, assignment_path):
     return pools, colormap
 
 
-def check_automatic_result(mrc_path):
+def check_automatic_result(mrc_path, version, use_clahe=False):
 
-    seg_path = get_seg_path(mrc_path)
+    seg_path = get_seg_path(mrc_path, version)
 
     segmentations, colormaps = {}, {}
-    with h5py.File(seg_path, "r") as f:
-        g = f["segmentation"]
-        for name, ds in g.items():
-            segmentations[name] = ds[:]
+    if os.path.exists(seg_path):
+        with h5py.File(seg_path, "r") as f:
+            g = f["segmentation"]
+            for name, ds in g.items():
+                segmentations[name] = ds[:]
 
     output_folder = os.path.split(seg_path)[0]
     assignment_path = os.path.join(output_folder, "vesicle_pools.csv")
     if os.path.exists(assignment_path):
         segmentations["pools"], colormaps["pools"] = _get_vesicle_pools(segmentations["vesicles"], assignment_path)
-    
+
     tomogram, _ = read_mrc(mrc_path)
+    if use_clahe:
+        print("Run CLAHE ...")
+        tomogram = equalize_adapthist(tomogram, clip_limit=0.03)
+        print("... done")
 
     v = napari.Viewer()
     v.add_image(tomogram)
@@ -58,7 +64,7 @@ def main():
     version = 1
     tomograms = get_all_tomograms()
     for tomogram in tqdm(tomograms, desc="Visualize automatic segmentation results"):
-        check_automatic_result(tomogram)
+        check_automatic_result(tomogram, version)
 
 
 if __name__:

@@ -4,13 +4,13 @@ import h5py
 import numpy as np
 import pandas as pd
 
-from synaptic_reconstruction.distance_measurements import measure_segmentation_to_object_distances, load_distances
-from synaptic_reconstruction.file_utils import read_mrc
-from synaptic_reconstruction.inference.vesicles import segment_vesicles
-from synaptic_reconstruction.tools.util import get_model, compute_scale_from_voxel_size, _segment_ribbon_AZ
+from synapse_net.distance_measurements import measure_segmentation_to_object_distances, load_distances
+from synapse_net.file_utils import read_mrc
+from synapse_net.inference.vesicles import segment_vesicles
+from synapse_net.tools.util import get_model, compute_scale_from_voxel_size, _segment_ribbon_AZ
 from tqdm import tqdm
 
-from common import INPUT_ROOT, OUTPUT_ROOT, STRUCTURE_NAMES, get_all_tomograms
+from common import STRUCTURE_NAMES, get_all_tomograms, get_seg_path
 
 
 def process_vesicles(mrc_path, output_path, version):
@@ -38,12 +38,14 @@ def process_ribbon_structures(mrc_path, output_path, version):
         if key in f:
             return
         vesicles = f["segmentation/vesicles"][:]
-    
+
     input_, voxel_size = read_mrc(mrc_path)
     model_name = "ribbon"
     model = get_model(model_name)
     scale = compute_scale_from_voxel_size(voxel_size, model_name)
-    segmentations = _segment_ribbon_AZ(input_, model, tiling=None, scale=scale, verbose=True, extra_segmentation=vesicles)
+    segmentations = _segment_ribbon_AZ(
+        input_, model, tiling=None, scale=scale, verbose=True, extra_segmentation=vesicles
+    )
 
     with h5py.File(output_path, "a") as f:
         for name, seg in segmentations.items():
@@ -57,7 +59,7 @@ def measure_distances(mrc_path, seg_path, output_folder):
 
     # Get the voxel size.
     _, voxel_size = read_mrc(mrc_path)
-    resolution = tuple(voxel_size[ax] for ax in "zyx") 
+    resolution = tuple(voxel_size[ax] for ax in "zyx")
 
     # Load the segmentations.
     with h5py.File(seg_path, "r") as f:
@@ -98,16 +100,13 @@ def assign_vesicle_pools(output_folder):
 
     rav_distances, seg_ids = distances["ribbon"][0], np.array(distances["ribbon"][-1])
     rav_ids = seg_ids[rav_distances < rav_ribbon_distance]
-    
+
     pd_distances, mem_distances = distances["PD"][0], distances["membrane"][0]
     assert len(pd_distances) == len(mem_distances) == len(rav_distances)
 
     mpv_ids = seg_ids[np.logical_and(pd_distances < mpv_pd_distance, mem_distances < mpv_mem_distance)]
     docked_ids = seg_ids[np.logical_and(pd_distances < docked_pd_distance, mem_distances < docked_mem_distance)]
-    
-    # Keep only the vesicle ids that are in one of the three categories.
-    vesicle_ids = np.unique(np.concatenate([rav_ids, mpv_ids, docked_ids]))
-    
+
     # Create a dictionary to map vesicle ids to their corresponding pool.
     # (RA-V get's over-written by MP-V, which is correct).
     pool_assignments = {vid: "RA-V" for vid in rav_ids}
@@ -122,13 +121,9 @@ def assign_vesicle_pools(output_folder):
 
 
 def process_tomogram(mrc_path, version):
-    relative_path = os.path.relpath(mrc_path, INPUT_ROOT)
-    relative_folder = os.path.split(relative_path)[0]
-
-    output_folder = os.path.join(OUTPUT_ROOT, f"v{version}", relative_folder)
+    output_path = get_seg_path(mrc_path, version)
+    output_folder = os.path.split(output_path)[0]
     os.makedirs(output_folder, exist_ok=True)
-    relative_name = os.path.splitext(relative_path)[0]
-    output_path = os.path.join(OUTPUT_ROOT, f"v{version}", f"{relative_name}.h5")
 
     process_vesicles(mrc_path, output_path, version)
     process_ribbon_structures(mrc_path, output_path, version)
