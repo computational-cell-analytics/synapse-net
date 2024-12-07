@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 
 import napari
@@ -14,6 +15,16 @@ try:
     from napari_skimage_regionprops import add_table, get_table
 except ImportError:
     add_table, get_table = None, None
+
+
+class _SilencePrint:
+    def __enter__(self):
+        self._original_stdout = sys.stdout
+        sys.stdout = open(os.devnull, "w")
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        sys.stdout.close()
+        sys.stdout = self._original_stdout
 
 
 class BaseWidget(QWidget):
@@ -316,18 +327,17 @@ class BaseWidget(QWidget):
         return file_path
 
     def _add_properties_and_table(self, layer, table_data, save_path=""):
-        if layer.properties:
-            layer.properties.update(table_data)
-        else:
-            layer.properties = table_data
+        layer.properties = table_data
 
         if add_table is not None:
             table = get_table(layer, self.viewer)
             if table is None:
-                add_table(layer, self.viewer)
+                with _SilencePrint():
+                    add_table(layer, self.viewer)
             else:
                 # FIXME updating the table does not yet work
-                table.update_content()
+                with _SilencePrint():
+                    table.update_content()
                 # table_dict = table_data.to_dict()
                 # table_dict["index"] = table_dict["label"]
                 # table.set_content(table_dict)
