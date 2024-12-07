@@ -9,7 +9,7 @@ contributions:
     # Commands for widgets.
     - id: synapse_net.segment
       python_name: synapse_net.tools.segmentation_widget:SegmentationWidget
-      title: Segment
+      title: Segmentation
     - id: synapse_net.distance_measure
       python_name: synapse_net.tools.distance_measure_widget:DistanceMeasureWidget
       title: Distance Measurement
@@ -21,7 +21,7 @@ contributions:
       title: Morphology Analysis
     - id: synapse_net.vesicle_pooling
       python_name: synapse_net.tools.vesicle_pool_widget:VesiclePoolWidget
-      title: Vesicle Pooling
+      title: Pool Assignment
 
     # Commands for sample data.
     - id: synapse_net.sample_data_tem_2d
@@ -47,7 +47,7 @@ contributions:
     - command: synapse_net.morphology
       display_name: Morphology Analysis
     - command: synapse_net.vesicle_pooling
-      display_name: Vesicle Pooling
+      display_name: Pool Assignment
 
   sample_data:
     - command: synapse_net.sample_data_tem_2d

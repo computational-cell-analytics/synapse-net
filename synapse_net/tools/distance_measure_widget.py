@@ -45,9 +45,9 @@ class DistanceMeasureWidget(BaseWidget):
     def _to_table_data(self, distances, seg_ids, endpoints1=None, endpoints2=None):
         assert len(distances) == len(seg_ids), f"{distances.shape}, {seg_ids.shape}"
         if seg_ids.ndim == 2:
-            table_data = {"label_id1": seg_ids[:, 0], "label_id2": seg_ids[:, 1], "distance": distances}
+            table_data = {"label1": seg_ids[:, 0], "label2": seg_ids[:, 1], "distance": distances}
         else:
-            table_data = {"label_id": seg_ids, "distance": distances}
+            table_data = {"label": seg_ids, "distance": distances}
         if endpoints1 is not None:
             axis_names = "zyx" if endpoints1.shape[1] == 3 else "yx"
             table_data.update({f"begin-{ax}": endpoints1[:, i] for i, ax in enumerate(axis_names)})
