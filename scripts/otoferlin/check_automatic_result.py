@@ -28,27 +28,34 @@ def _get_vesicle_pools(seg, assignment_path):
     return pools, colormap
 
 
-def check_automatic_result(mrc_path, version, use_clahe=False):
-
-    seg_path = get_seg_path(mrc_path, version)
-
-    segmentations, colormaps = {}, {}
-    if os.path.exists(seg_path):
-        with h5py.File(seg_path, "r") as f:
-            g = f["segmentation"]
-            for name, ds in g.items():
-                segmentations[name] = ds[:]
-
-    output_folder = os.path.split(seg_path)[0]
-    assignment_path = os.path.join(output_folder, "vesicle_pools.csv")
-    if os.path.exists(assignment_path):
-        segmentations["pools"], colormaps["pools"] = _get_vesicle_pools(segmentations["vesicles"], assignment_path)
-
+def check_automatic_result(mrc_path, version, use_clahe=False, center_crop=True, segmentation_group="segmentation"):
     tomogram, _ = read_mrc(mrc_path)
+    if center_crop:
+        halo = (50, 512, 512)
+        bb = tuple(
+            slice(max(sh // 2 - ha, 0), min(sh // 2 + ha, sh)) for sh, ha in zip(tomogram.shape, halo)
+        )
+        tomogram = tomogram[bb]
+    else:
+        bb = np.s_[:]
+
     if use_clahe:
         print("Run CLAHE ...")
         tomogram = equalize_adapthist(tomogram, clip_limit=0.03)
         print("... done")
+
+    seg_path = get_seg_path(mrc_path, version)
+    segmentations, colormaps = {}, {}
+    if os.path.exists(seg_path):
+        with h5py.File(seg_path, "r") as f:
+            g = f[segmentation_group]
+            for name, ds in g.items():
+                segmentations[name] = ds[bb]
+
+    output_folder = os.path.split(seg_path)[0]
+    assignment_path = os.path.join(output_folder, "vesicle_pools.csv")
+    if os.path.exists(assignment_path) and "vesicles" in segmentations:
+        segmentations["pools"], colormaps["pools"] = _get_vesicle_pools(segmentations["vesicles"], assignment_path)
 
     v = napari.Viewer()
     v.add_image(tomogram)
@@ -64,6 +71,7 @@ def main():
     version = 1
     tomograms = get_all_tomograms()
     for tomogram in tqdm(tomograms, desc="Visualize automatic segmentation results"):
+        # check_automatic_result(tomogram, version, segmentation_group="vesicles")
         check_automatic_result(tomogram, version)
 
 

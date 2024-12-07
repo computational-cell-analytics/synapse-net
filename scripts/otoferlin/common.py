@@ -44,6 +44,7 @@ def get_colormaps():
         "RA-V": (0, 0.33, 0),
         "MP-V": (1.0, 0.549, 0.0),
         "Docked-V": (1, 1, 0),
+        None: "Gray",
     }
     return {"pools": pool_map}
 
