@@ -11,9 +11,9 @@ from qtpy.QtWidgets import (
 from superqt import QCollapsible
 
 try:
-    from napari_skimage_regionprops import add_table
+    from napari_skimage_regionprops import add_table, get_table
 except ImportError:
-    add_table = None
+    add_table, get_table = None, None
 
 
 class BaseWidget(QWidget):
@@ -317,11 +317,21 @@ class BaseWidget(QWidget):
 
     def _add_properties_and_table(self, layer, table_data, save_path=""):
         if layer.properties:
-            layer.properties = layer.properties.update(table_data)
+            layer.properties.update(table_data)
         else:
             layer.properties = table_data
+
         if add_table is not None:
-            add_table(layer, self.viewer)
+            table = get_table(layer, self.viewer)
+            if table is None:
+                add_table(layer, self.viewer)
+            else:
+                # FIXME updating the table does not yet work
+                table.update_content()
+                # table_dict = table_data.to_dict()
+                # table_dict["index"] = table_dict["label"]
+                # table.set_content(table_dict)
+
         # Save table to file if save path is provided.
         if save_path != "":
             file_path = self._save_table(self.save_path.text(), table_data)

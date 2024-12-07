@@ -9,11 +9,6 @@ from qtpy.QtWidgets import QWidget, QVBoxLayout, QPushButton
 
 from .base_widget import BaseWidget
 
-try:
-    from napari_skimage_regionprops import add_table
-except ImportError:
-    add_table = None
-
 # This will fail if we have more than 8 pools.
 COLORMAP = ["red", "blue", "yellow", "cyan", "purple", "magenta", "orange", "green"]
 
@@ -107,9 +102,8 @@ class VesiclePoolWidget(BaseWidget):
             pool_name (str): Name for the pooled group to be assigned.
             query (dict): Query parameters.
         """
-
-        distance_ids = distances.get("label_id", [])
-        morphology_ids = morphology.get("label_id", [])
+        distance_ids = distances.get("label", [])
+        morphology_ids = morphology.get("label", [])
 
         # Ensure that IDs are identical.
         if set(distance_ids) != set(morphology_ids):
@@ -120,11 +114,11 @@ class VesiclePoolWidget(BaseWidget):
         # TODO: select the dataframes more dynamically depending on the criterion defined by the user.
         distances = pd.DataFrame(distances)
         morphology = pd.DataFrame(morphology)
-        merged_df = morphology.merge(distances, left_on="label_id", right_on="label_id", suffixes=("_morph", "_dist"))
+        merged_df = morphology.merge(distances, left_on="label", right_on="label", suffixes=("_morph", "_dist"))
 
         # Assign the vesicles to the current pool by filtering the mergeddataframe based on the query.
         filtered_df = self._parse_query(query, merged_df)
-        pool_vesicle_ids = filtered_df.label_id.values.tolist()
+        pool_vesicle_ids = filtered_df.label.values.tolist()
 
         # Check if this layer was already created in a previous pool assignment.
         if pool_layer_name in self.viewer.layers:
@@ -140,7 +134,7 @@ class VesiclePoolWidget(BaseWidget):
 
             # Combine the vesicle ids corresponding to the previous assignment with the
             # assignment for the new / current pool.
-            old_pool_ids = pool_properties.label_id.values.tolist()
+            old_pool_ids = pool_properties.label.values.tolist()
             pool_assignments = sorted(pool_vesicle_ids + old_pool_ids)
 
             # Get a map for each vesicle id to its pool.
@@ -161,7 +155,14 @@ class VesiclePoolWidget(BaseWidget):
         vesicle_pools[~np.isin(vesicle_pools, pool_assignments)] = 0
 
         # Create the pool properties.
-        pool_properties = merged_df[merged_df.label_id.isin(pool_assignments)]
+        pool_properties = merged_df[merged_df.label.isin(pool_assignments)]
+        # Remove columns that are not relevant for measurements.
+        keep_columns = [
+            col for col in pool_properties.columns
+            if col not in ("x", "y", "z", "begin-x", "begin-y", "begin-z", "end-x", "end-y", "end-z")
+        ]
+        pool_properties = pool_properties[keep_columns].reset_index()
+        # Add a colun for the pool.
         pool_properties.insert(1, "pool", pool_values)
 
         # Create the colormap to group the pools in the layer rendering.
@@ -170,12 +171,12 @@ class VesiclePoolWidget(BaseWidget):
         # To avoid this the user has to specify the pool color (not yet implemented, see next todo).
         pool_names = np.unique(pool_values).tolist()
         # TODO: add setting so that users can over-ride the color for a pool.
-        # TODO: provide a default color (how?) to avoid the warning
         pool_colors = {pname: COLORMAP[pool_names.index(pname)] for pname in pool_names}
         vesicle_colors = {
             label_id: pool_colors[pname] for label_id, pname
-            in zip(pool_properties.label_id.values, pool_properties.pool.values)
+            in zip(pool_properties.label.values, pool_properties.pool.values)
         }
+        vesicle_colors[None] = "gray"
 
         # TODO print some messages
         # Add or replace the pool layer and properties.
@@ -183,13 +184,12 @@ class VesiclePoolWidget(BaseWidget):
             # message about added or over-ridden pool, including number of vesicles in pool
             pool_layer = self.viewer.layers[pool_layer_name]
             pool_layer.data = vesicle_pools
-            pool_layer.color_map = vesicle_colors
+            pool_layer.colormap = vesicle_colors
         else:
             # message about new pool, including number of vesicles in pool
             pool_layer = self.viewer.add_labels(vesicle_pools, name=pool_layer_name, colormap=vesicle_colors)
 
-        # TODO add the save path
-        self._add_properties_and_table(pool_layer, pool_properties, save_path="")
+        self._add_properties_and_table(pool_layer, pool_properties, save_path=self.save_path.text())
         pool_layer.refresh()
 
     def _parse_query(self, query: str, data: pd.DataFrame) -> pd.DataFrame:
@@ -218,9 +218,6 @@ class VesiclePoolWidget(BaseWidget):
         setting_values.setLayout(QVBoxLayout())
 
         self.save_path, layout = self._add_path_param(name="Save Table", select_type="file", value="")
-        setting_values.layout().addLayout(layout)
-
-        self.voxel_size_param, layout = self._add_float_param("voxel_size", 0.0, min_val=0.0, max_val=100.0)
         setting_values.layout().addLayout(layout)
 
         settings = self._make_collapsible(widget=setting_values, title="Advanced Settings")
