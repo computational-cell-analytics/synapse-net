@@ -1,6 +1,8 @@
 import os
 from glob import glob
 
+from synapse_net.tools.util import load_custom_model
+
 
 # These are the files just for the test data.
 # INPUT_ROOT = "/home/ag-wichmann/data/test-data/tomograms"
@@ -20,7 +22,9 @@ VERSION = 2
 
 def get_adapted_model():
     # Path on nhr, need to put the model on the WS and update this.
-    return "/mnt/vast-nhr/home/pape41/u12086/Work/my_projects/synaptic-reconstruction/scripts/otoferlin/domain_adaptation/checkpoints/otoferlin_da.pt"  # noqa
+    model_path = "/mnt/vast-nhr/home/pape41/u12086/Work/my_projects/synaptic-reconstruction/scripts/otoferlin/domain_adaptation/checkpoints/otoferlin_da.pt"  # noqa
+    model = load_custom_model(model_path)
+    return model
 
 
 def get_folders():

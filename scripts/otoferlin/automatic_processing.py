@@ -47,9 +47,6 @@ def process_ribbon_structures(mrc_path, output_path):
         return_predictions=True,
     )
 
-    # TODO binarize the predictions
-    breakpoint()
-
     with h5py.File(output_path, "a") as f:
         for name, seg in segmentations.items():
             f.create_dataset(f"segmentation/{name}", data=seg, compression="gzip")
@@ -132,6 +129,9 @@ def process_tomogram(mrc_path):
     process_vesicles(mrc_path, output_path)
     process_ribbon_structures(mrc_path, output_path)
     return
+    # TODO vesicle post-processing:
+    # snap to boundaries?
+    # remove vesicles in ribbon
 
     measure_distances(mrc_path, output_path, output_folder)
     assign_vesicle_pools(output_folder)

@@ -72,13 +72,18 @@ def _segment_ribbon_AZ(image, model, tiling, scale, verbose, return_predictions=
 
     # If the vesicles were passed then run additional post-processing.
     if vesicles is None:
-        segmentation = predictions
+        if verbose:
+            print("Vesicle segmentation was not passed, WILL NOT run post-processing.")
+        segmentations = predictions
 
     # Otherwise, just return the predictions.
     else:
         from synapse_net.inference.postprocessing import (
             segment_ribbon, segment_presynaptic_density, segment_membrane_distance_based,
         )
+
+        if verbose:
+            print("Vesicle segmentation was passed, WILL run post-processing.")
 
         ribbon = segment_ribbon(
             predictions["ribbon"], vesicles, n_slices_exclude=n_slices_exclude, n_ribbons=n_ribbons,
@@ -92,11 +97,11 @@ def _segment_ribbon_AZ(image, model, tiling, scale, verbose, return_predictions=
             predictions["membrane"], ref_segmentation, max_distance=500, n_slices_exclude=n_slices_exclude,
         )
 
-        segmentation = {"ribbon": ribbon, "PD": PD, "membrane": membrane}
+        segmentations = {"ribbon": ribbon, "PD": PD, "membrane": membrane}
 
     if return_predictions:
-        return predictions, segmentation
-    return segmentation
+        return segmentations, predictions
+    return segmentations
 
 
 def run_segmentation(
