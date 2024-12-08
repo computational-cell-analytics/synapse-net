@@ -51,6 +51,7 @@ def check_automatic_result(mrc_path, version, use_clahe=False, center_crop=True,
             g = f[segmentation_group]
             for name, ds in g.items():
                 segmentations[name] = ds[bb]
+                colormaps[name] = get_colormaps().get(name, None)
 
     output_folder = os.path.split(seg_path)[0]
     assignment_path = os.path.join(output_folder, "vesicle_pools.csv")
@@ -71,11 +72,9 @@ def main():
     for i, tomogram in tqdm(
         enumerate(tomograms), total=len(tomograms), desc="Visualize automatic segmentation results"
     ):
-        if i < 3:
-            continue
         print("Checking tomogram", tomogram)
         # check_automatic_result(tomogram, version, segmentation_group="vesicles")
-        check_automatic_result(tomogram, version)
+        check_automatic_result(tomogram, version, segmentation_group="prediction")
 
 
 if __name__:

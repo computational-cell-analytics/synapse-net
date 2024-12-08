@@ -58,9 +58,11 @@ def get_colormaps():
         "RA-V": (0, 0.33, 0),
         "MP-V": (1.0, 0.549, 0.0),
         "Docked-V": (1, 1, 0),
-        None: "Gray",
+        None: "gray",
     }
-    return {"pools": pool_map}
+    membrane_map = {1: "purple", None: "gray"}
+    pd_map = {1: "magenta", None: "gray"}
+    return {"pools": pool_map, "membrane": membrane_map, "PD": pd_map}
 
 
 # TODO: sync the ukon folder with the tomograms.

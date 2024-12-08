@@ -59,6 +59,27 @@ def get_model(model_type: str, device: Optional[Union[str, torch.device]] = None
     return model
 
 
+def _ribbon_AZ_postprocessing(predictions, vesicles, n_slices_exclude, n_ribbons):
+    from synapse_net.inference.postprocessing import (
+        segment_ribbon, segment_presynaptic_density, segment_membrane_distance_based,
+    )
+
+    ribbon = segment_ribbon(
+        predictions["ribbon"], vesicles, n_slices_exclude=n_slices_exclude, n_ribbons=n_ribbons,
+        max_vesicle_distance=40,
+    )
+    PD = segment_presynaptic_density(
+        predictions["PD"], ribbon, n_slices_exclude=n_slices_exclude, max_distance_to_ribbon=40,
+    )
+    ref_segmentation = PD if PD.sum() > 0 else ribbon
+    membrane = segment_membrane_distance_based(
+        predictions["membrane"], ref_segmentation, max_distance=500, n_slices_exclude=n_slices_exclude,
+    )
+
+    segmentations = {"ribbon": ribbon, "PD": PD, "membrane": membrane}
+    return segmentations
+
+
 def _segment_ribbon_AZ(image, model, tiling, scale, verbose, return_predictions=False, **kwargs):
     # Parse additional keyword arguments from the kwargs.
     vesicles = kwargs.pop("extra_segmentation")
@@ -70,34 +91,17 @@ def _segment_ribbon_AZ(image, model, tiling, scale, verbose, return_predictions=
         image, model=model, tiling=tiling, scale=scale, verbose=verbose, threshold=threshold, **kwargs
     )
 
-    # If the vesicles were passed then run additional post-processing.
+    # Otherwise, just return the predictions.
     if vesicles is None:
         if verbose:
             print("Vesicle segmentation was not passed, WILL NOT run post-processing.")
         segmentations = predictions
 
-    # Otherwise, just return the predictions.
+    # If the vesicles were passed then run additional post-processing.
     else:
-        from synapse_net.inference.postprocessing import (
-            segment_ribbon, segment_presynaptic_density, segment_membrane_distance_based,
-        )
-
         if verbose:
             print("Vesicle segmentation was passed, WILL run post-processing.")
-
-        ribbon = segment_ribbon(
-            predictions["ribbon"], vesicles, n_slices_exclude=n_slices_exclude, n_ribbons=n_ribbons,
-            max_vesicle_distance=40,
-        )
-        PD = segment_presynaptic_density(
-            predictions["PD"], ribbon, n_slices_exclude=n_slices_exclude, max_distance_to_ribbon=40,
-        )
-        ref_segmentation = PD if PD.sum() > 0 else ribbon
-        membrane = segment_membrane_distance_based(
-            predictions["membrane"], ref_segmentation, max_distance=500, n_slices_exclude=n_slices_exclude,
-        )
-
-        segmentations = {"ribbon": ribbon, "PD": PD, "membrane": membrane}
+        segmentations = _ribbon_AZ_postprocessing(predictions, vesicles, n_slices_exclude, n_ribbons)
 
     if return_predictions:
         return segmentations, predictions
