@@ -66,11 +66,14 @@ def check_automatic_result(mrc_path, version, use_clahe=False, center_crop=True,
 
 
 def main():
-    # The version of automatic processing. Current versions:
-    # 1: process everything with the synapse net default models
-    version = 1
+    version = 2
     tomograms = get_all_tomograms()
-    for tomogram in tqdm(tomograms, desc="Visualize automatic segmentation results"):
+    for i, tomogram in tqdm(
+        enumerate(tomograms), total=len(tomograms), desc="Visualize automatic segmentation results"
+    ):
+        if i < 3:
+            continue
+        print("Checking tomogram", tomogram)
         # check_automatic_result(tomogram, version, segmentation_group="vesicles")
         check_automatic_result(tomogram, version)
 

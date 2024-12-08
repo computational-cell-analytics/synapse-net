@@ -12,6 +12,16 @@ OUTPUT_ROOT = "/home/ag-wichmann/data/otoferlin/segmentation"
 
 STRUCTURE_NAMES = ("ribbon", "PD", "membrane")
 
+# The version of the automatic segmentation. We have:
+# - version 1: using the default models for all structures and the initial version of post-processing.
+# - version 2: using the adapted model for vesicles in the otoferlin and updating the post-processing.
+VERSION = 2
+
+
+def get_adapted_model():
+    # Path on nhr, need to put the model on the WS and update this.
+    return "/mnt/vast-nhr/home/pape41/u12086/Work/my_projects/synaptic-reconstruction/scripts/otoferlin/domain_adaptation/checkpoints/otoferlin_da.pt"  # noqa
+
 
 def get_folders():
     if os.path.exists(INPUT_ROOT):
@@ -30,12 +40,12 @@ def get_all_tomograms():
     return tomograms
 
 
-def get_seg_path(mrc_path, version=1):
+def get_seg_path(mrc_path, version=VERSION):
     input_root, output_root = get_folders()
     rel_path = os.path.relpath(mrc_path, input_root)
     rel_folder, fname = os.path.split(rel_path)
     fname = os.path.splitext(fname)[0]
-    seg_path = os.path.join(output_root, f"v{version}", rel_folder, f"{fname}.h5")
+    seg_path = os.path.join(output_root, f"v{VERSION}", rel_folder, f"{fname}.h5")
     return seg_path
 
 

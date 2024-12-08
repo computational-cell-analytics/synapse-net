@@ -10,10 +10,10 @@ from synapse_net.inference.vesicles import segment_vesicles
 from synapse_net.tools.util import get_model, compute_scale_from_voxel_size, _segment_ribbon_AZ
 from tqdm import tqdm
 
-from common import STRUCTURE_NAMES, get_all_tomograms, get_seg_path
+from common import STRUCTURE_NAMES, get_all_tomograms, get_seg_path, get_adapted_model
 
 
-def process_vesicles(mrc_path, output_path, version):
+def process_vesicles(mrc_path, output_path):
     key = "segmentation/vesicles"
     if os.path.exists(output_path):
         with h5py.File(output_path, "r") as f:
@@ -22,9 +22,8 @@ def process_vesicles(mrc_path, output_path, version):
 
     input_, voxel_size = read_mrc(mrc_path)
 
-    model_name = "vesicles_3d"
-    model = get_model(model_name)
-    scale = compute_scale_from_voxel_size(voxel_size, model_name)
+    model = get_adapted_model()
+    scale = compute_scale_from_voxel_size(voxel_size, "ribbon")
     print("Rescaling volume for vesicle segmentation with factor:", scale)
     segmentation = segment_vesicles(input_, model=model, scale=scale)
 
@@ -32,7 +31,7 @@ def process_vesicles(mrc_path, output_path, version):
         f.create_dataset(key, data=segmentation, compression="gzip")
 
 
-def process_ribbon_structures(mrc_path, output_path, version):
+def process_ribbon_structures(mrc_path, output_path):
     key = "segmentation/ribbon"
     with h5py.File(output_path, "r") as f:
         if key in f:
@@ -43,13 +42,18 @@ def process_ribbon_structures(mrc_path, output_path, version):
     model_name = "ribbon"
     model = get_model(model_name)
     scale = compute_scale_from_voxel_size(voxel_size, model_name)
-    segmentations = _segment_ribbon_AZ(
-        input_, model, tiling=None, scale=scale, verbose=True, extra_segmentation=vesicles
+    segmentations, predictions = _segment_ribbon_AZ(
+        input_, model, tiling=None, scale=scale, verbose=True, extra_segmentation=vesicles,
+        return_predictions=True,
     )
+
+    # TODO binarize the predictions
+    breakpoint()
 
     with h5py.File(output_path, "a") as f:
         for name, seg in segmentations.items():
             f.create_dataset(f"segmentation/{name}", data=seg, compression="gzip")
+            f.create_dataset(f"prediction/{name}", data=predictions[name], compression="gzip")
 
 
 def measure_distances(mrc_path, seg_path, output_folder):
@@ -120,25 +124,23 @@ def assign_vesicle_pools(output_folder):
     pool_assignments.to_csv(assignment_path, index=False)
 
 
-def process_tomogram(mrc_path, version):
-    output_path = get_seg_path(mrc_path, version)
+def process_tomogram(mrc_path):
+    output_path = get_seg_path(mrc_path)
     output_folder = os.path.split(output_path)[0]
     os.makedirs(output_folder, exist_ok=True)
 
-    process_vesicles(mrc_path, output_path, version)
-    process_ribbon_structures(mrc_path, output_path, version)
+    process_vesicles(mrc_path, output_path)
+    process_ribbon_structures(mrc_path, output_path)
+    return
 
     measure_distances(mrc_path, output_path, output_folder)
     assign_vesicle_pools(output_folder)
 
 
 def main():
-    # The version of automatic processing. Current versions:
-    # 1: process everything with the synapse net default models
-    version = 1
     tomograms = get_all_tomograms()
     for tomogram in tqdm(tomograms, desc="Process tomograms"):
-        process_tomogram(tomogram, version)
+        process_tomogram(tomogram)
 
 
 if __name__:

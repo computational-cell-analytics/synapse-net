@@ -59,7 +59,7 @@ def get_model(model_type: str, device: Optional[Union[str, torch.device]] = None
     return model
 
 
-def _segment_ribbon_AZ(image, model, tiling, scale, verbose, **kwargs):
+def _segment_ribbon_AZ(image, model, tiling, scale, verbose, return_predictions=False, **kwargs):
     # Parse additional keyword arguments from the kwargs.
     vesicles = kwargs.pop("extra_segmentation")
     threshold = kwargs.pop("threshold", 0.5)
@@ -94,6 +94,8 @@ def _segment_ribbon_AZ(image, model, tiling, scale, verbose, **kwargs):
 
         segmentation = {"ribbon": ribbon, "PD": PD, "membrane": membrane}
 
+    if return_predictions:
+        return predictions, segmentation
     return segmentation
 
 
