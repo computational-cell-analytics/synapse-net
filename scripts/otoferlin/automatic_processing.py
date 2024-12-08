@@ -23,7 +23,7 @@ def _get_center_crop(input_):
 
 
 def _get_tiling():
-    tile = {"x": 768, "y": 768, "z": 64}
+    tile = {"x": 768, "y": 768, "z": 48}
     halo = {"x": 128, "y": 128, "z": 8}
     return {"tile": tile, "halo": halo}
 
@@ -65,23 +65,25 @@ def process_ribbon_structures(mrc_path, output_path, process_center_crop):
     input_, voxel_size = read_mrc(mrc_path)
     if process_center_crop:
         bb, full_shape = _get_center_crop(input_)
-        input_ = input_[bb]
+        input_, vesicles = input_[bb], vesicles[bb]
+        assert input_.shape == vesicles.shape
 
     model_name = "ribbon"
     model = get_model(model_name)
     scale = compute_scale_from_voxel_size(voxel_size, model_name)
     tiling = _get_tiling()
+
     segmentations, predictions = _segment_ribbon_AZ(
         input_, model, tiling=tiling, scale=scale, verbose=True, extra_segmentation=vesicles,
         return_predictions=True, n_slices_exclude=5,
     )
 
     if process_center_crop:
-        for name, seg in segmentations:
+        for name, seg in segmentations.items():
             full_seg = np.zeros(full_shape, dtype=seg.dtype)
             full_seg[bb] = seg
             segmentations[name] = full_seg
-        for name, pred in predictions:
+        for name, pred in predictions.items():
             full_pred = np.zeros(full_shape, dtype=seg.dtype)
             full_pred[bb] = pred
             predictions[name] = full_pred
