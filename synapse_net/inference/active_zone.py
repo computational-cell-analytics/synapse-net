@@ -87,7 +87,8 @@ def segment_active_zone(
         verbose: Whether to print timing information.
         scale: The scale factor to use for rescaling the input volume before prediction.
         mask: An optional mask that is used to restrict the segmentation.
-        compartment:
+        compartment: Pass a compartment segmentation, to intersect the boundaries of the
+            compartments with the active zone prediction.
 
     Returns:
         The foreground mask as a numpy array.
@@ -108,13 +109,17 @@ def segment_active_zone(
     print(f"shape {foreground.shape}")
 
     segmentation = _run_segmentation(foreground, verbose=verbose, min_size=min_size)
+    segmentation = scaler.rescale_output(segmentation, is_segmentation=True)
 
-    # returning prediciton and intersection not possible atm, but currently do not need prediction anyways
+    # Returning prediciton and intersection currently not possible.
     if return_predictions:
+        assert compartment is None
         pred = scaler.rescale_output(pred, is_segmentation=False)
         return segmentation, pred
 
     if compartment is not None:
+        assert not return_predictions
+        compartment = scaler.scale_input(input_volume, is_segmentation=True)
         intersection = find_intersection_boundary(segmentation, compartment)
         return segmentation, intersection
 
