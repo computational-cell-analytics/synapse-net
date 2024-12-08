@@ -29,17 +29,18 @@ def check_structure_postprocessing(mrc_path, center_crop=True):
         g = f["segmentation"]
         for name in STRUCTURE_NAMES:
             segmentations[f"seg/{name}"] = g[name][bb]
+            colormaps[name] = get_colormaps().get(name, None)
+
         g = f["prediction"]
         for name in STRUCTURE_NAMES:
             predictions[f"pred/{name}"] = g[name][bb]
-        colormaps[name] = get_colormaps().get(name, None)
 
     v = napari.Viewer()
     v.add_image(tomogram)
     for name, seg in segmentations.items():
         v.add_labels(seg, name=name, colormap=colormaps.get(name.split("/")[1]))
-    for name, seg in predictions.items():
-        v.add_labels(seg, name=name, colormap=colormaps.get(name.split("/")[1]), visible=False)
+    for name, pred in predictions.items():
+        v.add_labels(pred, name=name, colormap=colormaps.get(name.split("/")[1]), visible=False)
     v.title = os.path.basename(mrc_path)
     napari.run()
 

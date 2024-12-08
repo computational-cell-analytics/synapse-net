@@ -73,8 +73,9 @@ def main():
         enumerate(tomograms), total=len(tomograms), desc="Visualize automatic segmentation results"
     ):
         print("Checking tomogram", tomogram)
+        check_automatic_result(tomogram, version)
         # check_automatic_result(tomogram, version, segmentation_group="vesicles")
-        check_automatic_result(tomogram, version, segmentation_group="prediction")
+        # check_automatic_result(tomogram, version, segmentation_group="prediction")
 
 
 if __name__:
