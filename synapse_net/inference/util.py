@@ -2,7 +2,7 @@ import os
 import time
 import warnings
 from glob import glob
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, Union
 
 # # Suppress annoying import warnings.
 # with warnings.catch_warnings():
@@ -24,6 +24,11 @@ from skimage.morphology import remove_small_holes
 from skimage.transform import rescale, resize
 from torch_em.util.prediction import predict_with_halo
 from tqdm import tqdm
+
+
+#
+# Utils for prediction.
+#
 
 
 class _Scaler:
@@ -474,6 +479,11 @@ def parse_tiling(
     return tiling
 
 
+#
+# Utils for post-processing.
+#
+
+
 def apply_size_filter(
     segmentation: np.ndarray,
     min_size: int,
@@ -525,3 +535,54 @@ def _postprocess_seg_3d(seg, area_threshold=1000, iterations=4, iterations_3d=8)
         seg[bb][mask] = prop.label
 
     return seg
+
+
+#
+# Utils for torch device.
+#
+
+def _get_default_device():
+    # Check that we're in CI and use the CPU if we are.
+    # Otherwise the tests may run out of memory on MAC if MPS is used.
+    if os.getenv("GITHUB_ACTIONS") == "true":
+        return "cpu"
+    # Use cuda enabled gpu if it's available.
+    if torch.cuda.is_available():
+        device = "cuda"
+    # As second priority use mps.
+    # See https://pytorch.org/docs/stable/notes/mps.html for details
+    elif torch.backends.mps.is_available() and torch.backends.mps.is_built():
+        device = "mps"
+    # Use the CPU as fallback.
+    else:
+        device = "cpu"
+    return device
+
+
+def get_device(device: Optional[Union[str, torch.device]] = None) -> Union[str, torch.device]:
+    """Get the torch device.
+
+    If no device is passed the default device for your system is used.
+    Else it will be checked if the device you have passed is supported.
+
+    Args:
+        device: The input device.
+
+    Returns:
+        The device.
+    """
+    if device is None or device == "auto":
+        device = _get_default_device()
+    else:
+        device_type = device if isinstance(device, str) else device.type
+        if device_type.lower() == "cuda":
+            if not torch.cuda.is_available():
+                raise RuntimeError("PyTorch CUDA backend is not available.")
+        elif device_type.lower() == "mps":
+            if not (torch.backends.mps.is_available() and torch.backends.mps.is_built()):
+                raise RuntimeError("PyTorch MPS backend is not available or is not built correctly.")
+        elif device_type.lower() == "cpu":
+            pass  # cpu is always available
+        else:
+            raise RuntimeError(f"Unsupported device: {device}. Please choose from 'cpu', 'cuda', or 'mps'.")
+    return device

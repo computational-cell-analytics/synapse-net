@@ -2,13 +2,19 @@ import argparse
 from functools import partial
 
 from synapse_net.inference.vesicles import segment_vesicles
+from synapse_net.inference.inference import get_model_path
 from synapse_net.inference.util import inference_helper, parse_tiling
 
 
 def run_vesicle_segmentation(args):
+    if args.model is None:
+        model_path = get_model_path("vesicles_3d")
+    else:
+        model_path = args.model
+
     tiling = parse_tiling(args.tile_shape, args.halo)
     segmentation_function = partial(
-        segment_vesicles, model_path=args.model_path, verbose=False, tiling=tiling,
+        segment_vesicles, model_path=model_path, verbose=False, tiling=tiling,
         exclude_boundary=not args.include_boundary
     )
     inference_helper(
@@ -28,7 +34,7 @@ def main():
         help="The filepath to directory where the segmentations will be saved."
     )
     parser.add_argument(
-        "--model_path", "-m", required=True, help="The filepath to the vesicle model."
+        "--model_path", "-m", help="The filepath to the vesicle model."
     )
     parser.add_argument(
         "--mask_path", help="The filepath to a tif file with a mask that will be used to restrict the segmentation."

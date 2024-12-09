@@ -2,13 +2,20 @@ import argparse
 from functools import partial
 
 from synapse_net.inference.compartments import segment_compartments
+from synapse_net.inference.inference import get_model_path
 from synapse_net.inference.util import inference_helper, parse_tiling
 
 
 def run_compartment_segmentation(args):
     tiling = parse_tiling(args.tile_shape, args.halo)
+
+    if args.model is None:
+        model_path = get_model_path("compartments")
+    else:
+        model_path = args.model
+
     segmentation_function = partial(
-        segment_compartments, model_path=args.model_path, verbose=False, tiling=tiling, scale=[0.25, 0.25, 0.25]
+        segment_compartments, model_path=model_path, verbose=False, tiling=tiling, scale=[0.25, 0.25, 0.25]
     )
     inference_helper(
         args.input_path, args.output_path, segmentation_function, force=args.force, data_ext=args.data_ext
@@ -26,7 +33,7 @@ def main():
         help="The filepath to directory where the segmentation will be saved."
     )
     parser.add_argument(
-        "--model_path", "-m", required=True, help="The filepath to the compartment model."
+        "--model", "-m", help="The filepath to the compartment model."
     )
     parser.add_argument(
         "--force", action="store_true",

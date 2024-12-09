@@ -56,7 +56,7 @@ def _export_az(train_root, test_tomos, name):
 
     for tomo in tqdm(tomograms):
         fname = os.path.basename(tomo)
-        if tomo in test_tomos:
+        if fname in test_tomos:
             out_path = os.path.join(test_out, fname)
         else:
             out_path = os.path.join(train_out, fname)

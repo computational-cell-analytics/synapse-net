@@ -1,10 +1,9 @@
 import argparse
 from functools import partial
 
-from .util import (
-    run_segmentation, get_model, get_model_registry, get_model_training_resolution, load_custom_model
-)
+import torch
 from ..imod.to_imod import export_helper, write_segmentation_to_imod_as_points, write_segmentation_to_imod
+from ..inference.inference import _get_model_registry, get_model, get_model_training_resolution, run_segmentation
 from ..inference.util import inference_helper, parse_tiling
 
 
@@ -108,7 +107,7 @@ def segmentation_cli():
         "--output_path", "-o", required=True,
         help="The filepath to directory where the segmentations will be saved."
     )
-    model_names = list(get_model_registry().urls.keys())
+    model_names = list(_get_model_registry().urls.keys())
     model_names = ", ".join(model_names)
     parser.add_argument(
         "--model", "-m", required=True,
@@ -152,7 +151,7 @@ def segmentation_cli():
     if args.checkpoint is None:
         model = get_model(args.model)
     else:
-        model = load_custom_model(args.checkpoint)
+        model = torch.load(args.checkpoint, weights_only=False)
         assert model is not None, f"The model from {args.checkpoint} could not be loaded."
 
     is_2d = "2d" in args.model

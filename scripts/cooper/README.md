@@ -19,9 +19,9 @@ $ micromamba activate sam
 The segmentation scripts (`run_..._segmentation.py`) all work similarly and can either run segmentation for a single mrc file or for all mrcs in a folder structure.
 For example, you can run vesicle segmentation like this:
 ```
-$ python run_vesicle_segmentation.py -i /path/to/input_folder -o /path/to/output_folder -m /path/to/vesicle_model.pt
+$ python run_vesicle_segmentation.py -i /path/to/input_folder -o /path/to/output_folder
 ```
-The filepath after `-i` specifices the location of the folder with the mrcs to be segmented, the segmentation results will be stored (as tifs) in the folder following `-o` and `-m` is used to specify the path to the segmentation model.
+The filepath after `-i` specifices the location of the folder with the mrcs to be segmented and the segmentation results will be stored (as tifs) in the folder following `-o`.
 To segment vesicles with an additional mask, you can use the `--mask_path` option.
 
 The segmentation scripts accept additional parameters, e.g. `--force` to overwrite existing segmentations in the output folder (by default these are skipped to avoid unnecessary computation) and `--tile_shape <TILE_Z> <TILE_Y> <TILE_X>` to specify a different tile shape (which may be necessary to avoid running out of GPU memory).

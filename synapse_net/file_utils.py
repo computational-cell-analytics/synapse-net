@@ -3,6 +3,17 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import mrcfile
 import numpy as np
+import pooch
+
+
+def get_cache_dir() -> str:
+    """Get the cache directory of synapse net.
+
+    Returns:
+        The cache directory.
+    """
+    cache_dir = os.path.expanduser(pooch.os_cache("synapse-net"))
+    return cache_dir
 
 
 def get_data_path(folder: str, n_tomograms: Optional[int] = 1) -> Union[str, List[str]]:

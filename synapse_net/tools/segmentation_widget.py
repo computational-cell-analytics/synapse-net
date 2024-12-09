@@ -1,15 +1,88 @@
 import copy
+import re
+from typing import Optional, Union
 
 import napari
 import numpy as np
+import torch
 
 from napari.utils.notifications import show_info
 from qtpy.QtWidgets import QWidget, QVBoxLayout, QPushButton, QLabel, QComboBox
 
 from .base_widget import BaseWidget
-from .util import (run_segmentation, get_model, get_model_registry, _available_devices, get_device,
-                   get_current_tiling, compute_scale_from_voxel_size, load_custom_model)
-from ..inference.util import get_default_tiling
+from ..inference.inference import _get_model_registry, get_model, run_segmentation, compute_scale_from_voxel_size
+from ..inference.util import get_default_tiling, get_device
+
+
+def _load_custom_model(model_path: str, device: Optional[Union[str, torch.device]] = None) -> torch.nn.Module:
+    model_path = _clean_filepath(model_path)
+    if device is None:
+        device = get_device(device)
+    try:
+        model = torch.load(model_path, map_location=torch.device(device), weights_only=False)
+    except Exception as e:
+        print(e)
+        print("model path", model_path)
+        return None
+    return model
+
+
+def _available_devices():
+    available_devices = []
+    for i in ["cuda", "mps", "cpu"]:
+        try:
+            device = get_device(i)
+        except RuntimeError:
+            pass
+        else:
+            available_devices.append(device)
+    return available_devices
+
+
+def _get_current_tiling(tiling: dict, default_tiling: dict, model_type: str):
+    # get tiling values from qt objects
+    for k, v in tiling.items():
+        for k2, v2 in v.items():
+            if isinstance(v2, int):
+                continue
+            tiling[k][k2] = v2.value()
+    # check if user inputs tiling/halo or not
+    if default_tiling == tiling:
+        if "2d" in model_type:
+            # if its a 2d model expand x,y and set z to 1
+            tiling = {
+                "tile": {"x": 512, "y": 512, "z": 1},
+                "halo": {"x": 64, "y": 64, "z": 1},
+            }
+    elif "2d" in model_type:
+        # if its a 2d model set z to 1
+        tiling["tile"]["z"] = 1
+        tiling["halo"]["z"] = 1
+
+    return tiling
+
+
+def _clean_filepath(filepath):
+    """Cleans a given filepath by:
+    - Removing newline characters (\n)
+    - Removing escape sequences
+    - Stripping the 'file://' prefix if present
+
+    Args:
+        filepath (str): The original filepath
+
+    Returns:
+        str: The cleaned filepath
+    """
+    # Remove 'file://' prefix if present
+    if filepath.startswith("file://"):
+        filepath = filepath[7:]
+
+    # Remove escape sequences and newlines
+    filepath = re.sub(r'\\.', '', filepath)
+    filepath = filepath.replace('\n', '').replace('\r', '')
+
+    return filepath
 
 
 class SegmentationWidget(BaseWidget):
@@ -42,7 +115,7 @@ class SegmentationWidget(BaseWidget):
         model_widget = QWidget()
         title_label = QLabel("Select Model:")
 
-        models = ["- choose -"] + list(get_model_registry().urls.keys())
+        models = ["- choose -"] + list(_get_model_registry().urls.keys())
         self.model_selector = QComboBox()
         self.model_selector.addItems(models)
         # Create a layout and add the title label and combo box
@@ -66,7 +139,7 @@ class SegmentationWidget(BaseWidget):
 
         # Load the model. Override if user chose custom model
         if custom_model_path:
-            model = load_custom_model(custom_model_path, device)
+            model = _load_custom_model(custom_model_path, device)
             if model:
                 show_info(f"INFO: Using custom model from path: {custom_model_path}")
                 model_type = "custom"
@@ -83,7 +156,7 @@ class SegmentationWidget(BaseWidget):
             return
 
         # Get the current tiling.
-        self.tiling = get_current_tiling(self.tiling, self.default_tiling, model_type)
+        self.tiling = _get_current_tiling(self.tiling, self.default_tiling, model_type)
 
         # Get the voxel size.
         metadata = self._get_layer_selector_data(self.image_selector_name, return_metadata=True)

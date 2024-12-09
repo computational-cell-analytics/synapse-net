@@ -4,35 +4,41 @@ e.g. data from regular transmission electron microscopy (2D) instead of electron
 a different electron tomogram with different specimen and sample preparation.
 You don't need any annotations in the new domain to run this script.
 
-You can download example data for this script from:
-- Adaptation to 2d TEM data: TODO zenodo link
-- Adaptation to different tomography data: TODO zenodo link
+We use data from the SynapseNet publication for this example:
+- Adaptation to 2d TEM data: https://doi.org/10.5281/zenodo.14236381
+- Adaptation to different tomography data (3d data): https://doi.org/10.5281/zenodo.14232606
+
+It is of course possible to adapt it to your own data.
 """
 
 import os
 from glob import glob
 
 from sklearn.model_selection import train_test_split
+from synapse_net.inference.inference import get_model_path
+from synapse_net.sample_data import download_data_from_zenodo
 from synapse_net.training import mean_teacher_adaptation
-from synapse_net.tools.util import get_model_path
 
 
 def main():
     # Choose whether to adapt the model to 2D or to 3D data.
-    train_2d_model = True
+    train_2d_model = False
 
-    # TODO adjust to zenodo downloads
-    # These are the data folders for the example data downloaded from zenodo.
-    # Update these paths to apply the script to your own data.
-    # Check out the example data to see the data format for training.
-    data_root_folder_2d = "./data/2d_tem/train_unlabeled"
-    data_root_folder_3d = "./data/..."
-
-    # Choose the correct data folder depending on 2d/3d training.
-    data_root_folder = data_root_folder_2d if train_2d_model else data_root_folder_3d
+    # Download the training data from zenodo.
+    # You have to replace this if you want to train on your own data.
+    # The training data should be stored in an hdf5 file per tomogram,
+    # with tomgoram data stored in the internal dataset 'raw'.
+    if train_2d_model:
+        data_root = "./data/2d_tem"
+        download_data_from_zenodo(data_root, "2d_tem")
+        train_root_folder = os.path.join(data_root, "train_unlabeled")
+    else:
+        data_root = "./data/inner_ear_ribbon_synapse"
+        download_data_from_zenodo(data_root, "inner_ear_ribbon_synapse")
+        train_root_folder = data_root
 
     # Get all files with ending .h5 in the training folder.
-    files = sorted(glob(os.path.join(data_root_folder, "**", "*.h5"), recursive=True))
+    files = sorted(glob(os.path.join(train_root_folder, "**", "*.h5"), recursive=True))
 
     # Crate a train / val split.
     train_ratio = 0.85

@@ -2,13 +2,19 @@ import argparse
 from functools import partial
 
 from synapse_net.inference.mitochondria import segment_mitochondria
+from synapse_net.inference.inference import get_model_path
 from synapse_net.inference.util import inference_helper, parse_tiling
 
 
 def run_mitochondria_segmentation(args):
+    if args.model is None:
+        model_path = get_model_path("mitochondria")
+    else:
+        model_path = args.model
+
     tiling = parse_tiling(args.tile_shape, args.halo)
     segmentation_function = partial(
-        segment_mitochondria, model_path=args.model_path, verbose=False, tiling=tiling, scale=[0.5, 0.5, 0.5]
+        segment_mitochondria, model_path=model_path, verbose=False, tiling=tiling, scale=[0.5, 0.5, 0.5]
     )
     inference_helper(
         args.input_path, args.output_path, segmentation_function,
@@ -27,7 +33,7 @@ def main():
         help="The filepath to directory where the segmentation will be saved."
     )
     parser.add_argument(
-        "--model_path", "-m", required=True, help="The filepath to the mitochondria model."
+        "--model", "-m", help="The filepath to the mitochondria model."
     )
     parser.add_argument(
         "--force", action="store_true",

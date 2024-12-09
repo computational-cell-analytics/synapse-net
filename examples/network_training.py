@@ -5,22 +5,28 @@ the structures you want to segment. If you want to use domain adaptation
 to adapt an already trained network to your data without the need for
 additional annotations then check out `domain_adaptation.py`.
 
-You can download example data for this script from:
-TODO zenodo link to Single-Ax / Chemical Fix data.
+We will use the data from our manuscript here:
+https://doi.org/10.5281/zenodo.14330011
+
+You can also use your own data, if you prepare it in the same format.
 """
 import os
 from glob import glob
 
 from sklearn.model_selection import train_test_split
+from synapse_net.sample_data import download_data_from_zenodo
 from synapse_net.training import supervised_training
 
 
 def main():
-    # This is the folder that contains your training data.
-    # The example was designed so that it runs for the sample data downloaded to './data'.
-    # If you want to train on your own data than change this filepath accordingly.
-    # TODO update to match zenodo download
-    data_root_folder = "./data/vesicles/train"
+    # Download the training data from zenodo.
+    # You have to replace this if you want to train on your own data.
+    # The training data should be stored in an hdf5 file per tomogram,
+    # with tomgoram data stored in the internal dataset 'raw'
+    # and the vesicle annotations stored in the internal dataset 'labels/vesicles'.
+    data_root = "./data/training_data"
+    download_data_from_zenodo(data_root, "training_data")
+    train_root_folder = os.path.join(data_root, "vesicles/train")
 
     # The training data should be saved as .h5 files, with:
     # an internal dataset called 'raw' that contains the image data
@@ -28,7 +34,7 @@ def main():
     label_key = "labels/vesicles"
 
     # Get all files with the ending .h5 in the training folder.
-    files = sorted(glob(os.path.join(data_root_folder, "**", "*.h5"), recursive=True))
+    files = sorted(glob(os.path.join(train_root_folder, "**", "*.h5"), recursive=True))
 
     # Crate a train / val split.
     train_ratio = 0.85
