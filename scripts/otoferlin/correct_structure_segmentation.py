@@ -1,31 +1,20 @@
 import os
-from glob import glob
+from pathlib import Path
 
 import imageio.v3 as imageio
 import h5py
-import mrcfile
 import napari
-import numpy as np
 
-# TODO refactor everything once things are merged
-ROOT = "/home/ag-wichmann/data/otoferlin/tomograms"
-if not os.path.exists(ROOT):
-    ROOT = "./data/tomograms"
-
-SEG_ROOT = "./segmentation/v2"
+from synapse_net.file_utils import read_mrc
+from common import get_all_tomograms, get_seg_path
 
 
 def correct_structure_segmentation(mrc_path):
-    rel_path = os.path.relpath(mrc_path, ROOT)
-    rel_folder, fname = os.path.split(rel_path)
-    fname = os.path.splitext(fname)[0]
-    seg_path = os.path.join(SEG_ROOT, rel_folder, f"{fname}.h5")
+    seg_path = get_seg_path(mrc_path)
 
-    with mrcfile.open(mrc_path, permissive=True) as mrc:
-        data = np.asarray(mrc.data[:])
-    data = np.flip(data, axis=1)
-
-    correction_folder = os.path.join(SEG_ROOT, rel_folder, "correction")
+    data, _ = read_mrc(mrc_path)
+    correction_folder = os.path.join(os.path.split(seg_path)[0], "correction")
+    fname = Path(mrc_path).stem
 
     names = ("ribbon", "PD", "membrane", "veiscles_postprocessed")
     segmentations = {}
@@ -52,10 +41,7 @@ def correct_structure_segmentation(mrc_path):
 
 
 def main():
-    tomograms = glob(os.path.join(ROOT, "**", "*.mrc"), recursive=True)
-    tomograms += glob(os.path.join(ROOT, "**", "*.rec"), recursive=True)
-    tomograms = sorted(tomograms)
-
+    tomograms = get_all_tomograms()
     for tomo in tomograms:
         correct_structure_segmentation(tomo)
 

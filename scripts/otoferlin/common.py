@@ -10,7 +10,7 @@ from synapse_net.tools.util import load_custom_model
 
 # These are the otoferlin tomograms.
 INPUT_ROOT = "/home/ag-wichmann/data/otoferlin/tomograms"
-OUTPUT_ROOT = "/home/ag-wichmann/data/otoferlin/segmentation"
+OUTPUT_ROOT = "./segmentation"
 
 STRUCTURE_NAMES = ("ribbon", "PD", "membrane")
 
