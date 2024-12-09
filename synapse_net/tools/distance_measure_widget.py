@@ -87,7 +87,8 @@ class DistanceMeasureWidget(BaseWidget):
             seg_ids=seg_ids,
         )
         table_data = self._to_table_data(distances, seg_ids, endpoints1, endpoints2)
-        self._add_lines_and_table(lines, table_data, name="distances")
+        structure_layer_name = self._get_layer_selector_layer(self.image_selector_name2).name
+        self._add_lines_and_table(lines, table_data, name="distances-to-" + structure_layer_name)
 
     def on_measure_pairwise(self):
         segmentation = self._get_layer_selector_data(self.image_selector_name1)

@@ -30,10 +30,14 @@ class VesiclePoolWidget(BaseWidget):
         # 2. Selector for a distance layer.
         self.dist_selector_name1 = "Distances to Structure"
         self.dist_selector_widget1 = self._create_layer_selector(self.dist_selector_name1, layer_type="Shapes")
+        # 3. Selector for a second distance layer (optional).
+        self.dist_selector_name2 = "Distances to Structure 2"
+        self.dist_selector_widget2 = self._create_layer_selector(self.dist_selector_name2, layer_type="Shapes")
 
         # Add the selector widgets to the layout.
         layout.addWidget(self.vesicle_selector_widget)
         layout.addWidget(self.dist_selector_widget1)
+        layout.addWidget(self.dist_selector_widget2)
 
         # Create the UI elements for defining the vesicle pools:
         # The name of the output name, the name of the vesicle pool, and the criterion for the pool.
@@ -68,6 +72,8 @@ class VesiclePoolWidget(BaseWidget):
 
         distance_layer = self._get_layer_selector_layer(self.dist_selector_name1)
         distances = None if distance_layer is None else distance_layer.properties
+        distance_layer2 = self._get_layer_selector_layer(self.dist_selector_name2)
+        distances2 = None if distance_layer2 is None else distance_layer2.properties
 
         if segmentation is None:
             show_info("INFO: Please choose a segmentation.")
@@ -87,7 +93,9 @@ class VesiclePoolWidget(BaseWidget):
         pool_name = self.pool_name_param.text()
 
         pool_color = self.pool_color_param.text()
-        self._compute_vesicle_pool(segmentation, distances, morphology, pool_layer_name, pool_name, query, pool_color)
+        self._compute_vesicle_pool(
+            segmentation, distances, morphology, pool_layer_name, pool_name, query, pool_color, distances2
+            )
 
     def _update_pool_colors(self, pool_name, pool_color):
         if pool_color == "":
@@ -107,6 +115,7 @@ class VesiclePoolWidget(BaseWidget):
         pool_name: str,
         query: str,
         pool_color: str,
+        distances2: Dict = None
     ):
         """Compute a vesicle pool based on the provided query parameters.
 
@@ -118,6 +127,7 @@ class VesiclePoolWidget(BaseWidget):
             pool_name: Name for the pooled group to be assigned.
             query: Query parameters.
             pool_color: Optional color for the vesicle pool.
+            distances2: Properties from the second distances layer (optional).
         """
         # Check which of the properties are present and construct the combined properties based on this.
         if distances is None and morphology is None:  # No properties were given -> we can't do anything.
