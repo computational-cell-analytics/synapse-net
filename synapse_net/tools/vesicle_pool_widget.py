@@ -167,6 +167,12 @@ class VesiclePoolWidget(BaseWidget):
             # Combine the vesicle ids corresponding to the previous assignment with the
             # assignment for the new / current pool.
             old_pool_ids = pool_properties.label.values.tolist()
+
+            # Overwrite the intersection of the two pool assignments with the new pool.
+            pool_intersections = np.intersect1d(pool_vesicle_ids, old_pool_ids)
+            old_pool_ids = [item for item in old_pool_ids if item not in pool_intersections]
+            pool_properties = pool_properties[~pool_properties['label'].isin(pool_intersections)]
+
             pool_assignments = sorted(pool_vesicle_ids + old_pool_ids)
 
             # Get a map for each vesicle id to its pool.

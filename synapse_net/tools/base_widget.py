@@ -330,7 +330,8 @@ class BaseWidget(QWidget):
         layer.properties = table_data
 
         if add_table is not None:
-            add_table(layer, self.viewer)
+            with _SilencePrint():
+                add_table(layer, self.viewer)
 
         # Save table to file if save path is provided.
         if save_path != "":
