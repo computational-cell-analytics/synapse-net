@@ -21,8 +21,10 @@ VERSION = 2
 
 
 def get_adapted_model():
-    # Path on nhr, need to put the model on the WS and update this.
-    model_path = "/mnt/vast-nhr/home/pape41/u12086/Work/my_projects/synaptic-reconstruction/scripts/otoferlin/domain_adaptation/checkpoints/otoferlin_da.pt"  # noqa
+    # Path on nhr.
+    # model_path = "/mnt/vast-nhr/home/pape41/u12086/Work/my_projects/synaptic-reconstruction/scripts/otoferlin/domain_adaptation/checkpoints/otoferlin_da.pt"  # noqa
+    # Path on the Workstation.
+    model_path = "/home/ag-wichmann/Downloads/otoferlin_da.pt"
     model = load_custom_model(model_path)
     return model
 
