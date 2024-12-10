@@ -36,8 +36,7 @@ def get_folders():
         return INPUT_ROOT, OUTPUT_ROOT
     root_in = "./data/tomograms"
     assert os.path.exists(root_in)
-    root_out = "./data/segmentation"
-    return root_in, root_out
+    return root_in, OUTPUT_ROOT
 
 
 def get_all_tomograms():
@@ -87,6 +86,12 @@ def load_segmentations(seg_path):
             else:
                 segmentations[out_name] = g[f"{name}"][:]
     return segmentations
+
+
+def to_condition(mrc_path):
+    fname = os.path.basename(mrc_path)
+    # TODO: Is this correct, or is it the otherway round?
+    return "MUT" if fname.startswith("Otof") else "WT"
 
 
 if __name__ == "__main__":

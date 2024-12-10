@@ -1,1 +1,4 @@
 data/
+sync_segmentation.sh
+segmentation/
+results/

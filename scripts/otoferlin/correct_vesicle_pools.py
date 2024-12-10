@@ -18,8 +18,10 @@ def _create_pool_layer(seg, assignment_path):
 
     pool_colors = get_colormaps()["pools"]
     colormap = {}
-    for pool_id, pool_name in enumerate(pool_names, 1):
-        pool_vesicle_ids = assignments[assignments.pool == pool_name].vesicle_id
+    for pool_id, pool_name in enumerate(pool_names):
+        if not isinstance(pool_name, str) and np.isnan(pool_name):
+            continue
+        pool_vesicle_ids = assignments[assignments.pool == pool_name].vesicle_id.values
         pool_mask = np.isin(seg, pool_vesicle_ids)
         pools[pool_mask] = pool_id
         colormap[pool_id] = pool_colors[pool_name]
@@ -37,7 +39,7 @@ def _update_assignments(vesicles, pool_correction, assignment_path):
         correction_val = prop.max_intensity
         if correction_val == 0:
             continue
-        new_assignments[new_assignments.vesicle_id == prop.label] = val_to_pool[correction_val]
+        new_assignments[new_assignments.vesicle_id == prop.label].pool = val_to_pool[correction_val]
 
     new_assignments.to_csv(assignment_path, index=False)
 
@@ -48,6 +50,9 @@ def correct_vesicle_pools(mrc_path):
 
     output_folder = os.path.split(seg_path)[0]
     assignment_path = os.path.join(output_folder, "vesicle_pools.csv")
+    if not os.path.exists(assignment_path):
+        print("Skip", seg_path, "due to missing assignments")
+        return
 
     data, _ = read_mrc(mrc_path)
     segmentations = load_segmentations(seg_path)
@@ -62,6 +67,7 @@ def correct_vesicle_pools(mrc_path):
     vesicle_pools, pool_colors = _create_pool_layer(vesicles, assignment_path)
 
     pool_correction_path = os.path.join(output_folder, "correction", "pool_correction.tif")
+    os.makedirs(os.path.join(output_folder, "correction"), exist_ok=True)
     if os.path.exists(pool_correction_path):
         pool_correction = imageio.imread(pool_correction_path)
     else:
@@ -81,9 +87,10 @@ def correct_vesicle_pools(mrc_path):
         vesicles = viewer.layers["vesicles"].data
         pool_correction = viewer.layers["pool_correction"].data
         _update_assignments(vesicles, pool_correction, assignment_path)
-        imageio.imwrite(pool_correction_path, pool_correction, compression="zlib")
+        # imageio.imwrite(pool_correction_path, pool_correction, compression="zlib")
         pool_data, pool_colors = _create_pool_layer(vesicles, assignment_path)
         viewer.layers["vesicle_pools"].data = pool_data
+        viewer.layers["vesicle_pools"].colormap = pool_colors
 
     v.window.add_dock_widget(update_pools)
 
