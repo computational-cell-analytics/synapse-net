@@ -1,6 +1,8 @@
 import os
 from glob import glob
 
+import imageio.v3 as imageio
+import h5py
 from synapse_net.tools.util import load_custom_model
 
 
@@ -62,16 +64,29 @@ def get_colormaps():
         "Docked-V": (1, 1, 0),
         None: "gray",
     }
+    ribbon_map = {1: "red", None: "gray"}
     membrane_map = {1: "purple", None: "gray"}
     pd_map = {1: "magenta", None: "gray"}
-    return {"pools": pool_map, "membrane": membrane_map, "PD": pd_map}
+    return {"pools": pool_map, "membrane": membrane_map, "PD": pd_map, "ribbon": ribbon_map}
 
 
-# TODO: sync the ukon folder with the tomograms.
-# UKON Path:
-# /run/user/1000/gvfs/smb-share:server=wfs-medizin.top.gwdg.de,share=ukon-all$/UKON100/archiv/EM/For Segmentation
-def sync_tomograms():
-    pass
+def load_segmentations(seg_path):
+    # Keep the typo in the name, as these are the hdf5 keys!
+    seg_names = {"vesicles": "veiscles_postprocessed"}
+    seg_names.update({name: name for name in STRUCTURE_NAMES})
+
+    segmentations = {}
+    correction_folder = os.path.join(os.path.split(seg_path)[0], "correction")
+    with h5py.File(seg_path, "r") as f:
+        g = f["segmentation"]
+        for out_name, name in seg_names.items():
+            correction_path = os.path.join(correction_folder, f"{name}.tif")
+            if os.path.exists(correction_path):
+                print("Loading corrected", name, "segmentation from", correction_path)
+                segmentations[out_name] = imageio.imread(correction_path)
+            else:
+                segmentations[out_name] = g[f"{name}"][:]
+    return segmentations
 
 
 if __name__ == "__main__":
