@@ -73,6 +73,9 @@ class VesiclePoolWidget(BaseWidget):
         distance_layer = self._get_layer_selector_layer(self.dist_selector_name1)
         distances = None if distance_layer is None else distance_layer.properties
         distance_layer2 = self._get_layer_selector_layer(self.dist_selector_name2)
+        # Check if the second distance is the same as the first.
+        if distance_layer2.name == distance_layer.name:
+            distance_layer2 = None
         distances2 = None if distance_layer2 is None else distance_layer2.properties
 
         if segmentation is None:
@@ -153,12 +156,11 @@ class VesiclePoolWidget(BaseWidget):
         # Add distances2 if present.
         if distances2 is not None:
             distance_ids = distances2.get("label", [])
-            if set(distance_ids) != set(morphology_ids):
+            if set(distance_ids) != set(merged_df.label):
                 show_info("ERROR: The IDs in distances2 and morphology are not identical.")
                 return
             distances2 = pd.DataFrame(distances2).drop(columns=["index"])
             merged_df = merged_df.merge(distances2, left_on="label", right_on="label", suffixes=("", "2"))
-            print(merged_df)
         # Assign the vesicles to the current pool by filtering the mergeddataframe based on the query.
         filtered_df = self._parse_query(query, merged_df)
         if len(filtered_df) == 0:

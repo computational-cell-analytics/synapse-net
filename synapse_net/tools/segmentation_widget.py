@@ -116,7 +116,7 @@ class SegmentationWidget(BaseWidget):
             for name, seg in segmentation.items():
                 self.viewer.add_labels(seg, name=name, metadata=metadata)
         else:
-            self.viewer.add_labels(segmentation, name=f"{model_type}-segmentation", metadata=metadata)
+            self.viewer.add_labels(segmentation, name=f"{model_type}", metadata=metadata)
         show_info(f"INFO: Segmentation of {model_type} added to layers.")
 
     def _create_settings_widget(self):
