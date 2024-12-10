@@ -203,6 +203,7 @@ def refine_individual_vesicle_shapes(
     edge_map: np.ndarray,
     foreground_erosion: int = 4,
     background_erosion: int = 8,
+    compactness: float = 0.5,
 ) -> np.ndarray:
     """Refine vesicle shapes by fitting vesicles to a boundary map.
 
@@ -215,6 +216,8 @@ def refine_individual_vesicle_shapes(
             You can use `edge_filter` to compute this based on the tomogram.
         foreground_erosion: By how many pixels the foreground should be eroded in the seeds.
         background_erosion: By how many pixels the background should be eroded in the seeds.
+        compactness: The compactness parameter passed to the watershed function.
+            Higher compactness leads to more regular sized vesicles.
     Returns:
         The refined vesicles.
     """
@@ -250,7 +253,7 @@ def refine_individual_vesicle_shapes(
 
             # Run seeded watershed to fit the shapes.
             seeds = fg_seed + 2 * bg_seed
-            seg[z] = watershed(hmap[z], seeds) == 1
+            seg[z] = watershed(hmap[z], seeds, compactness=compactness) == 1
 
         # import napari
         # v = napari.Viewer()
