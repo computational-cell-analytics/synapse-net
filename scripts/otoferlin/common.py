@@ -53,6 +53,7 @@ def get_all_tomograms(restrict_to_good_tomos=False):
         table = table[table["Einschluss? "] == "ja"]
         fnames = [os.path.basename(row["File name"]) for _, row in table.iterrows()]
         tomograms = [tomo for tomo in tomograms if os.path.basename(tomo) in fnames]
+        assert len(tomograms) == len(table), f"{len(tomograms), len(table)}"
     return tomograms
 
 
