@@ -105,6 +105,8 @@ For more options supported by the IMOD exports, please run `synapse_net.export_t
 ## Python Library
 
 Using the `synapse_net` python library offers the most flexibility for using the SynapseNet functionality.
+You can find an example analysis pipeline implemented with SynapseNet [here](https://github.com/computational-cell-analytics/synapse-net/blob/main/examples/analysis_pipeline.py).
+
 We offer different functionality for segmenting and analyzing synapses in electron microscopy:
 - `synapse_net.inference` for segmenting synaptic structures with [our models](segmentation-models).
 - `synapse_net.distance_measurements` for measuring distances between segmented objects.
