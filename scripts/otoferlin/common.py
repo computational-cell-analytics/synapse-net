@@ -46,7 +46,6 @@ def get_all_tomograms(restrict_to_good_tomos=False):
     tomograms += glob(os.path.join(root, "**", "*.rec"), recursive=True)
     tomograms = sorted(tomograms)
     if restrict_to_good_tomos:
-        # TODO update path to table for the workstation
         table_path = "overview Otoferlin samples.xlsx"
         table = pd.read_excel(table_path)
         table = table[table["Einschluss? "] == "ja"]
@@ -102,5 +101,5 @@ def to_condition(mrc_path):
 
 
 if __name__ == "__main__":
-    tomos = get_all_tomograms()
+    tomos = get_all_tomograms(restrict_to_good_tomos=True)
     print("We have", len(tomos), "tomograms")

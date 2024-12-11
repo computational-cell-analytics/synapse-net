@@ -1,10 +1,14 @@
+import os
 from pathlib import Path
 from shutil import copyfile
 
+import imageio.v3 as imageio
 import napari
 import h5py
 
+from skimage.measure import label
 from tqdm import tqdm
+
 from common import get_all_tomograms, get_seg_path
 from automatic_processing import postprocess_vesicles
 
@@ -43,11 +47,23 @@ def redo_initial_postprocessing():
         postprocess(tomogram, process_center_crop=True)
 
 
+def label_all_vesicles():
+    tomograms = get_all_tomograms(restrict_to_good_tomos=True)
+    for mrc_path in tqdm(tomograms, desc="Process tomograms"):
+        output_path = get_seg_path(mrc_path)
+        output_folder = os.path.split(output_path)[0]
+        vesicle_path = os.path.join(output_folder, "correction", "veiscles_postprocessed.tif")
+        assert os.path.exists(vesicle_path), vesicle_path
+        copyfile(vesicle_path, vesicle_path + ".bkp")
+        vesicles = imageio.imread(vesicle_path)
+        vesicles = label(vesicles)
+        imageio.imwrite(vesicle_path, vesicles, compression="zlib")
+
+
 def main():
-    redo_initial_postprocessing()
-    # TODO TODO TODO
+    # redo_initial_postprocessing()
     # Label all vesicle corrections to make sure everyone has its own id
-    # label_all_vesicles()
+    label_all_vesicles()
 
 
 if __name__:
