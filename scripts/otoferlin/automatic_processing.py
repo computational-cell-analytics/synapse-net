@@ -17,7 +17,10 @@ from common import get_all_tomograms, get_seg_path, get_adapted_model, load_segm
 # These are tomograms for which the sophisticated membrane processing fails.
 # In this case, we just select the largest boundary piece.
 SIMPLE_MEM_POSTPROCESSING = [
-    "Otof_TDAKO1blockA_GridN5_2_rec.mrc", "Otof_TDAKO2blockC_GridF5_1_rec.mrc", "Otof_TDAKO2blockC_GridF5_2_rec.mrc"
+    "Otof_TDAKO1blockA_GridN5_2_rec.mrc", "Otof_TDAKO2blockC_GridF5_1_rec.mrc", "Otof_TDAKO2blockC_GridF5_2_rec.mrc",
+    "Bl6_NtoTDAWT1_blockH_GridF3_1_rec.mrc", "Bl6_NtoTDAWT1_blockH_GridG2_3_rec.mrc", "Otof_TDAKO1blockA_GridN5_5_rec.mrc",
+    "Otof_TDAKO2blockC_GridE2_1_rec.mrc", "Otof_TDAKO2blockC_GridE2_2_rec.mrc",
+
 ]
 
 
@@ -31,7 +34,8 @@ def _get_center_crop(input_):
 
 
 def _get_tiling():
-    tile = {"x": 768, "y": 768, "z": 48}
+    # tile = {"x": 768, "y": 768, "z": 48}
+    tile = {"x": 512, "y": 512, "z": 48}
     halo = {"x": 128, "y": 128, "z": 8}
     return {"tile": tile, "halo": halo}
 
@@ -178,19 +182,19 @@ def process_tomogram(mrc_path):
 
 def main():
     tomograms = get_all_tomograms()
-    for tomogram in tqdm(tomograms, desc="Process tomograms"):
-        process_tomogram(tomogram)
+    # for tomogram in tqdm(tomograms, desc="Process tomograms"):
+    #     process_tomogram(tomogram)
 
     # Update the membrane postprocessing for the tomograms where this went wrong.
-    # for tomo in tqdm(tomograms, desc="Fix membrame postprocesing"):
-    #     if os.path.basename(tomo) not in SIMPLE_MEM_POSTPROCESSING:
-    #         continue
-    #     seg_path = get_seg_path(tomo)
-    #     with h5py.File(seg_path, "r") as f:
-    #         pred = f["prediction/membrane"][:]
-    #     seg = _simple_membrane_postprocessing(pred)
-    #     with h5py.File(seg_path, "a") as f:
-    #         f["segmentation/membrane"][:] = seg
+    for tomo in tqdm(tomograms, desc="Fix membrame postprocesing"):
+        if os.path.basename(tomo) not in SIMPLE_MEM_POSTPROCESSING:
+            continue
+        seg_path = get_seg_path(tomo)
+        with h5py.File(seg_path, "r") as f:
+            pred = f["prediction/membrane"][:]
+        seg = _simple_membrane_postprocessing(pred)
+        with h5py.File(seg_path, "a") as f:
+            f["segmentation/membrane"][:] = seg
 
 
 if __name__ == "__main__":

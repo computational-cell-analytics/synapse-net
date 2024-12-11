@@ -10,13 +10,14 @@ from skimage.measure import label
 from tqdm import tqdm
 
 from common import get_all_tomograms, get_seg_path
+from synapse_net.file_utils import read_mrc
 from automatic_processing import postprocess_vesicles
 
 TOMOS = [
-    "Otof_TDAKO2blockC_GridE2_1",
-    "Otof_TDAKO1blockA_GridN5_3",
-    "Otof_TDAKO1blockA_GridN5_5",
-    "Bl6_NtoTDAWT1_blockH_GridG2_3",
+    "Otof_TDAKO2blockC_GridE2_1_rec",
+    "Otof_TDAKO1blockA_GridN5_3_rec",
+    "Otof_TDAKO1blockA_GridN5_5_rec",
+    "Bl6_NtoTDAWT1_blockH_GridG2_3_rec",
 ]
 
 
@@ -24,13 +25,15 @@ def postprocess(mrc_path, process_center_crop):
     output_path = get_seg_path(mrc_path)
     copyfile(output_path, output_path + ".bkp")
     postprocess_vesicles(
-        mrc_path, output_path, process_center_crop=process_center_crop, force=False
+        mrc_path, output_path, process_center_crop=process_center_crop, force=True
     )
 
+    tomo, _ = read_mrc(mrc_path)
     with h5py.File(output_path, "r") as f:
         ves = f["segmentation/veiscles_postprocessed"][:]
 
     v = napari.Viewer()
+    v.add_image(tomo)
     v.add_labels(ves)
     napari.run()
 
