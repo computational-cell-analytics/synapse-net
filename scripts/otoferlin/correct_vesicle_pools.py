@@ -33,14 +33,17 @@ def _update_assignments(vesicles, pool_correction, assignment_path):
     old_assignments = pd.read_csv(assignment_path)
     props = regionprops(vesicles, pool_correction)
 
-    new_assignments = old_assignments.copy()
-    val_to_pool = {1: "RA-V", 2: "MP-V", 3: "Docked-V", 4: None}
-    for prop in props:
-        correction_val = prop.max_intensity
-        if correction_val == 0:
-            continue
-        new_assignments[new_assignments.vesicle_id == prop.label].pool = val_to_pool[correction_val]
+    val_to_pool = {0: 0, 1: "RA-V", 2: "MP-V", 3: "Docked-V", 4: None}
+    corrected_pools = {prop.label: val_to_pool[int(prop.max_intensity)] for prop in props}
 
+    new_assignments = []
+    for _, row in old_assignments.iterrows():
+        vesicle_id = row.vesicle_id
+        corrected_pool = corrected_pools[vesicle_id]
+        if corrected_pool != 0:
+            row.pool = corrected_pool
+        new_assignments.append(row)
+    new_assignments = pd.DataFrame(new_assignments)
     new_assignments.to_csv(assignment_path, index=False)
 
 
@@ -87,7 +90,6 @@ def correct_vesicle_pools(mrc_path):
         vesicles = viewer.layers["vesicles"].data
         pool_correction = viewer.layers["pool_correction"].data
         _update_assignments(vesicles, pool_correction, assignment_path)
-        # imageio.imwrite(pool_correction_path, pool_correction, compression="zlib")
         pool_data, pool_colors = _create_pool_layer(vesicles, assignment_path)
         viewer.layers["vesicle_pools"].data = pool_data
         viewer.layers["vesicle_pools"].colormap = pool_colors
@@ -98,7 +100,7 @@ def correct_vesicle_pools(mrc_path):
 
 
 def main():
-    tomograms = get_all_tomograms()
+    tomograms = get_all_tomograms(restrict_to_good_tomos=True)
     for tomo in tomograms:
         correct_vesicle_pools(tomo)
 

@@ -3,6 +3,7 @@ from glob import glob
 
 import imageio.v3 as imageio
 import h5py
+import pandas as pd
 from synapse_net.tools.util import load_custom_model
 
 
@@ -39,11 +40,18 @@ def get_folders():
     return root_in, OUTPUT_ROOT
 
 
-def get_all_tomograms():
+def get_all_tomograms(restrict_to_good_tomos=False):
     root, _ = get_folders()
     tomograms = glob(os.path.join(root, "**", "*.mrc"), recursive=True)
     tomograms += glob(os.path.join(root, "**", "*.rec"), recursive=True)
     tomograms = sorted(tomograms)
+    if restrict_to_good_tomos:
+        # TODO update path to table for the workstation
+        table_path = "overview Otoferlin samples.xlsx"
+        table = pd.read_excel(table_path)
+        table = table[table["Einschluss? "] == "ja"]
+        fnames = [os.path.basename(row["File name"]) for _, row in table.iterrows()]
+        tomograms = [tomo for tomo in tomograms if os.path.basename(tomo) in fnames]
     return tomograms
 
 
@@ -90,8 +98,7 @@ def load_segmentations(seg_path):
 
 def to_condition(mrc_path):
     fname = os.path.basename(mrc_path)
-    # TODO: Is this correct, or is it the otherway round?
-    return "MUT" if fname.startswith("Otof") else "WT"
+    return "TDA KO" if fname.startswith("Otof") else "TDA WT"
 
 
 if __name__ == "__main__":
