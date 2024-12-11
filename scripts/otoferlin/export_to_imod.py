@@ -1,14 +1,18 @@
 import os
+from subprocess import run
 
 import numpy as np
 import pandas as pd
 
+from tqdm import tqdm
 from synapse_net.imod.to_imod import write_segmentation_to_imod,  write_segmentation_to_imod_as_points
 from common import STRUCTURE_NAMES, get_all_tomograms, get_seg_path, load_segmentations
-from tqdm import tqdm
 
 
-# TODO check if we need to remove offset from mrc
+def check_imod(mrc_path, mod_path):
+    run(["imod", mrc_path, mod_path])
+
+
 def export_tomogram(mrc_path, force):
     seg_path = get_seg_path(mrc_path)
     output_folder = os.path.split(seg_path)[0]
@@ -27,43 +31,32 @@ def export_tomogram(mrc_path, force):
     for name in STRUCTURE_NAMES:
         export_path = os.path.join(export_folder, f"{name}.mod")
         write_segmentation_to_imod(mrc_path, segmentations[name], export_path)
+        # check_imod(mrc_path, export_path)
 
     # Load the pool assignments and export the pools to IMOD.
     assignment_path = os.path.join(output_folder, "vesicle_pools.csv")
     assignments = pd.read_csv(assignment_path)
 
     pools = pd.unique(assignments.pool)
-    radius_factor = 1.0  # TODO!
+    # TODO: discuss this with Clara, not sure how to handle this with the irregular vesicles.
+    radius_factor = 1.0
     for pool in pools:
         export_path = os.path.join(export_folder, f"{pool}.mod")
-        pool_ids = assignments[assignments.pool == pool].vesicle_ids
+        pool_ids = assignments[assignments.pool == pool].vesicle_id
         pool_seg = vesicles.copy()
         pool_seg[~np.isin(pool_seg, pool_ids)] = 0
         write_segmentation_to_imod_as_points(
             mrc_path, pool_seg, export_path, min_radius=5, radius_factor=radius_factor
         )
-
-    # TODO: read measurements for ribbon and PD volume / surface from IMOD.
-    # - convert to meshes
-    # - smooth the meshes
-    # - run imodinfo to get the measurements
-    measures = pd.DataFrame({
-    })
-    return measures
+        # check_imod(mrc_path, export_path)
 
 
 def main():
-    force = False
-    tomograms = get_all_tomograms()
+    force = True
+    tomograms = get_all_tomograms(restrict_to_good_tomos=True)
 
-    measurements = []
     for tomogram in tqdm(tomograms, desc="Process tomograms"):
-        measures = export_tomogram(tomogram, force)
-        measurements.append(measures)
-
-    save_path = "./data/structure_measurements.xlsx"
-    measurements = pd.concat(measurements)
-    measurements.to_excel(save_path, index=False)
+        export_tomogram(tomogram, force)
 
 
 if __name__ == "__main__":

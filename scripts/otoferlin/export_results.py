@@ -96,6 +96,7 @@ def export_diameter(tomograms, result_path):
     _export_results(tomograms, result_path, result_extraction)
 
 
+# FIXME: update the counting and analysis of MP-V vesicles (include Docked-V, see Caro's mail for details)
 def main():
     tomograms = get_all_tomograms()
     result_folder = get_output_folder()
