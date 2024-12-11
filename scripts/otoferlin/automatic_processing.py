@@ -12,7 +12,7 @@ from synapse_net.inference.vesicles import segment_vesicles
 from synapse_net.tools.util import get_model, compute_scale_from_voxel_size, _segment_ribbon_AZ
 from tqdm import tqdm
 
-from common import get_all_tomograms, get_seg_path, get_adapted_model
+from common import get_all_tomograms, get_seg_path, get_adapted_model, load_segmentations
 
 # These are tomograms for which the sophisticated membrane processing fails.
 # In this case, we just select the largest boundary piece.
@@ -115,10 +115,12 @@ def process_ribbon_structures(mrc_path, output_path, process_center_crop):
             f.create_dataset(f"prediction/{name}", data=predictions[name], compression="gzip")
 
 
-def postprocess_vesicles(mrc_path, output_path, process_center_crop):
+def postprocess_vesicles(
+    mrc_path, output_path, process_center_crop, force=False
+):
     key = "segmentation/veiscles_postprocessed"
     with h5py.File(output_path, "r") as f:
-        if key in f:
+        if key in f and not force:
             return
         vesicles = f["segmentation/vesicles"][:]
         if process_center_crop:
@@ -127,8 +129,9 @@ def postprocess_vesicles(mrc_path, output_path, process_center_crop):
         else:
             bb = np.s_[:]
 
-        ribbon = f["segmentation/ribbon"][bb]
-        membrane = f["segmentation/membrane"][bb]
+    segs = load_segmentations(output_path)
+    ribbon = segs["ribbon"][bb]
+    membrane = segs["membrane"][bb]
 
     # Filter out small vesicle fragments.
     min_size = 5000
@@ -155,7 +158,10 @@ def postprocess_vesicles(mrc_path, output_path, process_center_crop):
         full_seg[bb] = vesicles
         vesicles = full_seg
     with h5py.File(output_path, "a") as f:
-        f.create_dataset(key, data=vesicles, compression="gzip")
+        if key in f:
+            f[key][:] = vesicles
+        else:
+            f.create_dataset(key, data=vesicles, compression="gzip")
 
 
 def process_tomogram(mrc_path):
