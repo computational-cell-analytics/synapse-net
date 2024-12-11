@@ -6,9 +6,16 @@ import pandas as pd
 from synapse_net.distance_measurements import measure_segmentation_to_object_distances, load_distances
 from synapse_net.file_utils import read_mrc
 from synapse_net.imod.to_imod import convert_segmentation_to_spheres
+from skimage.measure import label
 from tqdm import tqdm
 
 from common import STRUCTURE_NAMES, get_all_tomograms, get_seg_path, load_segmentations
+
+
+def ensure_labeled(vesicles):
+    n_ids = len(np.unique(vesicles))
+    n_ids_labeled = len(np.unique(label(vesicles)))
+    assert n_ids == n_ids_labeled, f"{n_ids}, {n_ids_labeled}"
 
 
 def measure_distances(mrc_path, seg_path, output_folder, force):
@@ -23,6 +30,7 @@ def measure_distances(mrc_path, seg_path, output_folder, force):
     # Load the segmentations.
     segmentations = load_segmentations(seg_path)
     vesicles = segmentations["vesicles"]
+    ensure_labeled(vesicles)
     structures = {name: segmentations[name] for name in STRUCTURE_NAMES}
 
     # Measure all the object distances.
@@ -109,7 +117,7 @@ def process_tomogram(mrc_path, force):
 
 def main():
     force = True
-    tomograms = get_all_tomograms()
+    tomograms = get_all_tomograms(restrict_to_good_tomos=True, restrict_to_nachgeb=True)
     for tomogram in tqdm(tomograms, desc="Process tomograms"):
         process_tomogram(tomogram, force)
 

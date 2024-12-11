@@ -11,14 +11,19 @@ from skimage.measure import regionprops
 from common import load_segmentations, get_seg_path, get_all_tomograms, get_colormaps, STRUCTURE_NAMES
 
 
+# FIXME: adding vesicles to pool doesn't work / messes with color map
 def _create_pool_layer(seg, assignment_path):
     assignments = pd.read_csv(assignment_path)
-    pool_names = pd.unique(assignments.pool).tolist()
     pools = np.zeros_like(seg)
 
     pool_colors = get_colormaps()["pools"]
-    colormap = {}
-    for pool_id, pool_name in enumerate(pool_names):
+    colormap = {None: "gray", 0: (0, 0, 0, 0)}
+
+    # Sorting of floats and ints by np.unique is weird. We better don't trust unique here
+    # It should not matter if one of the pools is empty.
+    pool_names = ["RA-V", "MP-V", "Docked-V"]
+
+    for pool_id, pool_name in enumerate(pool_names, 1):
         if not isinstance(pool_name, str) and np.isnan(pool_name):
             continue
         pool_vesicle_ids = assignments[assignments.pool == pool_name].vesicle_id.values
@@ -95,6 +100,7 @@ def correct_vesicle_pools(mrc_path):
         viewer.layers["vesicle_pools"].colormap = pool_colors
 
     v.window.add_dock_widget(update_pools)
+    v.title = os.path.basename(mrc_path)
 
     napari.run()
 

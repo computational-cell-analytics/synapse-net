@@ -40,7 +40,7 @@ def get_folders():
     return root_in, OUTPUT_ROOT
 
 
-def get_all_tomograms(restrict_to_good_tomos=False):
+def get_all_tomograms(restrict_to_good_tomos=False, restrict_to_nachgeb=False):
     root, _ = get_folders()
     tomograms = glob(os.path.join(root, "**", "*.mrc"), recursive=True)
     tomograms += glob(os.path.join(root, "**", "*.rec"), recursive=True)
@@ -51,6 +51,8 @@ def get_all_tomograms(restrict_to_good_tomos=False):
         table_wt = pd.read_excel(table_path, sheet_name="Wt")
         table = pd.concat([table_mut, table_wt])
         table = table[table["Einschluss? "] == "ja"]
+        if restrict_to_nachgeb:
+            table = table[table["nachgebessert"] == "ja"]
         fnames = [os.path.basename(row["File name"]) for _, row in table.iterrows()]
         tomograms = [tomo for tomo in tomograms if os.path.basename(tomo) in fnames]
         assert len(tomograms) == len(table), f"{len(tomograms), len(table)}"
@@ -73,9 +75,9 @@ def get_colormaps():
         "Docked-V": (1, 1, 0),
         None: "gray",
     }
-    ribbon_map = {1: "red", None: "gray"}
-    membrane_map = {1: "purple", None: "gray"}
-    pd_map = {1: "magenta", None: "gray"}
+    ribbon_map = {1: "red", None: (0, 0, 0, 0)}
+    membrane_map = {1: "purple", None: (0, 0, 0, 0)}
+    pd_map = {1: "magenta", None: (0, 0, 0, 0)}
     return {"pools": pool_map, "membrane": membrane_map, "PD": pd_map, "ribbon": ribbon_map}
 
 
@@ -104,5 +106,5 @@ def to_condition(mrc_path):
 
 
 if __name__ == "__main__":
-    tomos = get_all_tomograms(restrict_to_good_tomos=True)
+    tomos = get_all_tomograms(restrict_to_good_tomos=True, restrict_to_nachgeb=True)
     print("We have", len(tomos), "tomograms")
