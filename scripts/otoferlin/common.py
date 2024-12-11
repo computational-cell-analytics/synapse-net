@@ -47,7 +47,9 @@ def get_all_tomograms(restrict_to_good_tomos=False):
     tomograms = sorted(tomograms)
     if restrict_to_good_tomos:
         table_path = "overview Otoferlin samples.xlsx"
-        table = pd.read_excel(table_path)
+        table_mut = pd.read_excel(table_path, sheet_name="Mut")
+        table_wt = pd.read_excel(table_path, sheet_name="Wt")
+        table = pd.concat([table_mut, table_wt])
         table = table[table["Einschluss? "] == "ja"]
         fnames = [os.path.basename(row["File name"]) for _, row in table.iterrows()]
         tomograms = [tomo for tomo in tomograms if os.path.basename(tomo) in fnames]
