@@ -47,9 +47,8 @@ def measure_distances(mrc_path, seg_path, output_folder, force):
 def _measure_radii(seg_path):
     segmentations = load_segmentations(seg_path)
     vesicles = segmentations["vesicles"]
-    # TODO should we update this to account for elongated vesicles?
-    # TODO should we update this with different radius factors? (check IMOD export)
-    _, radii = convert_segmentation_to_spheres(vesicles, radius_factor=1.0)
+    # The radius factor of 0.85 yields the best fit to vesicles in IMOD.
+    _, radii = convert_segmentation_to_spheres(vesicles, radius_factor=0.85)
     return np.array(radii)
 
 
@@ -122,5 +121,5 @@ def main():
         process_tomogram(tomogram, force)
 
 
-if __name__:
+if __name__ == "__main__":
     main()

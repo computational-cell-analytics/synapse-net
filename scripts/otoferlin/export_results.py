@@ -41,13 +41,22 @@ def _export_results(tomograms, result_path, result_extraction):
             res.to_excel(result_path, sheet_name=condition, index=False)
 
 
+def load_measures(measure_path, min_radius=5):
+    measures = pd.read_csv(measure_path).dropna()
+    measures = measures[measures.radius > min_radius]
+    return measures
+
+
 def export_vesicle_pools(tomograms, result_path):
 
     def result_extraction(tomo):
         folder = os.path.split(get_seg_path(tomo))[0]
         measure_path = os.path.join(folder, "vesicle_pools.csv")
-        measures = pd.read_csv(measure_path).dropna()
+        measures = load_measures(measure_path)
         pool_names, counts = np.unique(measures.pool.values, return_counts=True)
+        pool_names, counts = pool_names.tolist(), counts.tolist()
+        pool_names.append("MP-V_all")
+        counts.append(counts[pool_names.index("MP-V")] + counts[pool_names.index("Docked-V")])
         res = {"tomogram": [os.path.basename(tomo)]}
         res.update({k: v for k, v in zip(pool_names, counts)})
         res = pd.DataFrame(res)
@@ -60,7 +69,7 @@ def export_distances(tomograms, result_path):
     def result_extraction(tomo):
         folder = os.path.split(get_seg_path(tomo))[0]
         measure_path = os.path.join(folder, "vesicle_pools.csv")
-        measures = pd.read_csv(measure_path).dropna()
+        measures = load_measures(measure_path)
 
         measures = measures[measures.pool.isin(["MP-V", "Docked-V"])][["vesicle_id", "pool"]]
 
@@ -86,7 +95,7 @@ def export_diameter(tomograms, result_path):
     def result_extraction(tomo):
         folder = os.path.split(get_seg_path(tomo))[0]
         measure_path = os.path.join(folder, "vesicle_pools.csv")
-        measures = pd.read_csv(measure_path).dropna()
+        measures = load_measures(measure_path)
 
         measures = measures[measures.pool.isin(["MP-V", "Docked-V"])][["pool", "diameter"]]
         measures.insert(0, "tomogram", len(measures) * [os.path.basename(tomo)])
@@ -96,9 +105,8 @@ def export_diameter(tomograms, result_path):
     _export_results(tomograms, result_path, result_extraction)
 
 
-# FIXME: update the counting and analysis of MP-V vesicles (include Docked-V, see Caro's mail for details)
 def main():
-    tomograms = get_all_tomograms()
+    tomograms = get_all_tomograms(restrict_to_good_tomos=True)
     result_folder = get_output_folder()
 
     result_path = os.path.join(result_folder, "vesicle_pools.xlsx")

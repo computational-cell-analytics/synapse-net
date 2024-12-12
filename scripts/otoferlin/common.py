@@ -40,17 +40,22 @@ def get_folders():
     return root_in, OUTPUT_ROOT
 
 
+def load_table():
+    table_path = "overview Otoferlin samples.xlsx"
+    table_mut = pd.read_excel(table_path, sheet_name="Mut")
+    table_wt = pd.read_excel(table_path, sheet_name="Wt")
+    table = pd.concat([table_mut, table_wt])
+    table = table[table["Einschluss? "] == "ja"]
+    return table
+
+
 def get_all_tomograms(restrict_to_good_tomos=False, restrict_to_nachgeb=False):
     root, _ = get_folders()
     tomograms = glob(os.path.join(root, "**", "*.mrc"), recursive=True)
     tomograms += glob(os.path.join(root, "**", "*.rec"), recursive=True)
     tomograms = sorted(tomograms)
     if restrict_to_good_tomos:
-        table_path = "overview Otoferlin samples.xlsx"
-        table_mut = pd.read_excel(table_path, sheet_name="Mut")
-        table_wt = pd.read_excel(table_path, sheet_name="Wt")
-        table = pd.concat([table_mut, table_wt])
-        table = table[table["Einschluss? "] == "ja"]
+        table = load_table()
         if restrict_to_nachgeb:
             table = table[table["nachgebessert"] == "ja"]
         fnames = [os.path.basename(row["File name"]) for _, row in table.iterrows()]
@@ -75,13 +80,13 @@ def get_colormaps():
         "Docked-V": (1, 1, 0),
         None: "gray",
     }
-    ribbon_map = {1: "red", None: (0, 0, 0, 0)}
+    ribbon_map = {1: "red", 2: "red", None: (0, 0, 0, 0), 0: (0, 0, 0, 0)}
     membrane_map = {1: "purple", None: (0, 0, 0, 0)}
-    pd_map = {1: "magenta", None: (0, 0, 0, 0)}
+    pd_map = {1: "magenta", 2: "magenta", None: (0, 0, 0, 0)}
     return {"pools": pool_map, "membrane": membrane_map, "PD": pd_map, "ribbon": ribbon_map}
 
 
-def load_segmentations(seg_path):
+def load_segmentations(seg_path, verbose=True):
     # Keep the typo in the name, as these are the hdf5 keys!
     seg_names = {"vesicles": "veiscles_postprocessed"}
     seg_names.update({name: name for name in STRUCTURE_NAMES})
@@ -93,7 +98,8 @@ def load_segmentations(seg_path):
         for out_name, name in seg_names.items():
             correction_path = os.path.join(correction_folder, f"{name}.tif")
             if os.path.exists(correction_path):
-                print("Loading corrected", name, "segmentation from", correction_path)
+                if verbose:
+                    print("Loading corrected", name, "segmentation from", correction_path)
                 segmentations[out_name] = imageio.imread(correction_path)
             else:
                 segmentations[out_name] = g[f"{name}"][:]
