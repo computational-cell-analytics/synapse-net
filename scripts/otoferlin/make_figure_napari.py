@@ -49,7 +49,8 @@ def plot_napari(mrc_path):
         color = colors[name]
         color = tuple(c / float(255) for c in color)
         cmap = {1: color, None: (0, 0, 0)}
-        v.add_labels(segmentations[name], colormap=cmap, scale=voxel_size, name=name)
+        seg = (segmentations[name] > 0).astype("uint8")
+        v.add_labels(seg, colormap=cmap, scale=voxel_size, name=name)
     v.scale_bar.visible = True
     v.scale_bar.unit = "nm"
     v.scale_bar.font_size = 18
