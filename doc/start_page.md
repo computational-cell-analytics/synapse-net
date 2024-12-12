@@ -32,7 +32,7 @@ git clone https://github.com/computational-cell-analytics/synapse-net
 ```bash
 cd synapse-net
 ```
-- Now you can install the environment for SynapseNet with `conda` from the environment file we proved:
+- Now you can install the environment for SynapseNet with `conda` from the environment file we provided:
 ```bash
 conda env create -f environment.yaml
 ```
@@ -62,11 +62,11 @@ to use them.
 
 We currently offer 7 different models for segmenting synaptic structures:
 - `vesicles_3d` to segment vesicles in (room-temperature) electron tomograms.
-- `vesicles_2d` to segment vesicles in two-dimensional electron migrographs.
+- `vesicles_2d` to segment vesicles in two-dimensional electron micrographs.
 - `vesicles_cryo` to segment vesicles in cryogenic electron tomograms.
-- `active_zone` to sement active zones in electron tomograms.
+- `active_zone` to segment active zones in electron tomograms.
 - `compartments` to segment synaptic compartments in electron tomograms.
-- `mitochondria` to segmenta mitochondria in electron tomograms.
+- `mitochondria` to segment mitochondria in electron tomograms.
 - `ribbon` to segment structures of the active zones in ribbon synapses (ribbon, presynaptic density and active zone membrane) in electron tomograms.
 
 
