@@ -37,6 +37,7 @@ def write_segmentation_to_imod(
     segmentation: Union[str, np.ndarray],
     output_path: str,
     segmentation_key: Optional[str] = None,
+    color: Optional[Tuple[int, int, int]] = None,
 ) -> None:
     """Write a segmentation to a mod file as closed contour object(s).
 
@@ -45,6 +46,7 @@ def write_segmentation_to_imod(
         segmentation: The segmentation (either as numpy array or filepath to a .tif file).
         output_path: The output path where the mod file will be saved.
         segmentation_key: The key to the segmentation data in case the segmentation is stored in hdf5 files.
+        color: Optional color for the exported model.
     """
     cmd = "imodauto"
     cmd_path = shutil.which(cmd)
@@ -83,6 +85,10 @@ def write_segmentation_to_imod(
 
         # Run the command.
         cmd_list = [cmd, "-E", "1", "-u", tmp_path, output_path]
+        if color is not None:
+            assert len(color) == 3
+            r, g, b = [str(co) for co in color]
+            cmd_list += ["-co", f"{r} {g} {b}"]
         run(cmd_list)
 
 
@@ -172,6 +178,7 @@ def write_points_to_imod(
     min_radius: Union[float, int],
     output_path: str,
     color: Optional[Tuple[int, int, int]] = None,
+    name: Optional[str] = None,
 ) -> None:
     """Write point annotations to a .mod file for IMOD.
 
@@ -182,6 +189,7 @@ def write_points_to_imod(
         min_radius: Minimum radius for export.
         output_path: Where to save the .mod file.
         color: Optional color for writing out the points.
+        name: Optional name for the exported model.
     """
     cmd = "point2model"
     cmd_path = shutil.which(cmd)
@@ -210,6 +218,8 @@ def write_points_to_imod(
             assert len(color) == 3
             r, g, b = [str(co) for co in color]
             cmd += ["-co", f"{r} {g} {b}"]
+        if name is not None:
+            cmd += ["-name", name]
 
         run(cmd)
 
@@ -222,6 +232,8 @@ def write_segmentation_to_imod_as_points(
     radius_factor: float = 1.0,
     estimate_radius_2d: bool = True,
     segmentation_key: Optional[str] = None,
+    color: Optional[Tuple[int, int, int]] = None,
+    name: Optional[str] = None,
 ) -> None:
     """Write segmentation results to .mod file with imod point annotations.
 
@@ -237,6 +249,8 @@ def write_segmentation_to_imod_as_points(
             the radius will be computed only in 2d rather than in 3d. This can lead to better results
             in case of deformation across the depth axis.
         segmentation_key: The key to the segmentation data in case the segmentation is stored in hdf5 files.
+        color: Optional color for writing out the points.
+        name: Optional name for the exported model.
     """
 
     # Read the resolution information from the mrcfile.
@@ -254,7 +268,7 @@ def write_segmentation_to_imod_as_points(
     )
 
     # Write the point annotations to imod.
-    write_points_to_imod(coordinates, radii, segmentation.shape, min_radius, output_path)
+    write_points_to_imod(coordinates, radii, segmentation.shape, min_radius, output_path, color=color, name=name)
 
 
 def _get_file_paths(input_path, ext=(".mrc", ".rec")):
