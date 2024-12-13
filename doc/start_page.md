@@ -32,7 +32,7 @@ git clone https://github.com/computational-cell-analytics/synapse-net
 ```bash
 cd synapse-net
 ```
-- Now you can install the environment for SynapseNet with `conda` from the environment file we provided:
+- Now you can install the environment for SynapseNet with `conda` from the environment file we provide:
 ```bash
 conda env create -f environment.yaml
 ```
