@@ -1,5 +1,8 @@
 import os
+import platform
+import sys
 import unittest
+
 from subprocess import run
 from shutil import rmtree
 
@@ -41,25 +44,45 @@ class TestCLI(unittest.TestCase):
         # napari.run()
 
     def test_segmentation_cli(self):
-        cmd = ["synapse_net.run_segmentation", "-i", self.data_path, "-o", self.tmp_dir, "-m", "vesicles_2d"]
+        if platform.system() == "Windows":
+            cmd = [
+                sys.executable, "-m",  "synapse_net.run_segmentation",
+                "-i", self.data_path, "-o", self.tmp_dir, "-m", "vesicles_2d"
+            ]
+        else:
+            cmd = ["synapse_net.run_segmentation", "-i", self.data_path, "-o", self.tmp_dir, "-m", "vesicles_2d"]
         run(cmd)
         self.check_segmentation_result()
 
     def test_segmentation_cli_with_scale(self):
-        cmd = [
-            "synapse_net.run_segmentation", "-i", self.data_path, "-o", self.tmp_dir, "-m", "vesicles_2d",
-            "--scale", "0.5"
-        ]
+        if platform.system() == "Windows":
+            cmd = [
+                sys.executable, "-m", "synapse_net.run_segmentation",
+                "-i", self.data_path, "-o", self.tmp_dir, "-m", "vesicles_2d",
+                "--scale", "0.5"
+            ]
+        else:
+            cmd = [
+                "synapse_net.run_segmentation", "-i", self.data_path, "-o", self.tmp_dir, "-m", "vesicles_2d",
+                "--scale", "0.5"
+            ]
         run(cmd)
         self.check_segmentation_result()
 
     def test_segmentation_cli_with_checkpoint(self):
         cache_dir = os.path.expanduser(pooch.os_cache("synapse-net"))
         model_path = os.path.join(cache_dir, "models", "vesicles_2d")
-        cmd = [
-            "synapse_net.run_segmentation", "-i", self.data_path, "-o", self.tmp_dir, "-m", "vesicles_2d",
-            "-c", model_path,
-        ]
+        if platform.system() == "Windows":
+            cmd = [
+                sys.executable, "-m", "synapse_net.run_segmentation",
+                "-i", self.data_path, "-o", self.tmp_dir, "-m", "vesicles_2d",
+                "-c", model_path,
+            ]
+        else:
+            cmd = [
+                "synapse_net.run_segmentation", "-i", self.data_path, "-o", self.tmp_dir, "-m", "vesicles_2d",
+                "-c", model_path,
+            ]
         run(cmd)
         self.check_segmentation_result()
 
