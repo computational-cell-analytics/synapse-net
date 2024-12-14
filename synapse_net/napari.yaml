@@ -22,6 +22,9 @@ contributions:
     - id: synapse_net.vesicle_pooling
       python_name: synapse_net.tools.vesicle_pool_widget:VesiclePoolWidget
       title: Pool Assignment
+    - id: synapse_net.postprocessing
+      python_name: synapse_net.tools.postprocessing_widget:PostprocessingWidget
+      title: Segmentation Postprocessing
 
     # Commands for sample data.
     - id: synapse_net.sample_data_tem_2d
@@ -48,6 +51,8 @@ contributions:
       display_name: Morphology Analysis
     - command: synapse_net.vesicle_pooling
       display_name: Pool Assignment
+    - command: synapse_net.postprocessing
+      display_name: Segmentation Postprocessing
 
   sample_data:
     - command: synapse_net.sample_data_tem_2d

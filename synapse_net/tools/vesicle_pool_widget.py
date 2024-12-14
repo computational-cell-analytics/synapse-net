@@ -15,7 +15,6 @@ from .base_widget import BaseWidget
 COLORMAP = ["red", "blue", "yellow", "cyan", "purple", "magenta", "orange", "green"]
 
 
-# TODO Make selection of the distance layers optional and add a second distance layer.
 class VesiclePoolWidget(BaseWidget):
     def __init__(self):
         super().__init__()
