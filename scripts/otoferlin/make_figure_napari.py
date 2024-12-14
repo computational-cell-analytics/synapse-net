@@ -18,7 +18,7 @@ colors = {
 }
 
 
-def plot_napari(mrc_path):
+def plot_napari(mrc_path, rotate=False):
     data, voxel_size = read_mrc(mrc_path)
     voxel_size = tuple(voxel_size[ax] for ax in "zyx")
 
@@ -41,6 +41,11 @@ def plot_napari(mrc_path):
         color = colors.get(pool_name)
         color = tuple(c / float(255) for c in color)
         pool_colors[pool_id] = color
+
+    if rotate:
+        data = np.rot90(data, k=3, axes=(1, 2))
+        pools = np.rot90(pools, k=3, axes=(1, 2))
+        segmentations = {name: np.rot90(segmentations[name], k=3, axes=(1, 2)) for name in STRUCTURE_NAMES}
 
     v = napari.Viewer()
     v.add_image(data, scale=voxel_size)
@@ -68,7 +73,7 @@ def main():
         fname = os.path.basename(tomogram)
         if fname not in tomograms_for_vis:
             continue
-        plot_napari(tomogram)
+        plot_napari(tomogram, rotate=fname.startswith("Otof"))
 
 
 main()

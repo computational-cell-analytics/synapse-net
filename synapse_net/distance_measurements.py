@@ -226,6 +226,7 @@ def measure_segmentation_to_object_distances(
     resolution: Optional[Tuple[int, int, int]] = None,
     save_path: Optional[os.PathLike] = None,
     verbose: bool = False,
+    return_object_ids: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Compute the distance betwen all objects in a segmentation and another object.
 
@@ -238,6 +239,7 @@ def measure_segmentation_to_object_distances(
         resolution: The resolution / pixel size of the data.
         save_path: Path for saving the measurement results in numpy zipped format.
         verbose: Whether to print the progress of the distance computation.
+        return_object_ids: Whether to also return the object ids.
 
     Returns:
         The segmentation to object distances.
@@ -262,7 +264,10 @@ def measure_segmentation_to_object_distances(
             seg_ids=seg_ids,
             object_ids=object_ids,
         )
-    return distances, endpoints1, endpoints2, seg_ids
+    if return_object_ids:
+        return distances, endpoints1, endpoints2, seg_ids, objet_ids
+    else:
+        return distances, endpoints1, endpoints2, seg_ids
 
 
 def _extract_nearest_neighbors(pairwise_distances, seg_ids, n_neighbors, remove_duplicates=True):
@@ -292,12 +297,13 @@ def _extract_nearest_neighbors(pairwise_distances, seg_ids, n_neighbors, remove_
 
 
 def load_distances(
-    measurement_path: os.PathLike
+    measurement_path: os.PathLike, return_object_ids: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Load the saved distacnes from a zipped numpy file.
 
     Args:
         measurement_path: The path where the distances where saved.
+        return_object_ids: Whether to also return the object ids.
 
     Returns:
         The segmentation to object distances.
@@ -308,7 +314,11 @@ def load_distances(
     auto_dists = np.load(measurement_path)
     distances, seg_ids = auto_dists["distances"], list(auto_dists["seg_ids"])
     endpoints1, endpoints2 = auto_dists["endpoints1"], auto_dists["endpoints2"]
-    return distances, endpoints1, endpoints2, seg_ids
+    if return_object_ids:
+        object_ids = auto_dists["object_ids"]
+        return distances, endpoints1, endpoints2, seg_ids, object_ids
+    else:
+        return distances, endpoints1, endpoints2, seg_ids
 
 
 def create_pairwise_distance_lines(

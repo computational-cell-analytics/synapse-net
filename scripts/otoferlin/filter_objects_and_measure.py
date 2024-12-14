@@ -77,5 +77,5 @@ def main():
         process_tomogram(tomogram, force)
 
 
-if __name__:
+if __name__ == "__main__":
     main()

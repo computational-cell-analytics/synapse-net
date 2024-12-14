@@ -47,20 +47,30 @@ def load_measures(measure_path, min_radius=5):
     return measures
 
 
+def count_vesicle_pools(measures, ribbon_id, tomo):
+    ribbon_measures = measures[measures.ribbon_id == ribbon_id]
+    pool_names, counts = np.unique(ribbon_measures.pool.values, return_counts=True)
+    pool_names, counts = pool_names.tolist(), counts.tolist()
+    pool_names.append("MP-V_all")
+    counts.append(counts[pool_names.index("MP-V")] + counts[pool_names.index("Docked-V")])
+    res = {"tomogram": [os.path.basename(tomo)], "ribbon": ribbon_id}
+    res.update({k: v for k, v in zip(pool_names, counts)})
+    return pd.DataFrame(res)
+
+
 def export_vesicle_pools(tomograms, result_path):
 
     def result_extraction(tomo):
         folder = os.path.split(get_seg_path(tomo))[0]
         measure_path = os.path.join(folder, "vesicle_pools.csv")
         measures = load_measures(measure_path)
-        pool_names, counts = np.unique(measures.pool.values, return_counts=True)
-        pool_names, counts = pool_names.tolist(), counts.tolist()
-        pool_names.append("MP-V_all")
-        counts.append(counts[pool_names.index("MP-V")] + counts[pool_names.index("Docked-V")])
-        res = {"tomogram": [os.path.basename(tomo)]}
-        res.update({k: v for k, v in zip(pool_names, counts)})
-        res = pd.DataFrame(res)
-        return res
+        ribbon_ids = pd.unique(measures.ribbon_id)
+
+        results = []
+        for ribbon_id in ribbon_ids:
+            res = count_vesicle_pools(measures, ribbon_id, tomo)
+            results.append(res)
+        return pd.concat(results)
 
     _export_results(tomograms, result_path, result_extraction)
 
