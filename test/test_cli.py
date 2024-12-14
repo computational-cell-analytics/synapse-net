@@ -13,7 +13,7 @@ from synapse_net.sample_data import get_sample_data
 
 
 class TestCLI(unittest.TestCase):
-    tmp_dir = "./tmp"
+    tmp_dir = "tmp"
 
     def setUp(self):
         self.data_path = get_sample_data("tem_2d")
