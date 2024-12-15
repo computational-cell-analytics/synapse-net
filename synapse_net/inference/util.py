@@ -344,6 +344,7 @@ def inference_helper(
         assert len(input_files) == len(mask_files)
 
     for i, img_path in tqdm(enumerate(input_files), total=len(input_files), desc="Processing files"):
+        print("!!!!!!!!!!!!!!!!!1 start segmentation for", img_path)
         # Determine the output file name.
         input_folder, input_name = os.path.split(img_path)
 
@@ -396,6 +397,7 @@ def inference_helper(
             with open_file(output_path, "a") as f:
                 f.create_dataset(output_key, data=segmentation, compression="gzip")
 
+        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!11 segmentation done")
         print(f"Saved segmentation to {output_path}.")
 
 
