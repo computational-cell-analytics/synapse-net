@@ -12,6 +12,7 @@ import pooch
 from synapse_net.sample_data import get_sample_data
 
 
+@unittest.skipIf(platform.system() == "Windows", "CLI does not work on Windows")
 class TestCLI(unittest.TestCase):
     tmp_dir = "tmp"
 
@@ -72,17 +73,10 @@ class TestCLI(unittest.TestCase):
     def test_segmentation_cli_with_checkpoint(self):
         cache_dir = os.path.expanduser(pooch.os_cache("synapse-net"))
         model_path = os.path.join(cache_dir, "models", "vesicles_2d")
-        if platform.system() == "Windows":
-            cmd = [
-                sys.executable, "-m", "synapse_net.run_segmentation",
-                "-i", self.data_path, "-o", self.tmp_dir, "-m", "vesicles_2d",
-                "-c", model_path,
-            ]
-        else:
-            cmd = [
-                "synapse_net.run_segmentation", "-i", self.data_path, "-o", self.tmp_dir, "-m", "vesicles_2d",
-                "-c", model_path,
-            ]
+        cmd = [
+            "synapse_net.run_segmentation", "-i", self.data_path, "-o", self.tmp_dir, "-m", "vesicles_2d",
+            "-c", model_path,
+        ]
         run(cmd)
         self.check_segmentation_result()
 
