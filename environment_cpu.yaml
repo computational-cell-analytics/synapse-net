@@ -1,9 +1,11 @@
 channels:
+    - pytorch
     - conda-forge
 name:
     synapse-net
 dependencies:
     - bioimageio.core
+    - cpuonly
     - kornia
     - magicgui
     - napari

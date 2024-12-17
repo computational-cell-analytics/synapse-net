@@ -1,5 +1,8 @@
 import os
+import platform
+import sys
 import unittest
+
 from subprocess import run
 from shutil import rmtree
 
@@ -9,8 +12,9 @@ import pooch
 from synapse_net.sample_data import get_sample_data
 
 
+@unittest.skipIf(platform.system() == "Windows", "CLI does not work on Windows")
 class TestCLI(unittest.TestCase):
-    tmp_dir = "./tmp"
+    tmp_dir = "tmp"
 
     def setUp(self):
         self.data_path = get_sample_data("tem_2d")
@@ -41,15 +45,28 @@ class TestCLI(unittest.TestCase):
         # napari.run()
 
     def test_segmentation_cli(self):
-        cmd = ["synapse_net.run_segmentation", "-i", self.data_path, "-o", self.tmp_dir, "-m", "vesicles_2d"]
+        if platform.system() == "Windows":
+            cmd = [
+                sys.executable, "-m",  "synapse_net.run_segmentation",
+                "-i", self.data_path, "-o", self.tmp_dir, "-m", "vesicles_2d"
+            ]
+        else:
+            cmd = ["synapse_net.run_segmentation", "-i", self.data_path, "-o", self.tmp_dir, "-m", "vesicles_2d"]
         run(cmd)
         self.check_segmentation_result()
 
     def test_segmentation_cli_with_scale(self):
-        cmd = [
-            "synapse_net.run_segmentation", "-i", self.data_path, "-o", self.tmp_dir, "-m", "vesicles_2d",
-            "--scale", "0.5"
-        ]
+        if platform.system() == "Windows":
+            cmd = [
+                sys.executable, "-m", "synapse_net.run_segmentation",
+                "-i", self.data_path, "-o", self.tmp_dir, "-m", "vesicles_2d",
+                "--scale", "0.5"
+            ]
+        else:
+            cmd = [
+                "synapse_net.run_segmentation", "-i", self.data_path, "-o", self.tmp_dir, "-m", "vesicles_2d",
+                "--scale", "0.5"
+            ]
         run(cmd)
         self.check_segmentation_result()
 
