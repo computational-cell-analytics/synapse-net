@@ -12,7 +12,8 @@ def _run_segmentation(
     foreground, boundaries, verbose, min_size,
     # blocking shapes for parallel computation
     block_shape=(128, 256, 256),
-    halo=(48, 48, 48)
+    halo=(48, 48, 48),
+    seed_distance=6
 ):
     t0 = time.time()
     boundary_threshold = 0.25
@@ -24,7 +25,6 @@ def _run_segmentation(
 
     # Get the segmentation via seeded watershed.
     t0 = time.time()
-    seed_distance = 6
     seeds = np.logical_and(foreground > 0.5, dist > seed_distance)
     seeds = parallel.label(seeds, block_shape=block_shape, verbose=verbose)
     if verbose:
@@ -65,6 +65,7 @@ def segment_mitochondria(
     return_predictions: bool = False,
     scale: Optional[List[float]] = None,
     mask: Optional[np.ndarray] = None,
+    seed_distance: int = 6,
 ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
     """Segment mitochondria in an input volume.
 
@@ -97,7 +98,7 @@ def segment_mitochondria(
 
     # Run segmentation and rescale the result if necessary.
     foreground, boundaries = pred[:2]
-    seg = _run_segmentation(foreground, boundaries, verbose=verbose, min_size=min_size)
+    seg = _run_segmentation(foreground, boundaries, verbose=verbose, min_size=min_size, seed_distance=seed_distance)
     seg = scaler.rescale_output(seg, is_segmentation=True)
 
     if return_predictions:
