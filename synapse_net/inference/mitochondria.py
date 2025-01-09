@@ -30,13 +30,6 @@ def _run_segmentation(
     if verbose:
         print("Compute connected components in", time.time() - t0, "s")
 
-    # import napari
-    # v = napari.Viewer()
-    # v.add_image(boundaries)
-    # v.add_image(dist)
-    # v.add_labels(seeds)
-    # napari.run()
-
     t0 = time.time()
     hmap = boundaries + ((dist.max() - dist) / dist.max())
     mask = (foreground + boundaries) > 0.5
@@ -66,6 +59,8 @@ def segment_mitochondria(
     scale: Optional[List[float]] = None,
     mask: Optional[np.ndarray] = None,
     seed_distance: int = 6,
+    ws_block_shape=(128, 256, 256),
+    ws_halo=(48, 48, 48),
 ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
     """Segment mitochondria in an input volume.
 
@@ -80,6 +75,9 @@ def segment_mitochondria(
         return_predictions: Whether to return the predictions (foreground, boundaries) alongside the segmentation.
         scale: The scale factor to use for rescaling the input volume before prediction.
         mask: An optional mask that is used to restrict the segmentation.
+        seed_distance: The distance threshold for the seeded watershed.
+        ws_block_shape: The block shape for the seeded watershed.
+        ws_halo: The halo for the seeded watershed.
 
     Returns:
         The segmentation mask as a numpy array, or a tuple containing the segmentation mask
@@ -98,7 +96,8 @@ def segment_mitochondria(
 
     # Run segmentation and rescale the result if necessary.
     foreground, boundaries = pred[:2]
-    seg = _run_segmentation(foreground, boundaries, verbose=verbose, min_size=min_size, seed_distance=seed_distance)
+    seg = _run_segmentation(foreground, boundaries, verbose=verbose, min_size=min_size, seed_distance=seed_distance,
+                            block_shape=ws_block_shape, halo=ws_halo)
     seg = scaler.rescale_output(seg, is_segmentation=True)
 
     if return_predictions:
