@@ -15,5 +15,6 @@ dependencies:
     - torch_em
     - torchvision
     - trimesh
+    - zarr < 3
     - pip:
         - napari-skimage-regionprops
