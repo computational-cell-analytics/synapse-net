@@ -59,8 +59,8 @@ def segment_mitochondria(
     scale: Optional[List[float]] = None,
     mask: Optional[np.ndarray] = None,
     seed_distance: int = 6,
-    ws_block_shape=(128, 256, 256),
-    ws_halo=(48, 48, 48),
+    ws_block_shape: Tuple[int, ...] = (128, 256, 256),
+    ws_halo: Tuple[int, ...] = (48, 48, 48),
 ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
     """Segment mitochondria in an input volume.
 
