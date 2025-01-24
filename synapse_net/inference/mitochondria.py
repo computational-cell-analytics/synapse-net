@@ -13,10 +13,11 @@ def _run_segmentation(
     # blocking shapes for parallel computation
     block_shape=(128, 256, 256),
     halo=(48, 48, 48),
-    seed_distance=6
+    seed_distance=6,
+    boundary_threshold=0.25,
+    area_threshold=5000,
 ):
     t0 = time.time()
-    boundary_threshold = 0.25
     dist = parallel.distance_transform(
         boundaries < boundary_threshold, halo=halo, verbose=verbose, block_shape=block_shape
     )
@@ -43,7 +44,7 @@ def _run_segmentation(
         print("Compute watershed in", time.time() - t0, "s")
 
     seg = apply_size_filter(seg, min_size, verbose=verbose, block_shape=block_shape)
-    seg = _postprocess_seg_3d(seg, area_threshold=5000)
+    seg = _postprocess_seg_3d(seg, area_threshold=area_threshold)
     return seg
 
 
@@ -61,6 +62,8 @@ def segment_mitochondria(
     seed_distance: int = 6,
     ws_block_shape: Tuple[int, ...] = (128, 256, 256),
     ws_halo: Tuple[int, ...] = (48, 48, 48),
+    boundary_threshold: float = 0.25,
+    area_threshold: int = 5000,
 ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
     """Segment mitochondria in an input volume.
 
@@ -78,6 +81,8 @@ def segment_mitochondria(
         seed_distance: The distance threshold for the seeded watershed.
         ws_block_shape: The block shape for the seeded watershed.
         ws_halo: The halo for the seeded watershed.
+        boundary_threshold: The boundary threshold distance calculation.
+        area_threshold: The area threshold for removing smaller objects after watershed.
 
     Returns:
         The segmentation mask as a numpy array, or a tuple containing the segmentation mask
@@ -97,7 +102,8 @@ def segment_mitochondria(
     # Run segmentation and rescale the result if necessary.
     foreground, boundaries = pred[:2]
     seg = _run_segmentation(foreground, boundaries, verbose=verbose, min_size=min_size, seed_distance=seed_distance,
-                            block_shape=ws_block_shape, halo=ws_halo)
+                            block_shape=ws_block_shape, halo=ws_halo, boundary_threshold=boundary_threshold,
+                            area_threshold=area_threshold)
     seg = scaler.rescale_output(seg, is_segmentation=True)
 
     if return_predictions:
