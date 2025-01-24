@@ -527,7 +527,7 @@ def _postprocess_seg_3d(seg, area_threshold=1000, iterations=4, iterations_3d=8)
     props = regionprops(seg)
     for prop in props:
         # Get bounding box and mask.
-        bb = tuple(slice(start, stop) for start, stop in zip(prop.bbox[:2], prop.bbox[2:]))
+        bb = tuple(slice(start, stop) for start, stop in zip(prop.bbox[:3], prop.bbox[3:]))
         mask = seg[bb] == prop.label
 
         # Fill small holes and apply closing.
