@@ -82,7 +82,8 @@ def segment_mitochondria(
         ws_block_shape: The block shape for the seeded watershed.
         ws_halo: The halo for the seeded watershed.
         boundary_threshold: The boundary threshold distance calculation.
-        area_threshold: The area threshold for removing smaller objects after watershed.
+        area_threshold: The minimum area (in pixels) of holes to be removed or filled in the segmentation.
+            This parameter is passed to `skimage.morphology.remove_small_holes`.
 
     Returns:
         The segmentation mask as a numpy array, or a tuple containing the segmentation mask
