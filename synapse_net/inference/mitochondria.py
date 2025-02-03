@@ -32,8 +32,8 @@ def _run_segmentation(
         print("Compute connected components in", time.time() - t0, "s")
 
     t0 = time.time()
-    hmap = boundaries + ((dist.max() - dist) / dist.max())
-    hmap[boundaries > boundary_threshold] = hmap.max()
+    hmap = (dist.max() - dist) / dist.max()
+    hmap[boundaries > boundary_threshold] = (hmap + boundaries).max()
     mask = (foreground + boundaries) > 0.5
 
     seg = np.zeros_like(seeds)
