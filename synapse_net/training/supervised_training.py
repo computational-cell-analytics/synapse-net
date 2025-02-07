@@ -7,6 +7,7 @@ from torch_em.model import AnisotropicUNet, UNet2d
 
 def get_3d_model(
     out_channels: int,
+    in_channels: int = 1,
     scale_factors: Tuple[Tuple[int, int, int]] = [[1, 2, 2], [2, 2, 2], [2, 2, 2], [2, 2, 2]],
     initial_features: int = 32,
     final_activation: str = "Sigmoid",
@@ -25,7 +26,7 @@ def get_3d_model(
     """
     model = AnisotropicUNet(
         scale_factors=scale_factors,
-        in_channels=1,
+        in_channels=in_channels,
         out_channels=out_channels,
         initial_features=initial_features,
         gain=2,
@@ -36,6 +37,7 @@ def get_3d_model(
 
 def get_2d_model(
     out_channels: int,
+    in_channels: int = 1,
     initial_features: int = 32,
     final_activation: str = "Sigmoid",
 ) -> torch.nn.Module:
@@ -51,7 +53,7 @@ def get_2d_model(
         The U-Net.
     """
     model = UNet2d(
-        in_channels=1,
+        in_channels=in_channels,
         out_channels=out_channels,
         initial_features=initial_features,
         gain=2,
@@ -183,6 +185,7 @@ def supervised_training(
     check: bool = False,
     ignore_label: Optional[int] = None,
     label_transform: Optional[callable] = None,
+    in_channels: int = 1,
     out_channels: int = 2,
     mask_channel: bool = False,
     **loader_kwargs,
@@ -242,9 +245,9 @@ def supervised_training(
 
     is_2d, _ = _determine_ndim(patch_shape)
     if is_2d:
-        model = get_2d_model(out_channels=out_channels)
+        model = get_2d_model(out_channels=out_channels, in_channels=in_channels)
     else:
-        model = get_3d_model(out_channels=out_channels)
+        model = get_3d_model(out_channels=out_channels, in_channels=in_channels)
 
     loss, metric = None, None
     # No ignore label -> we can use default loss.
