@@ -33,9 +33,9 @@ from tqdm import tqdm
 
 class _Scaler:
     def __init__(self, scale, verbose):
-        if isinstance(scale, (int, float)): # single number
+        if isinstance(scale, (int, float)):  # single number
             is_one = scale in (1, 1.0)
-        else: # list
+        else:  # list
             is_one = all(s in (1, 1.0) for s in scale)
         if is_one:
             self.scale = None
