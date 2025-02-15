@@ -170,13 +170,15 @@ def read_data_from_cryo_et_portal_run(
         output_path: The path for saving the data. The data will be streamed if the path is not given.
         use_zarr_format: Whether to use the data in zarr format instead of mrc.
         processing_type: The processing type of the tomogram to download.
-        id_field: The name of the id field.
+        id_field: The name of the id field. One of 'id' or 'run_id'.
+            The 'id' references specific tomograms, whereas 'run_id' references a collection of experimental data.
         scale_level: The scale level to read from the data. Only valid for zarr data.
 
     Returns:
         The data read from the run.
         The voxel size read from the run.
     """
+    assert id_field in ("id", "run_id")
     if output_path is not None and os.path.exists(output_path):
         return read_ome_zarr(output_path) if use_zarr_format else read_mrc(output_path)
 

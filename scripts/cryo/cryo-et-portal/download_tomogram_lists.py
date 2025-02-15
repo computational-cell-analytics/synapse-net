@@ -27,12 +27,13 @@ def download_tomograms_for_da():
 def download_tomograms_for_eval():
     with open("./list_for_eval.json") as f:
         run_ids = json.load(f)
-    download_tomogram_list(run_ids)
+    output_root = "/scratch-grete/projects/nim00007/cryo-et/from_portal/for_eval"
+    download_tomogram_list(run_ids, output_root)
 
 
 def main():
-    # download_tomograms_for_eval()
-    download_tomograms_for_da()
+    download_tomograms_for_eval()
+    # download_tomograms_for_da()
 
 
 if __name__ == "__main__":
