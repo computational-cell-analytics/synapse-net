@@ -13,8 +13,10 @@ def run_mitochondria_segmentation(args):
         model_path = args.model
 
     tiling = parse_tiling(args.tile_shape, args.halo)
+    print(f"Using the tiling {tiling}")
+
     segmentation_function = partial(
-        segment_mitochondria, model_path=model_path, verbose=False, tiling=tiling, scale=[0.5, 0.5, 0.5]
+        segment_mitochondria, model_path=model_path, verbose=False, tiling=tiling, scale=[0.6, 0.6, 0.6]
     )
     inference_helper(
         args.input_path, args.output_path, segmentation_function,
@@ -44,11 +46,11 @@ def main():
         "Can also be a directory with tifs if the filestructure matches input_path."
     )
     parser.add_argument(
-        "--tile_shape", type=int, nargs=3,
+        "--tile_shape", type=int, nargs=3, default=(32,768,768),
         help="The tile shape for prediction. Lower the tile shape if GPU memory is insufficient."
     )
     parser.add_argument(
-        "--halo", type=int, nargs=3,
+        "--halo", type=int, nargs=3, default=(8,64,64),
         help="The halo for prediction. Increase the halo to minimize boundary artifacts."
     )
     parser.add_argument(
