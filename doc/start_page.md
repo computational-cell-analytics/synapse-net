@@ -124,3 +124,10 @@ Domain adaptation is implemented in `synapse_net.training.domain_adaptation`. Yo
 
 We also provide functionality for 'regular' neural network training. In this case, you have to provide data **and** manual annotations for the structure(s) you want to segment.
 This functionality is implemented in `synapse_net.training.supervised_training`. You can find an example script that shows how to use it [here](https://github.com/computational-cell-analytics/synapse-net/blob/main/examples/network_training.py).
+
+## Segmentation for the CryoET Data Portal
+
+We have published segmentation results for tomograms of synapses stored in the [CryoET Data Portal](https://cryoetdataportal.czscience.com/). So far we have made the following depositions:
+- [CZCDP-10330](https://cryoetdataportal.czscience.com/depositions/10330): Contains synaptic vesicle segmentations for over 50 tomograms of synaptosomes. The segmentations were made with a model domain adapted to the synaptosome tomograms.
+
+The scripts for the submissions can be found in [scripts/cryo/cryo-et-portal](https://github.com/computational-cell-analytics/synapse-net/tree/main/scripts/cryo/cryo-et-portal).
