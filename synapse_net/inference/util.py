@@ -121,7 +121,7 @@ def get_prediction(
     # If we have channels then the standardization is done independently per channel.
     if with_channels:
         # TODO Check that this is the correct axis.
-        input_volume = torch_em.transform.raw.standardize(input_volume, axis=(1, 2, 3))
+        input_volume = np.stack([torch_em.transform.raw.normalize(input_volume[0]), input_volume[1]], axis=0)
     else:
         input_volume = torch_em.transform.raw.standardize(input_volume)
 
