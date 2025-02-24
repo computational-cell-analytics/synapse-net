@@ -33,7 +33,7 @@ def _run_segmentation(
 
     t0 = time.time()
     hmap = (dist.max() - dist) / dist.max()
-    hmap[boundaries > boundary_threshold] = (hmap + boundaries).max()
+    hmap[np.logical_and(boundaries > boundary_threshold, foreground < boundary_threshold)] = (hmap + boundaries).max()
     mask = (foreground + boundaries) > 0.5
 
     seg = np.zeros_like(seeds)
