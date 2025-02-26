@@ -35,7 +35,6 @@ class _Scaler:
     def __init__(self, scale, verbose):
         self.verbose = verbose
         self._original_shape = None
-        print(scale)
 
         if scale is None:
             self.scale = None
