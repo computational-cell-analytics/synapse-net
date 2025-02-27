@@ -45,7 +45,10 @@ def _get_current_tiling(tiling: dict, default_tiling: dict, model_type: str):
         for k2, v2 in v.items():
             if isinstance(v2, int):
                 continue
-            tiling[k][k2] = v2.value()
+            elif hasattr(v2, "value"):  # If it's a QSpinBox, extract the value
+                tiling[k][k2] = v2.value()
+            else:
+                raise TypeError(f"Unexpected type for tiling value: {type(v2)} at {k}/{k2}")
     # check if user inputs tiling/halo or not
     if default_tiling == tiling:
         if "2d" in model_type:
@@ -54,11 +57,13 @@ def _get_current_tiling(tiling: dict, default_tiling: dict, model_type: str):
                 "tile": {"x": 512, "y": 512, "z": 1},
                 "halo": {"x": 64, "y": 64, "z": 1},
             }
-    elif "2d" in model_type:
+    else:
+        show_info(f"Using custom tiling: {tiling}")
+    if "2d" in model_type:
         # if its a 2d model set z to 1
         tiling["tile"]["z"] = 1
-        tiling["halo"]["z"] = 1
-
+        tiling["halo"]["z"] = 0
+        show_info(f"Using tiling: {tiling}")
     return tiling
 
 
