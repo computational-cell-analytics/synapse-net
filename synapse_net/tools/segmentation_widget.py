@@ -183,6 +183,9 @@ class SegmentationWidget(BaseWidget):
         if model_type == "ribbon":  # Currently only the ribbon model needs the extra seg.
             extra_seg = self._get_layer_selector_data(self.extra_seg_selector_name)
             kwargs = {"extra_segmentation": extra_seg}
+        elif model_type == "cristae":  # Cristae model expects 2 3D volumes
+            image = np.stack([image, self._get_layer_selector_data(self.extra_seg_selector_name)], axis=0)
+            kwargs = {}
         else:
             kwargs = {}
         segmentation = run_segmentation(
