@@ -2,7 +2,7 @@ import os
 import time
 import warnings
 from glob import glob
-from typing import Dict, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 # # Suppress annoying import warnings.
 # with warnings.catch_warnings():
@@ -85,6 +85,7 @@ def get_prediction(
     model: Optional[torch.nn.Module] = None,
     verbose: bool = True,
     with_channels: bool = False,
+    channels_to_normalize: Optional[List[int]] = [0],
     mask: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     """Run prediction on a given volume.
@@ -99,6 +100,7 @@ def get_prediction(
         tiling: The tiling configuration for the prediction.
         verbose: Whether to print timing information.
         with_channels: Whether to predict with channels.
+        channels_to_normalize: List of channels to normalize. Defaults to 0.
         mask: Optional binary mask. If given, the prediction will only be run in
             the foreground region of the mask.
 
@@ -120,8 +122,10 @@ def get_prediction(
     # We standardize the data for the whole volume beforehand.
     # If we have channels then the standardization is done independently per channel.
     if with_channels:
+        input_volume = input_volume.astype(np.float32, copy=False)
         # TODO Check that this is the correct axis.
-        input_volume = np.stack([torch_em.transform.raw.normalize(input_volume[0]), input_volume[1]], axis=0)
+        for ch in channels_to_normalize:
+            input_volume[ch] = torch_em.transform.raw.normalize(input_volume[ch])
     else:
         input_volume = torch_em.transform.raw.standardize(input_volume)
 
