@@ -432,13 +432,22 @@ def get_default_tiling(is_2d: bool = False) -> Dict[str, Dict[str, int]]:
         else:
             raise NotImplementedError(f"Infererence with a GPU with {vram} GB VRAM is not supported.")
 
-        print(f"Determined tile size: {tile}")
+        print(f"Determined tile size for CUDA: {tile}")
         tiling = {"tile": tile, "halo": halo}
+
+    elif torch.backends.mps.is_available():  # Check for Apple Silicon (MPS)
+        print("Using Metal Performance Shaders (MPS) for inference.")
+        # MPS memory detection is limited, so use conservative tiling
+        tile = {"x": 512, "y": 512, "z": 64}
+        halo = {"x": 64, "y": 64, "z": 16}
+        print(f"Determined tile size for MPS: {tile}")
+        tiling = {"tile": tile, "halo": halo}
+
 
     # I am not sure what is reasonable on a cpu. For now choosing very small tiling.
     # (This will not work well on a CPU in any case.)
     else:
-        print("Determining default tiling")
+        print("Determining default tiling for CPU")
         tiling = {
             "tile": {"x": 96, "y": 96, "z": 16},
             "halo": {"x": 16, "y": 16, "z": 4},
