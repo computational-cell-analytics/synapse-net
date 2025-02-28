@@ -54,6 +54,7 @@ class _Scaler:
             self.scale = scale
 
     def scale_input(self, input_volume, is_segmentation=False):
+        t0 = time.time()
         if self.scale is None:
             return input_volume
 
@@ -73,10 +74,11 @@ class _Scaler:
             input_volume = rescale(input_volume, self.scale, preserve_range=True).astype(input_volume.dtype)
 
         if self.verbose:
-            print("Rescaled volume from", self._original_shape, "to", input_volume.shape)
+            print("Rescaled volume from", self._original_shape, "to", input_volume.shape, "in", time.time() - t0, "s")
         return input_volume
 
     def rescale_output(self, output, is_segmentation):
+        t0 = time.time()
         if self.scale is None:
             return output
 
@@ -90,6 +92,9 @@ class _Scaler:
             output = resize(output, out_shape, preserve_range=True, order=0, anti_aliasing=False).astype(output.dtype)
         else:
             output = resize(output, out_shape, preserve_range=True).astype(output.dtype)
+
+        if self.verbose:
+            print("Resized prediction back to original shape", output.shape, "in", time.time() - t0, "s")
 
         return output
 
@@ -462,7 +467,6 @@ def get_default_tiling(is_2d: bool = False) -> Dict[str, Dict[str, int]]:
         halo = {"x": 16, "y": 16, "z": 4}
         tiling = {"tile": tile, "halo": halo}
         print(f"Determined tile size for MPS: {tiling}")
-
 
     # I am not sure what is reasonable on a cpu. For now choosing very small tiling.
     # (This will not work well on a CPU in any case.)

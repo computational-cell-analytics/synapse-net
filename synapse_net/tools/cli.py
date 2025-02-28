@@ -146,6 +146,10 @@ def segmentation_cli():
         "By default, the scaling factor will be derived from the voxel size of the input data. "
         "If this parameter is given it will over-ride the default behavior. "
     )
+    parser.add_argument(
+        "--verbose", "-v", action="store_true",
+        help="Whether to print verbose information about the segmentation progress."
+    )
     args = parser.parse_args()
 
     if args.checkpoint is None:
@@ -169,7 +173,7 @@ def segmentation_cli():
         scale = (2 if is_2d else 3) * (args.scale,)
 
     segmentation_function = partial(
-        run_segmentation, model=model, model_type=args.model, verbose=False, tiling=tiling,
+        run_segmentation, model=model, model_type=args.model, verbose=args.verbose, tiling=tiling,
     )
     inference_helper(
         args.input_path, args.output_path, segmentation_function,
