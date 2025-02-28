@@ -85,7 +85,7 @@ def get_prediction(
     model: Optional[torch.nn.Module] = None,
     verbose: bool = True,
     with_channels: bool = False,
-    channels_to_normalize: Optional[List[int]] = [0],
+    channels_to_standardize: Optional[List[int]] = None,
     mask: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     """Run prediction on a given volume.
@@ -100,7 +100,7 @@ def get_prediction(
         tiling: The tiling configuration for the prediction.
         verbose: Whether to print timing information.
         with_channels: Whether to predict with channels.
-        channels_to_normalize: List of channels to normalize. Defaults to 0.
+        channels_to_standardize: List of channels to standardize. Defaults to None.
         mask: Optional binary mask. If given, the prediction will only be run in
             the foreground region of the mask.
 
@@ -123,9 +123,12 @@ def get_prediction(
     # If we have channels then the standardization is done independently per channel.
     if with_channels:
         input_volume = input_volume.astype(np.float32, copy=False)
+        channels_to_standardize = None
         # TODO Check that this is the correct axis.
-        for ch in channels_to_normalize:
-            input_volume[ch] = torch_em.transform.raw.normalize(input_volume[ch])
+        if channels_to_standardize is None:  # assume all channels
+            channels_to_standardize = range(input_volume.shape[0])
+        for ch in channels_to_standardize:
+            input_volume[ch] = torch_em.transform.raw.standardize(input_volume[ch])
     else:
         input_volume = torch_em.transform.raw.standardize(input_volume)
 

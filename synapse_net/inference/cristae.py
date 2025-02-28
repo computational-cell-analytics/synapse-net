@@ -42,6 +42,7 @@ def segment_cristae(
     return_predictions: bool = False,
     scale: Optional[List[float]] = None,
     mask: Optional[np.ndarray] = None,
+    **kwargs
 ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
     """Segment cristae in an input volume.
 
@@ -61,6 +62,8 @@ def segment_cristae(
         The segmentation mask as a numpy array, or a tuple containing the segmentation mask
         and the predictions if return_predictions is True.
     """
+    with_channels = kwargs.pop("with_channels", True)
+    channels_to_standardize = kwargs.pop("channels_to_standardize", [0])
     if verbose:
         print("Segmenting cristae in volume of shape", input_volume.shape)
     # Create the scaler to handle prediction with a different scaling factor.
@@ -72,7 +75,7 @@ def segment_cristae(
         mask = scaler.scale_input(mask, is_segmentation=True)
     pred = get_prediction(
         input_volume, model_path=model_path, model=model, mask=mask,
-        tiling=tiling, with_channels=True, verbose=verbose
+        tiling=tiling, with_channels=with_channels, channels_to_standardize=channels_to_standardize, verbose=verbose
     )
     foreground, boundaries = pred[:2]
     seg = _run_segmentation(foreground, verbose=verbose, min_size=min_size)
