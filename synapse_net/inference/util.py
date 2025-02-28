@@ -123,7 +123,6 @@ def get_prediction(
     # If we have channels then the standardization is done independently per channel.
     if with_channels:
         input_volume = input_volume.astype(np.float32, copy=False)
-        channels_to_standardize = None
         # TODO Check that this is the correct axis.
         if channels_to_standardize is None:  # assume all channels
             channels_to_standardize = range(input_volume.shape[0])
