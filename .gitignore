@@ -12,3 +12,4 @@ scripts/cooper/training/copy_testset.py
 scripts/rizzoli/upsample_data.py
 scripts/cooper/training/find_rec_testset.py
 synapse-net-models/
+scripts/portal/upscale_tomo.py

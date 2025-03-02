@@ -33,6 +33,12 @@ contributions:
     - id: synapse_net.sample_data_tem_tomo
       python_name: synapse_net.sample_data:sample_data_tem_tomo
       title: Load TEM Tomo sample data
+    - id: synapse_net.sample_data_tomo_small
+      python_name: synapse_net.sample_data:sample_data_tomo_small
+      title: Load small tomo sample data
+    - id: synapse_net.sample_data_mito_small
+      python_name: synapse_net.sample_data:sample_data_mito_small
+      title: Load TEM Tomo sample data
 
   readers:
     - command: synapse_net.file_reader
@@ -61,3 +67,9 @@ contributions:
     - command: synapse_net.sample_data_tem_tomo
       display_name: TEM Tomo Sample Data
       key: synapse-net-tem-tomo
+    - command: synapse_net.sample_data_tomo_small
+      display_name: Small Tomo Sample Data
+      key: synapse-net-tomo-small
+    - command: synapse_net.sample_data_mito_small
+      display_name: Small Mito Sample Data
+      key: synapse-net-mito-small

@@ -17,10 +17,14 @@ def get_sample_data(name: str) -> str:
     registry = {
         "tem_2d.mrc": "3c6f9ff6d7673d9bf2fd46c09750c3c7dbb8fa1aa59dcdb3363b65cc774dcf28",
         "tem_tomo.mrc": "fe862ce7c22000d4440e3aa717ca9920b42260f691e5b2ab64cd61c928693c99",
+        "tomo_small.mrc": "057b214777157682e220958e7ca5c90104eada67210a5589572134ac0d8d177f",
+        "mito_small.mrc": "643534ac080f13a4ba8c9f12f5ea59442cb6d1e7ae1a5aec5ea98b7ae9ab45cc",
     }
     urls = {
         "tem_2d.mrc": "https://owncloud.gwdg.de/index.php/s/5sAQ0U4puAspcHg/download",
         "tem_tomo.mrc": "https://owncloud.gwdg.de/index.php/s/FJDhDfbT4UxhtOn/download",
+        "tomo_small.mrc": "https://owncloud.gwdg.de/index.php/s/03NvEuIye08kkkL/download",
+        "mito_small.mrc": "https://owncloud.gwdg.de/index.php/s/TUhvVMrA7GE8sJv/download",
     }
     key = f"{name}.mrc"
 
@@ -53,6 +57,14 @@ def sample_data_tem_2d():
 
 def sample_data_tem_tomo():
     return _sample_data("tem_tomo")
+
+
+def sample_data_tomo_small():
+    return _sample_data("tomo_small")
+
+
+def sample_data_mito_small():
+    return _sample_data("mito_small")
 
 
 def download_data_from_zenodo(path: str, name: str):

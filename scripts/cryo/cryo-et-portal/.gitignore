@@ -1,0 +1,4 @@
+credentials.portal
+sync_with_s3.sh
+segmentations/
+upload_CZCDP-10330/

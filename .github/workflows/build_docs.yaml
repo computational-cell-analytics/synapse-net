@@ -25,12 +25,11 @@ jobs:
     - name: Set up Micromamba
       uses: mamba-org/setup-micromamba@v2
       with:
-        micromamba-version: "latest"       # Use the latest version of micromamba
-        environment-file: environment_cpu.yaml  # Reference your environment.yml file
+        micromamba-version: "latest"
+        environment-file: environment.yaml
         init-shell: bash
         cache-environment: true
         post-cleanup: 'all'
-        # cache: true                        # Cache the micromamba environment
 
     - name: Install package
       shell: bash -l {0}
@@ -50,7 +49,6 @@ jobs:
     - name: Upload Documentation Artifact
       uses: actions/upload-pages-artifact@v3
       with:
-        # name: documentation
         path: doc/
 
   deploy:
@@ -64,14 +62,5 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      # - name: Download Documentation Artifact
-      #   uses: actions/download-artifact@v4
-      #   with:
-      #     name: documentation
-      #     path: .
-
       - name: Deploy to GiHub Pages
         uses: actions/deploy-pages@v4
-        # with:
-        #   artifact_name: documentation
-

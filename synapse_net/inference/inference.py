@@ -10,6 +10,7 @@ from .compartments import segment_compartments
 from .mitochondria import segment_mitochondria
 from .ribbon_synapse import segment_ribbon_synapse_structures
 from .vesicles import segment_vesicles
+from .cristae import segment_cristae
 from .util import get_device
 from ..file_utils import get_cache_dir
 
@@ -24,19 +25,31 @@ def _get_model_registry():
         "active_zone": "a18f29168aed72edec0f5c2cb1aa9a4baa227812db6082a6538fd38d9f43afb0",
         "compartments": "527983720f9eb215c45c4f4493851fd6551810361eda7b79f185a0d304274ee1",
         "mitochondria": "24625018a5968b36f39fa9d73b121a32e8f66d0f2c0540d3df2e1e39b3d58186",
+        "mitochondria2": "553decafaff4838fff6cc8347f22c8db3dee5bcbeffc34ffaec152f8449af673",
+        "cristae": "f96c90484f4ea92ac0515a06e389cc117580f02c2aacdc44b5828820cf38c3c3",
         "ribbon": "7c947f0ddfabe51a41d9d05c0a6ca7d6b238f43df2af8fffed5552d09bb075a9",
         "vesicles_2d": "eb0b74f7000a0e6a25b626078e76a9452019f2d1ea6cf2033073656f4f055df1",
         "vesicles_3d": "b329ec1f57f305099c984fbb3d7f6ae4b0ff51ec2fa0fa586df52dad6b84cf29",
         "vesicles_cryo": "782f5a21c3cda82c4e4eaeccc754774d5aaed5929f8496eb018aad7daf91661b",
+        # Additional models that are only available in the CLI, not in the plugin model selection.
+        "vesicles_2d_maus": "01506895df6343fc33ffc9c9eb3f975bf42eb4eaaaf4848bac83b57f1b46e460",
+        "vesicles_3d_endbulb": "8582c7e3e5f16ef2bf34d6f9e34644862ca3c76835c9e7d44475c9dd7891d228",
+        "vesicles_3d_innerear": "924f0f7cfb648a3a6931c1d48d8b1fdc6c0c0d2cb3330fe2cae49d13e7c3b69d",
     }
     urls = {
         "active_zone": "https://owncloud.gwdg.de/index.php/s/zvuY342CyQebPsX/download",
         "compartments": "https://owncloud.gwdg.de/index.php/s/DnFDeTmDDmZrDDX/download",
         "mitochondria": "https://owncloud.gwdg.de/index.php/s/1T542uvzfuruahD/download",
+        "mitochondria2": "https://owncloud.gwdg.de/index.php/s/GZghrXagc54FFXd/download",
+        "cristae": "https://owncloud.gwdg.de/index.php/s/Df7OUOyQ1Kc2eEO/download",
         "ribbon": "https://owncloud.gwdg.de/index.php/s/S3b5l0liPP1XPYA/download",
         "vesicles_2d": "https://owncloud.gwdg.de/index.php/s/d72QIvdX6LsgXip/download",
         "vesicles_3d": "https://owncloud.gwdg.de/index.php/s/A425mkAOSqePDhx/download",
         "vesicles_cryo": "https://owncloud.gwdg.de/index.php/s/e2lVdxjCJuZkLJm/download",
+        # Additional models that are only available in the CLI, not in the plugin model selection.
+        "vesicles_2d_maus": "https://owncloud.gwdg.de/index.php/s/sZ8woLr0zs5zOpv/download",
+        "vesicles_3d_endbulb": "https://owncloud.gwdg.de/index.php/s/16tmnWrEDpYIMzU/download",
+        "vesicles_3d_innerear": "https://owncloud.gwdg.de/index.php/s/UFUCYivsCxrqISX/download",
     }
     cache_dir = get_cache_dir()
     models = pooch.create(
@@ -103,6 +116,10 @@ def get_model_training_resolution(model_type: str) -> Dict[str, float]:
         "vesicles_2d": {"x": 1.35, "y": 1.35},
         "vesicles_3d": {"x": 1.35, "y": 1.35, "z": 1.35},
         "vesicles_cryo": {"x": 1.35, "y": 1.35, "z": 0.88},
+        # TODO add the correct resolutions, these are the resolutions of the source models.
+        "vesicles_2d_maus": {"x": 1.35, "y": 1.35},
+        "vesicles_3d_endbulb": {"x": 1.35, "y": 1.35, "z": 1.35},
+        "vesicles_3d_innerear": {"x": 1.35, "y": 1.35, "z": 1.35},
     }
     return resolutions[model_type]
 
@@ -212,7 +229,7 @@ def run_segmentation(
     """
     if model_type.startswith("vesicles"):
         segmentation = segment_vesicles(image, model=model, tiling=tiling, scale=scale, verbose=verbose, **kwargs)
-    elif model_type == "mitochondria":
+    elif model_type == "mitochondria" or model_type == "mitochondria2":
         segmentation = segment_mitochondria(image, model=model, tiling=tiling, scale=scale, verbose=verbose, **kwargs)
     elif model_type == "active_zone":
         segmentation = segment_active_zone(image, model=model, tiling=tiling, scale=scale, verbose=verbose, **kwargs)
@@ -220,6 +237,8 @@ def run_segmentation(
         segmentation = segment_compartments(image, model=model, tiling=tiling, scale=scale, verbose=verbose, **kwargs)
     elif model_type == "ribbon":
         segmentation = _segment_ribbon_AZ(image, model=model, tiling=tiling, scale=scale, verbose=verbose, **kwargs)
+    elif model_type == "cristae":
+        segmentation = segment_cristae(image, model=model, tiling=tiling, scale=scale, verbose=verbose, **kwargs)
     else:
         raise ValueError(f"Unknown model type: {model_type}")
     return segmentation

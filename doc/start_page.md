@@ -10,15 +10,15 @@ It provides deep neural networks for:
 
 It also offers functionality for quantifying synaptic ultrastructure based on segmentation results, for example by measuring vesicle or structure morphology, measuring distances between vesicles and structures, or assigning vesicles into different pools.
 SynapseNet mainly targets electron tomography, but can also be appled to other types of electron microscopy,
-especially throught the [domain adaptation](domain-adaptation) functionality.
+especially throught the [domain adaptation](#domain-adaptation) functionality.
 
-SynapseNet offers a [napari plugin](napari-plugin), [command line interface](command-line-interface), and [python library](python-library).
+SynapseNet offers a [napari plugin](#napari-plugin), [command line interface](#command-line-interface), and [python library](#python-library).
 Please cite our [bioRxiv preprint](https://www.biorxiv.org/content/10.1101/2024.12.02.626387v1) if you use it in your research.
 
 
 ## Requirements & Installation
 
-SynapseNet was developed and tested on Linux. It should be possible to install and use it on Mac or Windows, but we have not tested this.
+SynapseNet was developed and tested on Linux. It is possible to install and use it on Mac or Windows, but we have not extensively tested this.
 Furthermore, SynapseNet requires a GPU for segmentation of 3D volumes.
 
 You need a [conda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html) or [mamba](https://mamba.readthedocs.io/en/latest/installation/mamba-installation.html) installation. Follow the instruction at the respective links if you have installed neither. We assume you have `conda` for the rest of the instructions. After installing it, you can use the `conda` command.
@@ -36,6 +36,7 @@ cd synapse-net
 ```bash
 conda env create -f environment.yaml
 ```
+If you are using Windows then you have to use a different environment file for the installation: Use `environment_gpu_win.yaml` if you have a GPU and `environment_cpu_win.yaml` without a GPU.
 - You will need to confirm this step. It will take a while. Afterwards you can activate the environment:
 ```bash
 conda activate synapse-net
@@ -71,6 +72,8 @@ We currently offer seven different models for segmenting synaptic structures:
 
 
 ## Napari Plugin
+
+You can find a video tutorial for the SynapseNet napari plugin [on YouTube](https://youtu.be/7n8Oq1uAByE). Below, we explain the different plugin components with screenshots.
 
 After installing SynapseNet you can start napari by activating the `synapse-net` environment (or another environment you installed it in) and executing the `napari` command.
 Once napari is opened, you can load a tomogram (or other image data), by drag'n'dropping the corresponding mrc file onto the napari window.
@@ -110,7 +113,7 @@ The screenshot below shows a grouping of vesicles into 'close' (red) and 'far' (
 In addition, the `Segmentation Postprocessing` widget can be used to filter out objects that do not overlap with a mask, e.g. a synaptic compartment, or to intersect a segmentation with the boundaries of a mask.
 
 
-## Command Line Functionality
+## Command Line Interface
 
 SynapseNet provides a command line interface to segment synaptic structures in mrc files (or other image formats), and to export segmentation results to IMOD.
 
@@ -161,3 +164,10 @@ Domain adaptation is implemented in `synapse_net.training.domain_adaptation`. Yo
 
 We also provide functionality for 'regular' neural network training. In this case, you have to provide data **and** manual annotations for the structure(s) you want to segment.
 This functionality is implemented in `synapse_net.training.supervised_training`. You can find an example script that shows how to use it [here](https://github.com/computational-cell-analytics/synapse-net/blob/main/examples/network_training.py).
+
+## Segmentation for the CryoET Data Portal
+
+We have published segmentation results for tomograms of synapses stored in the [CryoET Data Portal](https://cryoetdataportal.czscience.com/). So far we have made the following depositions:
+- [CZCDP-10330](https://cryoetdataportal.czscience.com/depositions/10330): Contains synaptic vesicle segmentations for over 50 tomograms of synaptosomes. The segmentations were made with a model domain adapted to the synaptosome tomograms.
+
+The scripts for the submissions can be found in [scripts/cryo/cryo-et-portal](https://github.com/computational-cell-analytics/synapse-net/tree/main/scripts/cryo/cryo-et-portal).

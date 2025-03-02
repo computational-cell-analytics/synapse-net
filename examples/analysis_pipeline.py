@@ -1,3 +1,6 @@
+import os
+
+import imageio.v3 as imageio
 import napari
 import pandas as pd
 import numpy as np
@@ -128,6 +131,13 @@ def save_analysis(segmentations, vesicle_attributes, save_path):
     vesicle_attributes.to_excel(save_path, index=False)
 
 
+def save_segmentations(segmentations):
+    output_folder = "segmentations"
+    os.makedirs(output_folder, exist_ok=True)
+    for name, segmentation in segmentations.items():
+        imageio.imwrite(os.path.join(output_folder, f"{name}.tif"), segmentation, compression="zlib")
+
+
 def main():
     """This script implements an example analysis pipeline with SynapseNet and applies it to a tomogram.
     Here, we analyze docked and non-attached vesicles in a sample tomogram."""
@@ -150,7 +160,11 @@ def main():
     vesicle_attributes = assign_vesicle_pools(vesicle_attributes)
 
     # Visualize the results.
-    visualize_results(tomogram, segmentations, vesicle_attributes)
+    # visualize_results(tomogram, segmentations, vesicle_attributes)
+
+    # Save the segmentation results to tif files so that they can be re-used later.
+    # They will be saved to the folder 'segmentations'.
+    save_segmentations(segmentations)
 
     # Compute the vesicle radii and combine and save all measurements.
     save_path = "analysis_results.xlsx"

@@ -8,7 +8,7 @@ from synapse_net.inference.util import inference_helper, parse_tiling
 
 def run_mitochondria_segmentation(args):
     if args.model is None:
-        model_path = get_model_path("mitochondria")
+        model_path = get_model_path("mitochondria2")
     else:
         model_path = args.model
 

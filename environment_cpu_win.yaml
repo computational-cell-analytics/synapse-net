@@ -4,15 +4,20 @@ channels:
 name:
     synapse-net
 dependencies:
+    - cpuonly
     - bioimageio.core
     - cpuonly
     - kornia
+    # This pin is necessary because later nifty versions have import errors on windows.
+    - nifty =1.2.1=*_4
     - magicgui
     - napari
+    - protobuf <5
     - pip
     - pyqt
     - python-elf
     - pytorch
+    - torchvision
     - tensorboard
     - torch_em
     - trimesh

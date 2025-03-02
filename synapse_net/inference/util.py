@@ -2,7 +2,7 @@ import os
 import time
 import warnings
 from glob import glob
-from typing import Dict, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 # # Suppress annoying import warnings.
 # with warnings.catch_warnings():
@@ -33,9 +33,25 @@ from tqdm import tqdm
 
 class _Scaler:
     def __init__(self, scale, verbose):
-        self.scale = scale
         self.verbose = verbose
         self._original_shape = None
+
+        if scale is None:
+            self.scale = None
+            return
+
+        # Convert scale to a NumPy array (ensures consistency)
+        scale = np.atleast_1d(scale).astype(np.float64)
+
+        # Validate scale values
+        if not np.issubdtype(scale.dtype, np.number):
+            raise TypeError(f"Scale contains non-numeric values: {scale}")
+
+        # Check if scaling is effectively identity (1.0 in all dimensions)
+        if np.allclose(scale, 1.0, atol=1e-3):
+            self.scale = None
+        else:
+            self.scale = scale
 
     def scale_input(self, input_volume, is_segmentation=False):
         if self.scale is None:
@@ -85,6 +101,7 @@ def get_prediction(
     model: Optional[torch.nn.Module] = None,
     verbose: bool = True,
     with_channels: bool = False,
+    channels_to_standardize: Optional[List[int]] = None,
     mask: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     """Run prediction on a given volume.
@@ -99,6 +116,7 @@ def get_prediction(
         tiling: The tiling configuration for the prediction.
         verbose: Whether to print timing information.
         with_channels: Whether to predict with channels.
+        channels_to_standardize: List of channels to standardize. Defaults to None.
         mask: Optional binary mask. If given, the prediction will only be run in
             the foreground region of the mask.
 
@@ -120,8 +138,12 @@ def get_prediction(
     # We standardize the data for the whole volume beforehand.
     # If we have channels then the standardization is done independently per channel.
     if with_channels:
+        input_volume = input_volume.astype(np.float32, copy=False)
         # TODO Check that this is the correct axis.
-        input_volume = torch_em.transform.raw.standardize(input_volume, axis=(1, 2, 3))
+        if channels_to_standardize is None:  # assume all channels
+            channels_to_standardize = range(input_volume.shape[0])
+        for ch in channels_to_standardize:
+            input_volume[ch] = torch_em.transform.raw.standardize(input_volume[ch])
     else:
         input_volume = torch_em.transform.raw.standardize(input_volume)
 
@@ -434,17 +456,24 @@ def get_default_tiling(is_2d: bool = False) -> Dict[str, Dict[str, int]]:
         else:
             raise NotImplementedError(f"Infererence with a GPU with {vram} GB VRAM is not supported.")
 
-        print(f"Determined tile size: {tile}")
         tiling = {"tile": tile, "halo": halo}
+        print(f"Determined tile size for CUDA: {tiling}")
+
+    elif torch.backends.mps.is_available():  # Check for Apple Silicon (MPS)
+        tile = {"x": 256, "y": 256, "z": 16}
+        halo = {"x": 16, "y": 16, "z": 4}
+        tiling = {"tile": tile, "halo": halo}
+        print(f"Determined tile size for MPS: {tiling}")
+
 
     # I am not sure what is reasonable on a cpu. For now choosing very small tiling.
     # (This will not work well on a CPU in any case.)
     else:
-        print("Determining default tiling")
         tiling = {
             "tile": {"x": 96, "y": 96, "z": 16},
             "halo": {"x": 16, "y": 16, "z": 4},
         }
+        print(f"Determining default tiling for CPU: {tiling}")
 
     return tiling
 
@@ -529,7 +558,7 @@ def _postprocess_seg_3d(seg, area_threshold=1000, iterations=4, iterations_3d=8)
     props = regionprops(seg)
     for prop in props:
         # Get bounding box and mask.
-        bb = tuple(slice(start, stop) for start, stop in zip(prop.bbox[:2], prop.bbox[2:]))
+        bb = tuple(slice(start, stop) for start, stop in zip(prop.bbox[:3], prop.bbox[3:]))
         mask = seg[bb] == prop.label
 
         # Fill small holes and apply closing.

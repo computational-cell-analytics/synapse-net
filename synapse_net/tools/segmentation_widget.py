@@ -45,7 +45,10 @@ def _get_current_tiling(tiling: dict, default_tiling: dict, model_type: str):
         for k2, v2 in v.items():
             if isinstance(v2, int):
                 continue
-            tiling[k][k2] = v2.value()
+            elif hasattr(v2, "value"):  # If it's a QSpinBox, extract the value
+                tiling[k][k2] = v2.value()
+            else:
+                raise TypeError(f"Unexpected type for tiling value: {type(v2)} at {k}/{k2}")
     # check if user inputs tiling/halo or not
     if default_tiling == tiling:
         if "2d" in model_type:
@@ -54,11 +57,13 @@ def _get_current_tiling(tiling: dict, default_tiling: dict, model_type: str):
                 "tile": {"x": 512, "y": 512, "z": 1},
                 "halo": {"x": 64, "y": 64, "z": 1},
             }
-    elif "2d" in model_type:
+    else:
+        show_info(f"Using custom tiling: {tiling}")
+    if "2d" in model_type:
         # if its a 2d model set z to 1
         tiling["tile"]["z"] = 1
-        tiling["halo"]["z"] = 1
-
+        tiling["halo"]["z"] = 0
+        show_info(f"Using tiling: {tiling}")
     return tiling
 
 
@@ -115,7 +120,12 @@ class SegmentationWidget(BaseWidget):
         model_widget = QWidget()
         title_label = QLabel("Select Model:")
 
-        models = ["- choose -"] + list(_get_model_registry().urls.keys())
+        # Exclude the models that are only offered through the CLI and not in the plugin.
+        model_list = set(_get_model_registry().urls.keys())
+        excluded_models = ["vesicles_2d_maus", "vesicles_3d_endbulb", "vesicles_3d_innerear"]
+        model_list = [name for name in model_list if name not in excluded_models]
+
+        models = ["- choose -"] + model_list
         self.model_selector = QComboBox()
         self.model_selector.addItems(models)
         # Create a layout and add the title label and combo box
@@ -178,6 +188,9 @@ class SegmentationWidget(BaseWidget):
         if model_type == "ribbon":  # Currently only the ribbon model needs the extra seg.
             extra_seg = self._get_layer_selector_data(self.extra_seg_selector_name)
             kwargs = {"extra_segmentation": extra_seg}
+        elif model_type == "cristae":  # Cristae model expects 2 3D volumes
+            image = np.stack([image, self._get_layer_selector_data(self.extra_seg_selector_name)], axis=0)
+            kwargs = {}
         else:
             kwargs = {}
         segmentation = run_segmentation(
