@@ -19,7 +19,7 @@ Please cite our [bioRxiv preprint](https://www.biorxiv.org/content/10.1101/2024.
 ## Requirements & Installation
 
 SynapseNet was tested on all operating systems (Linux, Mac, Windows).
-SynapseNet requires a GPU or a Macbooc with M chipset for the segmentation of 3D volumes. 
+SynapseNet requires a GPU or a Macbook with M chipset for the segmentation of 3D volumes.
 
 You need a [conda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html) or [mamba](https://mamba.readthedocs.io/en/latest/installation/mamba-installation.html) installation. Follow the instruction at the respective links if you have installed neither. We assume you have `conda` for the rest of the instructions. After installing it, you can use the `conda` command.
 
