@@ -68,7 +68,10 @@ def segment_cristae(
         print("Segmenting cristae in volume of shape", input_volume.shape)
     # Create the scaler to handle prediction with a different scaling factor.
     scaler = _Scaler(scale, verbose)
-    input_volume = scaler.scale_input(input_volume)
+    # rescale each channel
+    volume = scaler.scale_input(input_volume[0])
+    mito_seg = scaler.scale_input(input_volume[1], is_segmentation=True)
+    input_volume = np.stack([volume, mito_seg], axis=0)
 
     # Run prediction and segmentation.
     if mask is not None:

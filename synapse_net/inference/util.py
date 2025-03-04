@@ -59,7 +59,7 @@ class _Scaler:
 
         if self._original_shape is None:
             self._original_shape = input_volume.shape
-        elif self._oringal_shape != input_volume.shape:
+        elif self._original_shape != input_volume.shape:
             raise RuntimeError(
                 "Scaler was called with different input shapes. "
                 "This is not supported, please create a new instance of the class for it."

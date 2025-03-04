@@ -112,6 +112,7 @@ def get_model_training_resolution(model_type: str) -> Dict[str, float]:
         "active_zone": {"x": 1.44, "y": 1.44, "z": 1.44},
         "compartments": {"x": 3.47, "y": 3.47, "z": 3.47},
         "mitochondria": {"x": 2.07, "y": 2.07, "z": 2.07},
+        "cristae": {"x": 1.44, "y": 1.44, "z": 1.44},
         "ribbon": {"x": 1.188, "y": 1.188, "z": 1.188},
         "vesicles_2d": {"x": 1.35, "y": 1.35},
         "vesicles_3d": {"x": 1.35, "y": 1.35, "z": 1.35},
