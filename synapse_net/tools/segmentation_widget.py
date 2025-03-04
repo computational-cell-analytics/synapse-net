@@ -189,8 +189,11 @@ class SegmentationWidget(BaseWidget):
             extra_seg = self._get_layer_selector_data(self.extra_seg_selector_name)
             kwargs = {"extra_segmentation": extra_seg}
         elif model_type == "cristae":  # Cristae model expects 2 3D volumes
-            image = np.stack([image, self._get_layer_selector_data(self.extra_seg_selector_name)], axis=0)
-            kwargs = {}
+            kwargs = {
+                "extra_segmentation": self._get_layer_selector_data(self.extra_seg_selector_name),
+                "with_channels": True,
+                "channels_to_standardize": [0]
+            }
         else:
             kwargs = {}
         segmentation = run_segmentation(

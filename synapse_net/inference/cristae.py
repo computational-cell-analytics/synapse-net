@@ -62,6 +62,7 @@ def segment_cristae(
         The segmentation mask as a numpy array, or a tuple containing the segmentation mask
         and the predictions if return_predictions is True.
     """
+    mitochondria = kwargs.pop("extra_segmentation")
     with_channels = kwargs.pop("with_channels", True)
     channels_to_standardize = kwargs.pop("channels_to_standardize", [0])
     if verbose:
@@ -69,8 +70,8 @@ def segment_cristae(
     # Create the scaler to handle prediction with a different scaling factor.
     scaler = _Scaler(scale, verbose)
     # rescale each channel
-    volume = scaler.scale_input(input_volume[0])
-    mito_seg = scaler.scale_input(input_volume[1], is_segmentation=True)
+    volume = scaler.scale_input(input_volume)
+    mito_seg = scaler.scale_input(mitochondria, is_segmentation=True)
     input_volume = np.stack([volume, mito_seg], axis=0)
 
     # Run prediction and segmentation.
