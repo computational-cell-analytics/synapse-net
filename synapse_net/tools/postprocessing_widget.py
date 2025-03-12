@@ -46,8 +46,13 @@ class PostprocessingWidget(BaseWidget):
 
         # Second postprocessing option: intersect with boundary of the mask.
         self.button2 = QPushButton("Intersect with Boundary")
-        self.button2.clicked.connect(self.on_intersect)
+        self.button2.clicked.connect(self.on_intersect_boundary)
         layout.addWidget(self.button2)
+
+        # Third postprocessing option: intersect with the mask.
+        self.button3 = QPushButton("Intersect")
+        self.button3.clicked.connect(self.on_intersect)
+        layout.addWidget(self.button3)
 
         # Add the widgets to the layout.
         self.setLayout(layout)
@@ -82,10 +87,17 @@ class PostprocessingWidget(BaseWidget):
         segmentation[np.isin(segmentation, filter_ids)] = 0
         self._write_pp(segmentation)
 
-    def on_intersect(self):
+    def on_intersect_boundary(self):
         if not self._conditions_met():
             return
         segmentation, mask = self._get_segmentation_and_mask()
         boundary = find_boundaries(mask)
         segmentation = np.logical_and(segmentation > 0, boundary).astype(segmentation.dtype)
+        self._write_pp(segmentation)
+
+    def on_intersect(self):
+        if not self._conditions_met():
+            return
+        segmentation, mask = self._get_segmentation_and_mask()
+        segmentation = np.logical_and(segmentation > 0, mask > 0).astype(segmentation.dtype)
         self._write_pp(segmentation)
