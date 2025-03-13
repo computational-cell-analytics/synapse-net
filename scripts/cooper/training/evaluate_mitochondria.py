@@ -18,7 +18,12 @@ def evaluate(labels, vesicles):
 
 
 def summarize_eval(results):
-    summary = results[["dataset", "f1-score", "precision", "recall", "SBD score"]].groupby("dataset").mean().reset_index("dataset")
+    summary = (
+        results[["dataset", "f1-score", "precision", "recall", "SBD score"]]
+        .groupby("dataset")
+        .mean()
+        .reset_index("dataset")
+    )
     total = results[["f1-score", "precision", "recall", "SBD score"]].mean().values.tolist()
     summary.iloc[-1] = ["all"] + total
     table = summary.to_markdown(index=False)
@@ -60,7 +65,7 @@ def evaluate_file(labels_path, seg_path, model_name, segment_key, anno_key, mask
         results = pd.concat([results, res])
     results.to_csv(result_path, index=False)
 
-    #print results
+    # print results
     summarize_eval(results)
 
 
