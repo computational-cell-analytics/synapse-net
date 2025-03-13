@@ -3,10 +3,24 @@ import os
 
 import h5py
 import pandas as pd
+import numpy as np
 
 from elf.evaluation import matching, symmetric_best_dice_score
 
-
+def get_bounding_box(mask, halo=2):
+    """ Get bounding box coordinates around a mask with a halo."""
+    coords = np.argwhere(mask)
+    if coords.size == 0:
+        return None  # No labels found
+    
+    min_coords = coords.min(axis=0)
+    max_coords = coords.max(axis=0)
+    
+    min_coords = np.maximum(min_coords - halo, 0)
+    max_coords = np.minimum(max_coords + halo, mask.shape)
+    
+    slices = tuple(slice(min_c, max_c) for min_c, max_c in zip(min_coords, max_coords))
+    return slices
 
 def evaluate(labels, vesicles):
     assert labels.shape == vesicles.shape
@@ -44,6 +58,16 @@ def evaluate_file(labels_path, vesicles_path, model_name, segment_key, anno_key,
     if mask_key is not None:
         gt[mask == 0] = 0
         vesicles[mask == 0] = 0
+
+    bb= False
+    if bb:
+        # Get bounding box and crop
+        bb_slices = get_bounding_box(gt, halo=2)
+        gt = gt[bb_slices]
+        vesicles = vesicles[bb_slices]
+    else:
+        print("not using bb")
+
      #evaluate the match of ground truth and vesicles
     scores = evaluate(gt, vesicles)
     
