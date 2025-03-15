@@ -62,7 +62,7 @@ def check_result(tomogram, deposition_id, processing_type):
     output_folder = os.path.join(f"upload_CZCDP-{deposition_id}", str(tomogram.run.dataset_id))
     output_file = os.path.join(output_folder, f"{tomogram.run.name}.zarr")
     if os.path.exists(output_file):
-        segmentation = ""   # TODO load the segmentation from zarr
+        segmentation = None   # TODO load the segmentation from zarr
     else:
         segmentation = None
 
