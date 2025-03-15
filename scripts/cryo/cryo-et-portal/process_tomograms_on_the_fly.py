@@ -1,3 +1,4 @@
+import argparse
 import os
 import cryoet_data_portal as cdp
 import zarr
@@ -28,8 +29,7 @@ def write_ome_zarr(output_file, segmentation, voxel_size):
 
 
 def run_prediction(tomogram, deposition_id, processing_type):
-    output_root = f"upload_CZCDP-{deposition_id}"
-    output_folder = os.path.join(output_root, str(tomogram.run.dataset_id))
+    output_folder = os.path.join(f"upload_CZCDP-{deposition_id}", str(tomogram.run.dataset_id))
     os.makedirs(output_folder, exist_ok=True)
 
     output_file = os.path.join(output_folder, f"{tomogram.run.name}.zarr")
@@ -50,7 +50,35 @@ def run_prediction(tomogram, deposition_id, processing_type):
     write_ome_zarr(output_file, segmentation, voxel_size)
 
 
+def check_result(tomogram, deposition_id, processing_type):
+    import napari
+
+    # Read tomogram data on the fly.
+    data, voxel_size = read_data_from_cryo_et_portal_run(
+        tomogram.run_id, processing_type=processing_type
+    )
+
+    # Read the output file if it exists.
+    output_folder = os.path.join(f"upload_CZCDP-{deposition_id}", str(tomogram.run.dataset_id))
+    output_file = os.path.join(output_folder, f"{tomogram.run.name}.zarr")
+    if os.path.exists(output_file):
+        segmentation = ""   # TODO load the segmentation from zarr
+    else:
+        segmentation = None
+
+    v = napari.Viewer()
+    v.add_image(data)
+    if segmentation is not None:
+        v.add_labels(segmentation)
+    napari.run()
+
+
 def main():
+    parser = argparse.ArgumentParser()
+    # Whether to check the result with napari instead of running the prediction.
+    parser.add_argument("-c", "--check", action="store_true")
+    args = parser.parse_args()
+
     deposition_id = 10313
     processing_type = "denoised"
 
@@ -59,7 +87,10 @@ def main():
 
     # Process each tomogram.
     for tomogram in tqdm(tomograms, desc="Run prediction for tomograms on-the-fly"):
-        run_prediction(tomogram, deposition_id, processing_type)
+        if args.check:
+            check_result(tomogram, deposition_id, processing_type)
+        else:
+            run_prediction(tomogram, deposition_id, processing_type)
 
 
 if __name__ == "__main__":
