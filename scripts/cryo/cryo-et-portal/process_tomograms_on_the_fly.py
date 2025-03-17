@@ -44,7 +44,7 @@ def run_prediction(tomogram, deposition_id, processing_type):
 
     # Segment vesicles.
     # TODO put segmentation code here.
-    segmentation = ...
+    segmentation = "/mnt/lustre-emmy-hdd/projects/nim00007/models/synaptic-reconstruction/vesicle-DA-portal-v3/"
 
     # Save the segmentation.
     write_ome_zarr(output_file, segmentation, voxel_size)
