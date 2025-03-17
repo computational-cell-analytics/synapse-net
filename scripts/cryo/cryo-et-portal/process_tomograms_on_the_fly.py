@@ -6,6 +6,7 @@ import zarr
 from ome_zarr.io import parse_url
 from ome_zarr.writer import write_image
 from synapse_net.file_utils import read_data_from_cryo_et_portal_run
+from synapse_net.inference.vesicles import segment_vesicles
 from tqdm import tqdm
 
 
@@ -43,8 +44,8 @@ def run_prediction(tomogram, deposition_id, processing_type):
     )
 
     # Segment vesicles.
-    # TODO put segmentation code here.
-    segmentation = "/mnt/lustre-emmy-hdd/projects/nim00007/models/synaptic-reconstruction/vesicle-DA-portal-v3/"
+    model_path = "/mnt/lustre-emmy-hdd/projects/nim00007/models/synaptic-reconstruction/vesicle-DA-portal-v3"
+    segmentation = segment_vesicles(data, model_path=model_path)
 
     # Save the segmentation.
     write_ome_zarr(output_file, segmentation, voxel_size)
