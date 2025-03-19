@@ -178,7 +178,7 @@ def read_data_from_cryo_et_portal_run(
         The data read from the run.
         The voxel size read from the run.
     """
-    assert id_field in ("id", "run_id")
+    assert id_field in ("id", "run_id", "deposition_id")
     if output_path is not None and os.path.exists(output_path):
         return read_ome_zarr(output_path) if use_zarr_format else read_mrc(output_path)
 
@@ -190,9 +190,14 @@ def read_data_from_cryo_et_portal_run(
     client = cdp.Client()
 
     fs = s3fs.S3FileSystem(anon=True)
-    tomograms = cdp.Tomogram.find(
-        client, [getattr(cdp.Tomogram, id_field) == run_id, cdp.Tomogram.processing == processing_type]
-    )
+    if processing_type is not None:
+        tomograms = cdp.Tomogram.find(
+            client, [getattr(cdp.Tomogram, id_field) == run_id, cdp.Tomogram.processing == processing_type]
+        )
+    else:
+        tomograms = cdp.Tomogram.find(
+            client, [getattr(cdp.Tomogram, id_field) == run_id]
+        )
     if len(tomograms) == 0:
         return None, None
     if len(tomograms) > 1:
