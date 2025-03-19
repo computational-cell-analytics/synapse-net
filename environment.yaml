@@ -17,5 +17,10 @@ dependencies:
     - torchvision
     - trimesh
     - zarr < 3
+    - ome-zarr
+    - s3fs
+    - botocore=1.37.1
+    - aiobotocore=2.21.1
     - pip:
         - napari-skimage-regionprops
+        - cryoet_data_portal
