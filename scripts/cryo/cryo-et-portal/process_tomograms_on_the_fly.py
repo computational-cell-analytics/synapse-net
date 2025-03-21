@@ -87,6 +87,7 @@ def main():
     tomograms = get_tomograms(deposition_id, processing_type)
 
     # Process each tomogram.
+    print("Start processing", len(tomograms), "tomograms")
     for tomogram in tqdm(tomograms, desc="Run prediction for tomograms on-the-fly"):
         if args.check:
             check_result(tomogram, deposition_id, processing_type)
