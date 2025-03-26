@@ -8,6 +8,7 @@ from elf.io import open_file
 import pandas as pd
 
 from elf.evaluation import matching, symmetric_best_dice_score
+import elf.parallel as parallel
 
 
 def evaluate(labels, vesicles):
@@ -43,6 +44,13 @@ def evaluate_file(labels_path, seg_path, model_name, segment_key, anno_key, mask
         print("Could not find label file for", seg_path)
         print("Skipping...")
 
+    if "Otof_AVCN03_429C_WT_M" in seg_path:
+        print("Removing unlabeled cristae by mitos", seg_path)
+        # read mito labels
+        mito_labels = open_file(labels_path)["raw_mitos_combined"][1][:]
+        mito_labels = parallel.label(mito_labels, block_shape=(128, 256, 256), verbose=True)
+        seg[mito_labels != 1] = 0
+
     # evaluate the match of ground truth and vesicles
     scores = evaluate(labels, seg)
 
@@ -72,7 +80,7 @@ def evaluate_file(labels_path, seg_path, model_name, segment_key, anno_key, mask
 
 
 def evaluate_folder(labels_path, segmentation_path, model_name, segment_key,
-                    anno_key, mask_key, output_folder, ext=".tif"):
+                    anno_key, mask_key, output_folder, ext=".n5"):
     print(f"Evaluating folder {segmentation_path}")
     print(f"Using labels stored in {labels_path}")
 
@@ -81,9 +89,9 @@ def evaluate_folder(labels_path, segmentation_path, model_name, segment_key,
     if label_paths is None or seg_paths is None:
         print("Could not find label file or segmentation file")
         return
-
     for seg_path in seg_paths:
-        label_path = find_label_file(seg_path, label_paths)
+        # label_path = find_label_file(seg_path, label_paths)
+        label_path = seg_path  # both store in n5
         if label_path is not None:
             evaluate_file(label_path, seg_path, model_name, segment_key, anno_key, mask_key, output_folder)
         else:
@@ -120,16 +128,16 @@ def find_label_file(given_path: str, label_paths: list) -> str:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("-sp", "--segmentation_path", required=True,
+    parser.add_argument("-sp", "--segmentation_path", required=False,
                         default="/scratch-grete/projects/nim00007/data/mitochondria/cooper/cristae_test_segmentations/")
-    parser.add_argument("-gp", "--groundtruth_path", required=True,
+    parser.add_argument("-gp", "--groundtruth_path", required=False,
                         default="/scratch-grete/projects/nim00007/data/mitochondria/cooper/cristae_test_segmentations/")
     parser.add_argument("-n", "--model_name", required=True)
-    parser.add_argument("-sk", "--segmentation_key", default=None, default="labels/new_cristae_seg")
-    parser.add_argument("-gk", "--groundtruth_key", default=None, default="labels/cristae")
+    parser.add_argument("-sk", "--segmentation_key", default="labels/new_cristae_seg")
+    parser.add_argument("-gk", "--groundtruth_key", default="labels/cristae")
     parser.add_argument("-m", "--mask_key", default=None)
     parser.add_argument(
-        "-o", "--output_folder", required=True,
+        "-o", "--output_folder", required=False,
         default="/scratch-grete/projects/nim00007/data/mitochondria/cooper/cristae_test_segmentations/eval"
         )
     args = parser.parse_args()
