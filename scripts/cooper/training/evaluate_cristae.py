@@ -44,7 +44,7 @@ def evaluate_file(labels_path, seg_path, model_name, segment_key, anno_key, mask
         print("Could not find label file for", seg_path)
         print("Skipping...")
 
-    if "Otof_AVCN03_429C_WT_M" in seg_path:
+    if "WT20_eb7_AZ1_model2_combined" in seg_path:
         print("Removing unlabeled cristae by mitos", seg_path)
         # read mito labels
         mito_labels = open_file(labels_path)["raw_mitos_combined"][1][:]
@@ -90,6 +90,9 @@ def evaluate_folder(labels_path, segmentation_path, model_name, segment_key,
         print("Could not find label file or segmentation file")
         return
     for seg_path in seg_paths:
+        if "Otof_AVCN03_429C_WT_M" in seg_path:
+            print("Skipping because file has artifacts", seg_path)
+            continue
         # label_path = find_label_file(seg_path, label_paths)
         label_path = seg_path  # both store in n5
         if label_path is not None:
