@@ -6,8 +6,8 @@ dependencies:
     - bioimageio.core
     - kornia
     - magicgui
-    - napari
-    - nifty >= 1.2.2
+    - napari >=0.5.0,<0.6.0
+    - nifty >=1.2.3
     - pip
     - pyqt
     - python-elf
@@ -16,6 +16,6 @@ dependencies:
     - torch_em
     - torchvision
     - trimesh
-    - zarr < 3
+    - zarr <3
     - pip:
         - napari-skimage-regionprops
