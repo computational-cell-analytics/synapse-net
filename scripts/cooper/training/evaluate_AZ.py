@@ -64,10 +64,10 @@ def evaluate_file(labels_path, segmentation_path, model_name, crop= False, preci
 
     #get the labels and segmentation
     with h5py.File(labels_path) as label_file:
-        gt = label_file["/labels/thin_az"][:]
+        gt = label_file["/labels/az"][:]
         
     with h5py.File(segmentation_path) as seg_file:
-        segmentation = seg_file["/AZ/thin_az"][:]
+        segmentation = seg_file["/AZ/segment_from_AZmodel_v5"][:]
 
     if crop:
         print("cropping the annotation and segmentation")
@@ -82,7 +82,7 @@ def evaluate_file(labels_path, segmentation_path, model_name, crop= False, preci
     # Store results
     result_folder = "/user/muth9/u12095/synaptic-reconstruction/scripts/cooper/evaluation_results"
     os.makedirs(result_folder, exist_ok=True)
-    result_path = os.path.join(result_folder, f"evaluation_{model_name}_dice_thinpred_thinanno.csv")
+    result_path = os.path.join(result_folder, f"evaluation_{model_name}.csv")
     print("Evaluation results are saved to:", result_path)
 
     # Load existing results if the file exists

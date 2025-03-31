@@ -1,6 +1,7 @@
 import argparse
 import h5py
 import os
+import json
 from pathlib import Path
 
 from tqdm import tqdm
@@ -91,13 +92,11 @@ def run_AZ_segmentation(input_path, output_path, model_path, mask_path, mask_key
         
 
 
-def segment_folder(args):
-    input_files = []
-    for root, dirs, files in os.walk(args.input_path):
-        input_files.extend([
-            os.path.join(root, name) for name in files if name.endswith(args.data_ext)
-        ])
+def segment_folder(args, valid_files):
+    input_files = [os.path.join(root, name) for root, _, files in os.walk(args.input_path) for name in files if name.endswith(args.data_ext)]
+    input_files = [f for f in input_files if f in valid_files] if valid_files else input_files
     print(input_files)
+    
     pbar = tqdm(input_files, desc="Run segmentation")
     for input_path in pbar:
 
@@ -114,8 +113,16 @@ def segment_folder(args):
             except:
                 print(f"compartment file not found for {input_path}")
                 compartment_seg = None
+        else:
+            compartment_seg = None
 
         run_AZ_segmentation(input_path, args.output_path, args.model_path, mask_path, args.mask_key, args.tile_shape, args.halo, args.key_label, compartment_seg)
+
+def get_dataset(json_file, input_path, sets=["test"]):
+    with open(json_file, 'r') as f:
+        data = json.load(f)
+    return {os.path.join(input_path, f) for dataset in sets for f in data.get(dataset, [])}
+
 
 def main():
     parser = argparse.ArgumentParser(description="Segment vesicles in EM tomograms.")
@@ -129,6 +136,9 @@ def main():
     )
     parser.add_argument(
         "--model_path", "-m", required=True, help="The filepath to the vesicle model."
+    )
+    parser.add_argument(
+        "--json_path", "-j",  help="The filepath to the json file that stores the train, val, and test split."
     )
     parser.add_argument(
         "--mask_path", help="The filepath to a h5 file with a mask that will be used to restrict the segmentation. Needs to be in combination with mask_key."
@@ -153,7 +163,7 @@ def main():
         help="Format extension of data to be segmented, default is .h5."
     )
     parser.add_argument(
-        "--compartment_seg", "-c", 
+        "--compartment_seg", "-c", default = None,
         help="Path to compartment segmentation."
         "If the compartment segmentation was executed before, this will add a key to output file that stores the intersection between compartment boundary and AZ."
         "Maybe need to adjust the compartment key that the segmentation is stored under"
@@ -161,12 +171,18 @@ def main():
     args = parser.parse_args()
 
     input_ = args.input_path
+    valid_files = get_dataset(args.json_path, input_) if args.json_path else None
     
-    if os.path.isdir(input_):
-        segment_folder(args)
+    if valid_files:
+        if len(valid_files) == 1:
+            run_AZ_segmentation(next(iter(valid_files)), args.output_path, args.model_path, args.mask_path, args.mask_key, args.tile_shape, args.halo, args.key_label, args.compartment_seg)
+        else:
+            segment_folder(args, valid_files)
+    elif os.path.isdir(args.input_path):
+        segment_folder(args, valid_files)
     else:
-        run_AZ_segmentation(input_, args.output_path, args.model_path, args.mask_path, args.mask_key, args.tile_shape, args.halo, args.key_label, args.compartment_seg)
-
+        run_AZ_segmentation(args.input_path, args.output_path, args.model_path, args.mask_path, args.mask_key, args.tile_shape, args.halo, args.key_label, args.compartment_seg)
+    
     print("Finished segmenting!")
 
 if __name__ == "__main__":

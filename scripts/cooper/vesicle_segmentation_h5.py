@@ -35,6 +35,20 @@ def get_volume(input_path):
     return input_volume
 
 def run_vesicle_segmentation(input_path, output_path, model_path, mask_path, mask_key,tile_shape, halo, include_boundary, key_label, distance_threshold = None):
+    
+    seg_output = _require_output_folders(output_path)
+    file_name = Path(input_path).stem
+    seg_path = os.path.join(seg_output, f"{file_name}.h5")
+
+    try:
+        with h5py.File(seg_path, "r") as f:
+            key=f"vesicles/segment_from_{key_label}"
+            if key in f:
+                print("Skipping", input_path, "because", key, "exists")
+                return
+    except:
+        print("need to create new seg file")
+
     tiling = parse_tiling(tile_shape, halo)
     print(f"using tiling {tiling}")
     input = get_volume(input_path)
@@ -58,10 +72,6 @@ def run_vesicle_segmentation(input_path, output_path, model_path, mask_path, mas
 
     foreground, boundaries = prediction[:2]
 
-    seg_output = _require_output_folders(output_path)
-    file_name = Path(input_path).stem
-    seg_path = os.path.join(seg_output, f"{file_name}.h5")
-
     #check
     os.makedirs(Path(seg_path).parent, exist_ok=True)
 
@@ -77,8 +87,8 @@ def run_vesicle_segmentation(input_path, output_path, model_path, mask_path, mas
             print("Skipping", input_path, "because", key, "exists")
         else:
             f.create_dataset(key, data=segmentation, compression="gzip")
-            f.create_dataset(f"prediction_{key_label}/foreground", data = foreground, compression="gzip")
-            f.create_dataset(f"prediction_{key_label}/boundaries", data = boundaries, compression="gzip")
+            #f.create_dataset(f"prediction_{key_label}/foreground", data = foreground, compression="gzip")
+            #f.create_dataset(f"prediction_{key_label}/boundaries", data = boundaries, compression="gzip")
         
         if mask is not None:
             if mask_key in f:
