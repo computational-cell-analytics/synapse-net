@@ -1,5 +1,6 @@
 import os
 import multiprocessing as mp
+from itertools import product
 from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
@@ -265,7 +266,7 @@ def measure_segmentation_to_object_distances(
             object_ids=object_ids,
         )
     if return_object_ids:
-        return distances, endpoints1, endpoints2, seg_ids, objet_ids
+        return distances, endpoints1, endpoints2, seg_ids, object_ids
     else:
         return distances, endpoints1, endpoints2, seg_ids
 
@@ -507,6 +508,46 @@ def keep_direct_distances(
     return filtered_pairs
 
 
+# Current implementation only works for 3D data.
+def dilate_coordinates(
+    coords: List[Tuple[int, int, int]], dilation_radius: int, shape: Tuple[int, int, int]
+) -> List[Tuple[int, int, int]]:
+    """Expand coordinates similar to binary dilation without explicitly creating a mask.
+
+    Parameters:
+        coords: List of (z, row, col) coordinates to expand.
+        dilation_radius: Radius of dilation (in pixels).
+        shape: Shape (depth, rows, cols) to clip the expanded coordinates.
+
+    Returns:
+        Expanded list of coordinates.
+    """
+    coords = np.vstack(coords).T
+
+    # Generate a cubic structuring element (neighborhood)
+    offset_range = np.arange(-dilation_radius, dilation_radius + 1)
+    offsets = np.array(list(product(offset_range, offset_range, offset_range)))
+
+    # Apply offsets to all coordinates (broadcasted)
+    expanded = (coords[:, None, :] + offsets[None, :, :]).reshape(-1, 3)
+
+    # Clip coordinates to the image shape.
+    valid_mask = (
+        (expanded[:, 0] >= 0) & (expanded[:, 0] < shape[0]) &
+        (expanded[:, 1] >= 0) & (expanded[:, 1] < shape[1]) &
+        (expanded[:, 2] >= 0) & (expanded[:, 2] < shape[2])
+    )
+    expanded = expanded[valid_mask]
+
+    # Remove duplicates
+    expanded = np.unique(expanded, axis=0)
+
+    # Convert back to the tuple of arrays format
+    expanded_coords = tuple(expanded.T)
+
+    return expanded_coords
+
+
 def filter_blocked_segmentation_to_object_distances(
     segmentation: np.ndarray,
     distances: np.ndarray,
@@ -535,32 +576,27 @@ def filter_blocked_segmentation_to_object_distances(
         The list of id pairs that are kept.
     """
     distance_lines, properties = create_object_distance_lines(
-         distances, endpoints1, endpoints2, seg_ids, scale=scale
+         distances, endpoints1, endpoints2, seg_ids, filter_seg_ids=filter_seg_ids, scale=scale
     )
     all_seg_ids = properties["id"]
 
     filtered_ids = []
-    for seg_id, line in tqdm(zip(all_seg_ids, distance_lines), total=len(distance_lines), disable=not verbose):
-        if (seg_ids is not None) and (seg_id not in seg_ids):
+    for seg_id, line in tqdm(
+        zip(all_seg_ids, distance_lines), total=len(distance_lines), disable=not verbose, desc="Filter blocked objects"
+    ):
+        if (filter_seg_ids is not None) and (seg_id not in filter_seg_ids):
             continue
 
         start, stop = line
         line = line_nd(start, stop, endpoint=True)
 
         if line_dilation > 0:
-            # TODO make this more efficient, ideally by dilating the mask coordinates
-            # instead of dilating the actual mask.
-            # We turn the line into a binary mask and dilate it to have some tolerance.
-            line_vol = np.zeros_like(segmentation)
-            line_vol[line] = 1
-            line_vol = binary_dilation(line_vol, iterations=line_dilation)
-        else:
-            line_vol = line
+            line = dilate_coordinates(line, line_dilation, segmentation.shape)
 
         # Check if we cross any other segments:
         # Extract the unique ids in the segmentation that overlap with the segmentation.
         # We count this as a direct distance if no other object overlaps with the line.
-        line_seg_ids = np.unique(segmentation[line_vol])
+        line_seg_ids = np.unique(segmentation[line])
         line_seg_ids = np.setdiff1d(line_seg_ids, [0, seg_id])
 
         if len(line_seg_ids) == 0:  # No other objet is overlapping, we keep the line.

@@ -3,7 +3,7 @@ import os
 
 root = "/home/pape/Work/data/moser/em-synapses/Electron-Microscopy-Susi/Analyse"
 with open("tomo_issues.json", "r") as f:
-    tomos = json.load(f)[1:]
+    tomos = json.load(f)
 
 for name in tomos:
     path = os.path.join(root, name, "Korrektur", "measurements.xlsx")
