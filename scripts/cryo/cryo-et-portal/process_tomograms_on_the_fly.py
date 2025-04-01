@@ -51,10 +51,12 @@ def run_prediction(tomogram, deposition_id, processing_type):
     write_ome_zarr(output_file, segmentation, voxel_size)
 
 
+# TODO download on lower scale
 def check_result(tomogram, deposition_id, processing_type):
     import napari
 
     # Read tomogram data on the fly.
+    print("Download data ...")
     data, voxel_size = read_data_from_cryo_et_portal_run(
         tomogram.run_id, processing_type=processing_type
     )
@@ -63,7 +65,8 @@ def check_result(tomogram, deposition_id, processing_type):
     output_folder = os.path.join(f"upload_CZCDP-{deposition_id}", str(tomogram.run.dataset_id))
     output_file = os.path.join(output_folder, f"{tomogram.run.name}.zarr")
     if os.path.exists(output_file):
-        segmentation = None   # TODO load the segmentation from zarr
+        with zarr.open(output_file, "r") as f:
+            segmentation = f["0"][:]
     else:
         segmentation = None
 
@@ -95,5 +98,6 @@ def main():
             run_prediction(tomogram, deposition_id, processing_type)
 
 
+# TODO segmented at wrong size, check voxel size!
 if __name__ == "__main__":
     main()
