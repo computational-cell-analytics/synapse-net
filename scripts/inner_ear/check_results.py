@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 from glob import glob
@@ -204,10 +205,11 @@ def visualize_folder(folder, segmentation_version, visualize_distances, binning)
         for name, seg in segmentations.items():
             # The function signature of the label layer has recently changed,
             # and we still need to support both versions.
+            visible = name != "vesicles"
             try:
-                v.add_labels(seg, name=name, color=colors.get(name, None), scale=scale)
+                v.add_labels(seg, name=name, color=colors.get(name, None), scale=scale, visible=visible)
             except TypeError:
-                v.add_labels(seg, name=name, colormap=colors.get(name, None), scale=scale)
+                v.add_labels(seg, name=name, colormap=colors.get(name, None), scale=scale, visible=visible)
 
         for name, lines in distance_lines.items():
             v.add_shapes(lines, shape_type="line", name=name, visible=False, scale=scale)
@@ -250,7 +252,7 @@ def visualize_all_data(
     data_root, table,
     segmentation_version=None, check_micro=None,
     visualize_distances=False, skip_iteration=None,
-    binning="auto", val_table=None,
+    binning="auto", val_table=None, tomo_list=None,
 ):
     from parse_table import check_val_table
 
@@ -264,7 +266,13 @@ def visualize_all_data(
         if skip_iteration is not None and i < skip_iteration:
             continue
 
-        if val_table is not None:
+        if tomo_list is not None:
+            tomo_name = os.path.relpath(
+                folder, os.path.join(data_root, "Electron-Microscopy-Susi/Analyse")
+            )
+            if tomo_name not in tomo_list:
+                continue
+        elif val_table is not None:
             is_complete = check_val_table(val_table, row)
             if is_complete:
                 continue
@@ -303,6 +311,7 @@ def main():
     parser.add_argument("-d", "--visualize_distances", action="store_false")
     parser.add_argument("-b", "--binning", default="auto")
     parser.add_argument("-s", "--show_finished", action="store_true")
+    parser.add_argument("--tomos")  # Optional list of tomograms.
     args = parser.parse_args()
     assert args.microscope in (None, "both", "old", "new")
 
@@ -324,11 +333,16 @@ def main():
         val_table_path = os.path.join(data_root, "Electron-Microscopy-Susi", "Validierungs-Tabelle-v3.xlsx")
         val_table = pandas.read_excel(val_table_path)
 
+    tomo_list = args.tomos
+    if tomo_list is not None:
+        with open(tomo_list) as f:
+            tomo_list = json.load(f)
+
     visualize_all_data(
         data_root, table,
         segmentation_version=segmentation_version, check_micro=args.microscope,
         visualize_distances=args.visualize_distances, skip_iteration=args.iteration,
-        binning=binning, val_table=val_table
+        binning=binning, val_table=val_table, tomo_list=tomo_list
     )
 
 

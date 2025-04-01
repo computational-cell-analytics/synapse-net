@@ -54,6 +54,7 @@ def _load_segmentation(seg_path, tomo_shape):
 
 
 def compute_distances(segmentation_paths, save_folder, resolution, force, tomo_shape, use_corrected_vesicles=True):
+    print(save_folder)
     os.makedirs(save_folder, exist_ok=True)
 
     vesicles = None
@@ -77,6 +78,15 @@ def compute_distances(segmentation_paths, save_folder, resolution, force, tomo_s
         vesicles = _require_vesicles()
         ribbon_path = segmentation_paths["ribbon"]
         ribbon = _load_segmentation(ribbon_path, tomo_shape)
+
+        import napari
+        print("Tomo    :", tomo_shape)
+        print("Ribbon  :", ribbon.shape)
+        print("Vesicles:", vesicles.shape)
+        v = napari.Viewer()
+        v.add_labels(ribbon)
+        v.add_labels(vesicles)
+        napari.run()
 
         if ribbon is None or ribbon.sum() == 0:
             print("The ribbon segmentation at", segmentation_paths["ribbon"], "is empty. Skipping analysis.")
@@ -102,6 +112,8 @@ def compute_distances(segmentation_paths, save_folder, resolution, force, tomo_s
         mem_path = segmentation_paths["membrane"]
         membrane = _load_segmentation(mem_path, tomo_shape)
 
+        if membrane is None:
+            return None, True
         try:
             measure_segmentation_to_object_distances(
                 vesicles, membrane, save_path=membrane_save, resolution=resolution
@@ -469,7 +481,7 @@ def main():
 
     version = 2
     force = False
-    use_corrected_vesicles = False
+    use_corrected_vesicles = True
 
     # val_table_path = os.path.join(data_root, "Electron-Microscopy-Susi", "Validierungs-Tabelle-v3.xlsx")
     # val_table = pandas.read_excel(val_table_path)
