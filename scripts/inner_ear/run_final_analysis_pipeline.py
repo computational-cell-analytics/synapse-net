@@ -8,6 +8,7 @@ import pandas as pd
 from add_summary_stats_to_table import add_summary_stats
 from combine_measurements import combine_automatic_results, combine_manual_results
 from compare_pool_assignments import create_manual_assignment, compare_assignments, update_measurements
+from export_reformatted_results import export_reformatted_results
 
 sys.path.append("processing")
 
@@ -66,8 +67,15 @@ def main():
     update_measurements(data_root, tomograms, manual_res_path, output_path=full_manual_res_path)
 
     # Step 4: Add summary stats to all the tables.
-    for tab in [automatic_res_path, manual_res_path, full_manual_res_path]:
+    result_tables = [automatic_res_path, manual_res_path, full_manual_res_path]
+    for tab in result_tables:
         add_summary_stats(tab)
+
+    # Step 5: Export the reformatted results.
+    for tab in result_tables:
+        name = os.path.basename(tab)
+        out_tab = os.path.join(output_folder, f"summary_{name}")
+        export_reformatted_results(tab, out_tab)
 
 
 if __name__ == "__main__":

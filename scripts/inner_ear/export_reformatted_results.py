@@ -71,11 +71,10 @@ def aggregate_statistics(vesicle_table, morpho_table):
 
 
 # TODO
-# - check the ribbon association in multi-ribbon tomograms; not working for all yet
 # - add ribbon id to the morphology table!
-def main(args):
-    vesicle_table = pd.read_excel(args.input_path, sheet_name="vesicles")
-    morpho_table = pd.read_excel(args.input_path, sheet_name="morphology")
+def export_reformatted_results(input_path, output_path):
+    vesicle_table = pd.read_excel(input_path, sheet_name="vesicles")
+    morpho_table = pd.read_excel(input_path, sheet_name="morphology")
 
     vesicle_table["stimulation"] = vesicle_table["tomogram"].apply(lambda x: x.split("/")[0])
     # Separating by mouse is currently not required, but we leave in the column for now.
@@ -100,11 +99,11 @@ def main(args):
 
             sheet_name = f"{stim}-{condition}"
 
-            if os.path.exists(args.output_path):
-                with pd.ExcelWriter(args.output_path, engine="openpyxl", mode="a") as writer:
+            if os.path.exists(output_path):
+                with pd.ExcelWriter(output_path, engine="openpyxl", mode="a") as writer:
                     condition_table.to_excel(writer, sheet_name=sheet_name, index=False)
             else:
-                condition_table.to_excel(args.output_path, sheet_name=sheet_name, index=False)
+                condition_table.to_excel(output_path, sheet_name=sheet_name, index=False)
 
 
 if __name__ == "__main__":
@@ -118,4 +117,4 @@ if __name__ == "__main__":
         default="results/vesicle_pools_automatic.xlsx"
     )
     args = parser.parse_args()
-    main(args)
+    export_reformatted_results(args.input_path, args.output_path)
