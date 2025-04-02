@@ -41,6 +41,8 @@ def evaluate_file(labels_path, seg_path, model_name, segment_key, anno_key, mask
         labels = open_file(labels_path, "r")[anno_key][:]
     if ".tif" in seg_path:
         seg = imread(seg_path)
+    elif segment_key is not None:
+        seg = open_file(seg_path, "r")[segment_key][:]
     if labels is None or seg is None:
         print("Could not find label file for", seg_path)
         print("Skipping...")
@@ -74,14 +76,14 @@ def evaluate_file(labels_path, seg_path, model_name, segment_key, anno_key, mask
 
 
 def evaluate_folder(labels_path, segmentation_path, model_name, segment_key, anno_key,
-                    anno_ext, mask_key, output_folder):
+                    anno_ext, segment_ext, mask_key, output_folder):
     print(f"Evaluating folder {segmentation_path}")
     print(f"Using labels stored in {labels_path}")
     if labels_path is not None:
         label_paths = get_file_paths(labels_path, ext=anno_ext)
     else:
         label_paths = _get_default_label_paths()
-    seg_paths = get_file_paths(segmentation_path, ext=".tif")
+    seg_paths = get_file_paths(segmentation_path, ext=segment_ext)
     if label_paths is None or seg_paths is None:
         print("Could not find label file or segmentation file")
         return
@@ -117,7 +119,9 @@ def find_label_file(given_path: str, label_paths: list) -> str:
     raw_base = os.path.splitext(os.path.basename(given_path))[0]  # Remove extension
     raw_base = raw_base.replace("prediction", "").replace("pred", "")
     raw_base = raw_base.replace("segmentation", "").replace("seg", "")
+    raw_base = raw_base.replace("mito-v3_sd18_bt015_with__", "")
     raw_base = raw_base.rstrip("_")
+    print("raw_base", raw_base)
     for label_path in label_paths:
         label_base = os.path.splitext(os.path.basename(label_path))[0]  # Remove extension
         if raw_base.strip().lower() in label_base.strip().lower():  # Ensure raw name is contained in label name
@@ -144,13 +148,14 @@ def main():
     parser.add_argument("-sk", "--segmentation_key", default=None)
     parser.add_argument("-gk", "--groundtruth_key", default=None)
     parser.add_argument("-ae", "--annotation_extension", default=None)
+    parser.add_argument("-se", "--segmentation_extension", default=None)
     parser.add_argument("-m", "--mask_key", default=None)
     parser.add_argument("-o", "--output_folder", required=True)
     args = parser.parse_args()
 
     if os.path.isdir(args.segmentation_path):
         evaluate_folder(args.groundtruth_path, args.segmentation_path, args.model_name, args.segmentation_key,
-                        args.groundtruth_key, args.annotation_extension,
+                        args.groundtruth_key, args.annotation_extension, args.segmentation_extension,
                         args.mask_key, args.output_folder)
     else:
         evaluate_file(args.groundtruth_path, args.segmentation_path, args.model_name, args.segmentation_key,
