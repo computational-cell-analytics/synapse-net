@@ -26,7 +26,7 @@ def get_tomograms(deposition_id, processing_type, number_of_tomograms=None):
     return tomograms
 
 
-def write_ome_zarr(output_file, segmentation, voxel_size):
+def write_ome_zarr(output_file, segmentation, voxel_size, unit="nanometer"):
     store = parse_url(output_file, mode="w").store
     root = zarr.group(store=store)
 
@@ -34,7 +34,12 @@ def write_ome_zarr(output_file, segmentation, voxel_size):
     trafo = [
         [{"scale": scale, "type": "scale"}]
     ]
-    write_image(segmentation, root, axes="zyx", coordinate_transformations=trafo, scaler=None)
+    axes = [
+        {"name": "z", "type": "space", "unit": unit},
+        {"name": "y", "type": "space", "unit": unit},
+        {"name": "x", "type": "space", "unit": unit},
+    ]
+    write_image(segmentation, root, axes=axes, coordinate_transformations=trafo, scaler=None)
 
 
 def run_prediction(tomogram, deposition_id, processing_type):

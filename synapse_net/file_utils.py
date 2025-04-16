@@ -142,11 +142,16 @@ def read_ome_zarr(uri: str, scale_level: int = 0, fs=None) -> Tuple[np.ndarray, 
         # Read the axis and transformation metadata for this dataset, to determine the voxel size.
         axes = [axis["name"] for axis in multiscales["axes"]]
         assert set(axes) == set("xyz")
+        units = [axis.get("unit", "angstrom") for axis in multiscales["axes"]]
+        assert all(unit in ("angstrom", "nanometer") for unit in units)
+
         transformations = multiscales["datasets"][scale_level]["coordinateTransformations"]
         scale_transformation = [trafo["scale"] for trafo in transformations if trafo["type"] == "scale"][0]
 
-        # The voxel size is given in angstrom, we divide it by 10 to convert it to nanometer.
-        voxel_size = {axis: scale / 10.0 for axis, scale in zip(axes, scale_transformation)}
+        # Convert the given unit size to nanometer.
+        # (It is typically given in angstrom, and we have to divide by a factor of 10).
+        unit_factor = [10.0 if unit == "angstrom" else 1.0 for unit in units]
+        voxel_size = {axis: scale / factor for axis, scale, factor in zip(axes, scale_transformation, unit_factor)}
 
         # Get the internale path for the given scale and load the data.
         internal_path = multiscales["datasets"][scale_level]["path"]
