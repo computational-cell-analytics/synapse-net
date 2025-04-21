@@ -54,14 +54,10 @@ to use them.
 
 > Note: If you use `mamba` instead of conda just replace `conda` in the commands above with `mamba`.
 
-> Note: We also provide an environment for a CPU version of SynapseNet. You can install it by replacing `environment.yaml` with `environment_cpu.yaml` in the respective command above. This version can be used for 2D vesicle segmentation, but it does not work for 3D segmentation.
-
-> Note: If you have issues with the CUDA version then install a PyTorch that matches your nvidia drivers. See [pytorch.org](https://pytorch.org/) for details.
-
 ### Updating SynapseNet
 
 If you have installed SynapseNet following the instructions above then you can update it like this:
-- Go to the foloder where you have downloaded SyanapseNet in a terminal, e.g. via `cd synapase-net`
+- Go to the folder where you have downloaded SynapseNet in a terminal, e.g. via `cd synapse-net`
 - Then get the latest changes via git:
 ```bash
 git pull origin main
