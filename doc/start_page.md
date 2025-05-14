@@ -36,7 +36,6 @@ cd synapse-net
 ```bash
 conda env create -f environment.yaml
 ```
-If you are using Windows then you have to use a different environment file for the installation: Use `environment_gpu_win.yaml` if you have a GPU and `environment_cpu_win.yaml` without a GPU.
 - You will need to confirm this step. It will take a while. Afterwards you can activate the environment:
 ```bash
 conda activate synapse-net
