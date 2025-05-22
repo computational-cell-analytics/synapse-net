@@ -89,18 +89,61 @@ def process_all_azs(output_path):
     for ff in tqdm(files, desc="Thinning AZ segmentations"):
         process_az(ff, view=False)
 
+def subtract_SVseg_from_AZseg(input_path, SV_path, output_path):
+    """
+    Modifies AZ segmentation by setting regions where SV segmentation is not zero to zero.
+
+    Parameters:
+    input_path (str): Path to the folder containing AZ segmentation H5 files.
+    SV_path (str): Path to the folder containing corresponding SV segmentation H5 files.
+    output_path (str): Path to save modified AZ segmentation H5 files.
+    """
+
+    # Ensure output directory exists
+    os.makedirs(output_path, exist_ok=True)
+
+    # Iterate over all AZ segmentation files
+    for file_name in os.listdir(input_path):
+        if file_name.endswith(".h5"):
+            az_file = os.path.join(input_path, file_name)
+            sv_file = os.path.join(SV_path, file_name)
+
+            # Check if corresponding SV segmentation file exists
+            if os.path.exists(sv_file):
+                with h5py.File(sv_file, "r") as f_sv, h5py.File(az_file, "r+") as f_az:
+                    SV = f_sv["/vesicles/segment_from_combined_vesicles"][:]
+                    AZ = f_az["/labels/az"][:]
+                    raw = f_az["raw"][:]
+
+                    # Modify AZ segmentation where SV segmentation is not zero
+                    AZ[SV != 0] = 0
+
+                # Save modified AZ segmentation
+                output_file = os.path.join(output_path, file_name)
+                with h5py.File(output_file, "a") as f:
+                    f.create_dataset("raw", data=raw, compression="gzip")
+                    f.create_dataset("labels/az", data=AZ, compression="gzip")
+
+                print(f"Processed: {file_name}")
+
+            else:
+                print(f"Skipping {file_name}, corresponding SV file not found.")
+
 
 def main():
     parser = argparse.ArgumentParser(description="Filter and process AZ data.")
-    parser.add_argument("input_path", type=str, help="Path to the root directory containing datasets.")
-    parser.add_argument("output_path", type=str, help="Path to the root directory for saving processed data.")
+    parser.add_argument("-i", "--input_path", required=True, type=str, help="Path to the root directory containing datasets.")
+    parser.add_argument("-o", "--output_path", required=True, type=str, help="Path to the root directory for saving processed data.")
+    parser.add_argument("-sv", "--SV_path", type=str, help="Path to the root directory that contains the SV segmentations.")
     args = parser.parse_args()
 
     input_path = args.input_path
     output_path = args.output_path
 
-    filter_all_azs(input_path, output_path)
-    process_all_azs(output_path)
+    subtract_SVseg_from_AZseg(input_path, args.SV_path, output_path)
+
+    #filter_all_azs(input_path, output_path)
+    #process_all_azs(output_path)
 
 
 if __name__ == "__main__":

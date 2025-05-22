@@ -67,7 +67,7 @@ def evaluate_file(labels_path, segmentation_path, model_name, crop= False, preci
         gt = label_file["/labels/az"][:]
         
     with h5py.File(segmentation_path) as seg_file:
-        segmentation = seg_file["/AZ/segment_from_AZmodel_v5"][:]
+        segmentation = seg_file["/AZ/segment_from_AZmodel_v6"][:]
 
     if crop:
         print("cropping the annotation and segmentation")

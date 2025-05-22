@@ -11,7 +11,7 @@ from sklearn.model_selection import train_test_split
 from synaptic_reconstruction.training import supervised_training
 from synaptic_reconstruction.training import semisupervised_training
 
-TRAIN_ROOT = "/mnt/lustre-emmy-hdd/projects/nim00007/data/synaptic-reconstruction/cooper/exported_imod_objects/postprocessed_AZ"
+TRAIN_ROOT = "/mnt/lustre-emmy-hdd/usr/u12095/synaptic_reconstruction/AZ_data_after1stRevision/recorrected_length_of_AZ"
 OUTPUT_ROOT = "/mnt/lustre-emmy-hdd/usr/u12095/synaptic_reconstruction/training_AZ_after1stRevision"
 
 
@@ -83,11 +83,12 @@ def train(key, ignore_label = None, training_2D = False, testset = True):
     os.makedirs(OUTPUT_ROOT, exist_ok=True)
 
     datasets = [
-    "01data_withoutInvertedFiles",
-    "04_hoi_stem_examples",
-    "06_hoi_wt_stem750_fm",
-    "12_chemical_fix_cryopreparation",
-    "wichmann_withAZ"
+    "01data_withoutInvertedFiles_minusSVseg_corrected",
+    "04_hoi_stem_examples_fidi_and_sarah_corrected_rescaled_tomograms",
+    "04_hoi_stem_examples_minusSVseg_cropped_corrected_rescaled_tomograms",
+    "06_hoi_wt_stem750_fm_minusSVseg_cropped_corrected_rescaled_tomograms",
+    "12_chemical_fix_cryopreparation_minusSVseg_corrected",
+    "wichmann_withAZ_rescaled_tomograms"
 ]
     train_paths = get_paths("train", datasets=datasets, testset=testset)
     val_paths = get_paths("val", datasets=datasets, testset=testset)
@@ -97,7 +98,7 @@ def train(key, ignore_label = None, training_2D = False, testset = True):
     print(len(val_paths), "tomograms for validation")
 
     patch_shape = [48, 256, 256]
-    model_name=f"3D-AZ-model-v6"
+    model_name=f"3D-AZ-model-TEM_STEM_ChemFix_wichmann-v1"
 
     #checking for 2D training
     if training_2D:
@@ -113,7 +114,7 @@ def train(key, ignore_label = None, training_2D = False, testset = True):
         val_paths=val_paths,
         label_key=f"/labels/{key}",
         patch_shape=patch_shape, batch_size=batch_size,
-        sampler = torch_em.data.sampler.MinInstanceSampler(min_num_instances=1, p_reject = 0.95),
+        sampler = torch_em.data.sampler.MinInstanceSampler(min_num_instances=1, p_reject = 0.8),
         n_samples_train=None, n_samples_val=25,
         check=check,
         save_root="/mnt/lustre-emmy-hdd/usr/u12095/synaptic_reconstruction/for_revison/models",
@@ -121,6 +122,8 @@ def train(key, ignore_label = None, training_2D = False, testset = True):
         ignore_label= ignore_label,
         label_transform=torch_em.transform.label.labels_to_binary,
         out_channels = 1,
+        BCE_loss=False,
+        sigmoid_layer=True,
     )
 
 

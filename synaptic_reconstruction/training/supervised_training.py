@@ -184,6 +184,8 @@ def supervised_training(
     label_transform: Optional[callable] = None,
     out_channels: int = 2,
     mask_channel: bool = False,
+    BCE_loss:bool = False,
+    sigmoid_layer:bool = True,
     **loader_kwargs,
 ):
     """Run supervised segmentation training.
@@ -243,7 +245,10 @@ def supervised_training(
     if is_2d:
         model = get_2d_model(out_channels=out_channels)
     else:
-        model = get_3d_model(out_channels=out_channels)
+        if sigmoid_layer:
+            model = get_3d_model(out_channels=out_channels)
+        else:
+            model = get_3d_model(out_channels=out_channels, final_activation=None)
 
     loss, metric = None, None
     # No ignore label -> we can use default loss.
@@ -268,6 +273,12 @@ def supervised_training(
         metric = loss
     else:
         raise ValueError
+    
+    #check for BCE loss (for AZ training)
+    if BCE_loss:
+        loss=torch.nn.BCEWithLogitsLoss()
+        #loss=torch_em.loss.dice.BCEDiceLossWithLogits()
+        metric = loss
 
     trainer = torch_em.default_segmentation_trainer(
         name=name,

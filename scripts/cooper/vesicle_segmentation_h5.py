@@ -175,5 +175,91 @@ def main():
 
     print("Finished segmenting!")
 
+def segment_folder2(args, valid_files):
+    input_files = [os.path.join(root, name) for root, _, files in os.walk(args.input_path) for name in files if name.endswith(args.data_ext)]
+    input_files = [f for f in input_files if f in valid_files] if valid_files else input_files
+    print(input_files)
+    for root, dirs, files in os.walk(args.input_path):
+        input_files.extend([
+            os.path.join(root, name) for name in files if name.endswith(args.data_ext)
+        ])
+    print(input_files)
+    pbar = tqdm(input_files, desc="Run segmentation")
+    for input_path in pbar:
+
+        filename = os.path.basename(input_path)
+        try:
+            mask_path = os.path.join(args.mask_path, filename)
+        except:
+            print(f"Mask file not found for {input_path}")
+            mask_path = None
+
+        run_vesicle_segmentation(
+            input_path, args.output_path, args.model_path, mask_path, args.mask_key, 
+            args.tile_shape, args.halo, args.include_boundary, args.key_label, args.distance_threshold
+        )
+
+def get_dataset(testfolder_path, input_path):
+    print("Getting valid test set")
+    # Get base filenames without '_processed' and extension
+    test_files = [
+        os.path.splitext(f)[0].replace('_processed', '')
+        for f in os.listdir(testfolder_path)
+        if f.endswith('.h5')
+    ]
+    
+    # Build a set for faster lookup
+    test_files_set = set(test_files)
+
+    # List files in input_path that match names in test_files_set
+    valid_files = [
+        os.path.join(input_path, f)
+        for f in os.listdir(input_path)
+        if os.path.splitext(f)[0] in test_files_set and f.endswith('.h5')
+    ]
+    
+    return valid_files
+
+def main2():
+    parser = argparse.ArgumentParser(description="Segment vesicles in EM tomograms.")
+    parser.add_argument("--input_path", "-i", required=True, help="Path to MRC file or directory.")
+    parser.add_argument("--output_path", "-o", required=True, help="Output directory.")
+    parser.add_argument("--model_path", "-m", required=True, help="Model file path.")
+    parser.add_argument("--mask_path", help="Optional mask file.")
+    parser.add_argument("--mask_key", help="Key in mask file.")
+    parser.add_argument("--tile_shape", type=int, nargs=3, help="Tile shape for prediction.")
+    parser.add_argument("--halo", type=int, nargs=3, help="Halo size.")
+    parser.add_argument("--include_boundary", action="store_true", help="Include edge vesicles.")
+    parser.add_argument("--key_label", "-k", default="combined_vesicles", help="Output H5 key.")
+    parser.add_argument("--distance_threshold", "-t", type=int, help="Distance threshold.")
+    parser.add_argument("--data_ext", "-d", default=".h5", help="File extension.")
+    parser.add_argument("--testfolder_path", help="Folder path to testset.")
+
+    args = parser.parse_args()
+
+    input_ = args.input_path
+    valid_files = get_dataset(args.testfolder_path, input_) if args.testfolder_path else None
+
+    if valid_files:
+        if len(valid_files) == 1:
+            run_vesicle_segmentation(
+                input_, args.output_path, args.model_path, args.mask_path,
+                args.mask_key, args.tile_shape, args.halo,
+                args.include_boundary, args.key_label, args.distance_threshold
+            )
+        else:
+            segment_folder2(args, valid_files)
+    elif os.path.isdir(args.input_path):
+        segment_folder2(args, valid_files)
+    else:
+        run_vesicle_segmentation(
+            input_, args.output_path, args.model_path, args.mask_path,
+            args.mask_key, args.tile_shape, args.halo,
+            args.include_boundary, args.key_label, args.distance_threshold
+        )
+
+    print("Finished segmenting!")
+
 if __name__ == "__main__":
-    main()
+    #main()
+    main2() #needed this to do the vesicle segmentation for only the data that is in the testset for paper but the uncropped version of the only GT annotated data
