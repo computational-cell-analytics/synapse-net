@@ -107,7 +107,23 @@ def evaluate_folder(labels_path, vesicles_path, model_name, segment_key, anno_ke
 
             evaluate_file(os.path.join(labels_path, vesicle_file), os.path.join(vesicles_path, vesicle_file), model_name, segment_key, anno_key, mask_key)
 
+def evaluate_folder_onlyGTAnnotations(labels_path, vesicles_path, model_name, segment_key, anno_key, mask_key=None):
+    print(f"Evaluating folder {vesicles_path}")
+    print(f"Using labels stored in {labels_path}")
 
+    label_files = set(os.listdir(labels_path))
+    vesicles_files = os.listdir(vesicles_path)
+    
+    for vesicle_file in vesicles_files:
+        if vesicle_file.endswith('_processed.h5'):
+            # Remove '_processed' to get the corresponding label file name
+            label_file = vesicle_file.replace('_processed', '')
+            if label_file in label_files:
+                evaluate_file(
+                    os.path.join(labels_path, label_file),
+                    os.path.join(vesicles_path, vesicle_file),
+                    model_name, segment_key, anno_key, mask_key
+                )
 
 def main():
     
@@ -123,6 +139,7 @@ def main():
     vesicles_path = args.vesicles_path
     if os.path.isdir(vesicles_path):
         evaluate_folder(args.labels_path, vesicles_path, args.model_name, args.segment_key, args.anno_key, args.mask_key)
+        #evaluate_folder_onlyGTAnnotations(args.labels_path, vesicles_path, args.model_name, args.segment_key, args.anno_key, args.mask_key)
     else:
         evaluate_file(args.labels_path, vesicles_path, args.model_name, args.segment_key, args.anno_key, args.mask_key)
     
