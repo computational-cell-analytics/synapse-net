@@ -5,10 +5,11 @@ import h5py
 import pandas as pd
 import numpy as np
 from elf.evaluation import dice_score
-
+from skimage.measure import label as connected_components_label
 from scipy.ndimage import binary_dilation, binary_closing
 from tqdm import tqdm
 from elf.evaluation import matching
+from elf.evaluation.matching import _compute_scores, _compute_tps
 
 
 def _expand_AZ(az):
@@ -91,6 +92,7 @@ def main():
     print("Total:")
     print(scores["Dice"].mean(), "+-", scores["Dice"].std())
 
+
 def get_bounding_box(mask, halo=2):
     """ Get bounding box coordinates around a mask with a halo. """
     coords = np.argwhere(mask)
@@ -110,10 +112,14 @@ def get_bounding_box(mask, halo=2):
 def evaluate(labels, seg):
     assert labels.shape == seg.shape
     stats = matching(seg, labels)
-    return [stats["f1"], stats["precision"], stats["recall"]]
+    n_true, n_matched, n_pred, scores = _compute_scores(seg, labels, criterion= "iou", ignore_label=None)
+    tp = _compute_tps(scores, n_matched, threshold= 0.5)
+    fp = n_pred - tp
+    fn = n_true - tp
+    return stats["f1"], stats["precision"], stats["recall"], tp, fp, fn
 
 
-def evaluate_file(labels_path, seg_path, segment_key, anno_key, mask_key=None):
+def evaluate_file(labels_path, seg_path, segment_key, anno_key, mask_key=None, cc=False):
     print(f"Evaluating: {os.path.basename(labels_path)}")
 
     ds_name = os.path.basename(os.path.dirname(labels_path))
@@ -132,6 +138,11 @@ def evaluate_file(labels_path, seg_path, segment_key, anno_key, mask_key=None):
         gt[mask == 0] = 0
         az[mask == 0] = 0
 
+    # Optionally apply connected components
+    if cc:
+        gt = connected_components_label(gt)
+        az = connected_components_label(az)
+
     # Optionally crop to bounding box
     use_bb = False
     if use_bb:
@@ -139,12 +150,13 @@ def evaluate_file(labels_path, seg_path, segment_key, anno_key, mask_key=None):
         gt = gt[bb_slices]
         az = az[bb_slices]
 
-    scores = evaluate(gt, az)
-    return pd.DataFrame([[ds_name, tomo] + scores],
-                        columns=["dataset", "tomogram", "f1-score", "precision", "recall"])
+    f1, precision, recall, tp, fp, fn = evaluate(gt, az)
+
+    return pd.DataFrame([[ds_name, tomo, f1, precision, recall, tp, fp, fn]],
+                        columns=["dataset", "tomogram", "f1-score", "precision", "recall", "tp", "fp", "fn"])
 
 
-def evaluate_folder(labels_path, seg_path, model_name, segment_key, anno_key, mask_key=None):
+def evaluate_folder(labels_path, seg_path, model_name, segment_key, anno_key, mask_key=None, cc=False):
     print(f"\nEvaluating folder: {seg_path}")
     label_files = os.listdir(labels_path)
     seg_files = os.listdir(seg_path)
@@ -156,7 +168,7 @@ def evaluate_folder(labels_path, seg_path, model_name, segment_key, anno_key, ma
             label_fp = os.path.join(labels_path, seg_file)
             seg_fp = os.path.join(seg_path, seg_file)
 
-            res = evaluate_file(label_fp, seg_fp, segment_key, anno_key, mask_key)
+            res = evaluate_file(label_fp, seg_fp, segment_key, anno_key, mask_key, cc)
             all_results.append(res)
 
     if not all_results:
@@ -165,19 +177,29 @@ def evaluate_folder(labels_path, seg_path, model_name, segment_key, anno_key, ma
 
     results_df = pd.concat(all_results, ignore_index=True)
 
-    # Per-folder metrics
-    folder_metrics = results_df[["f1-score", "precision", "recall"]].mean().to_dict()
+    # Convert TP, FP, FN to integers
+    results_df[["tp", "fp", "fn"]] = results_df[["tp", "fp", "fn"]].astype(int)
+
+    # Compute folder-level TP/FP/FN and final metrics
+    total_tp = results_df["tp"].sum()
+    total_fp = results_df["fp"].sum()
+    total_fn = results_df["fn"].sum()
+
+    precision = total_tp / (total_tp + total_fp) if (total_tp + total_fp) > 0 else 0.0
+    recall = total_tp / (total_tp + total_fn) if (total_tp + total_fn) > 0 else 0.0
+    f1_score = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+
     folder_name = os.path.basename(seg_path)
     print(f"\n Folder-Level Metrics for '{folder_name}':")
-    print(f"Precision: {folder_metrics['precision']:.4f}")
-    print(f"Recall:    {folder_metrics['recall']:.4f}")
-    print(f"F1 Score:  {folder_metrics['f1-score']:.4f}\n")
+    print(f"Precision: {precision:.4f}")
+    print(f"Recall:    {recall:.4f}")
+    print(f"F1 Score:  {f1_score:.4f}\n")
 
     # Save results
     result_dir = "/user/muth9/u12095/synapse-net/scripts/cooper/evaluation_results"
     os.makedirs(result_dir, exist_ok=True)
 
-    # Per-file CSV
+    # Per-file results
     file_results_path = os.path.join(result_dir, f"evaluation_{model_name}_per_file.csv")
     if os.path.exists(file_results_path):
         existing_df = pd.read_csv(file_results_path)
@@ -185,10 +207,13 @@ def evaluate_folder(labels_path, seg_path, model_name, segment_key, anno_key, ma
     results_df.to_csv(file_results_path, index=False)
     print(f"Per-file results saved to {file_results_path}")
 
-    # Append to per-folder summary
+    # Folder-level summary
     folder_summary_path = os.path.join(result_dir, f"evaluation_{model_name}_per_folder.csv")
+    header_needed = not os.path.exists(folder_summary_path)
     with open(folder_summary_path, "a") as f:
-        f.write(f"{folder_name},{folder_metrics['f1-score']:.4f},{folder_metrics['precision']:.4f},{folder_metrics['recall']:.4f}\n")
+        if header_needed:
+            f.write("folder,f1-score,precision,recall,tp,fp,fn\n")
+        f.write(f"{folder_name},{f1_score:.4f},{precision:.4f},{recall:.4f},{total_tp},{total_fp},{total_fn}\n")
     print(f"Folder summary appended to {folder_summary_path}")
 
 
@@ -200,14 +225,15 @@ def main_f1():
     parser.add_argument("-sk", "--segment_key", required=True)
     parser.add_argument("-ak", "--anno_key", required=True)
     parser.add_argument("-m", "--mask_key")
+    parser.add_argument("--cc", "--connected_components", dest="cc", action="store_true",
+                        help="Apply connected components to ground truth and segmentation before evaluation")
 
     args = parser.parse_args()
 
     if os.path.isdir(args.seg_path):
-        evaluate_folder(args.labels_path, args.seg_path, args.model_name, args.segment_key, args.anno_key, args.mask_key)
+        evaluate_folder(args.labels_path, args.seg_path, args.model_name, args.segment_key, args.anno_key, args.mask_key, args.cc)
     else:
         print("Please pass a folder to get folder-level metrics.")
-
 
 if __name__ == "__main__":
     #main() #for dice score
