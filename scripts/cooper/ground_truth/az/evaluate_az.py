@@ -5,7 +5,7 @@ import h5py
 import pandas as pd
 import numpy as np
 from elf.evaluation import dice_score
-from skimage.measure import label as connected_components_label
+from torch_em.transform.label import connected_components
 from scipy.ndimage import binary_dilation, binary_closing
 from tqdm import tqdm
 from elf.evaluation import matching
@@ -140,8 +140,8 @@ def evaluate_file(labels_path, seg_path, segment_key, anno_key, mask_key=None, c
 
     # Optionally apply connected components
     if cc:
-        gt = connected_components_label(gt)
-        az = connected_components_label(az)
+        gt = connected_components(gt)
+        az = connected_components(az)
 
     # Optionally crop to bounding box
     use_bb = False
