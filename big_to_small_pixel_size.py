@@ -8,7 +8,7 @@ from skimage.morphology import closing, ball
 
 # Input and output folders
 input_folder = "/mnt/lustre-emmy-hdd/usr/u12095/synaptic_reconstruction/AZ_data_after1stRevision/recorrected_length_of_AZ/wichmann_withAZ"
-output_folder = "/mnt/lustre-emmy-hdd/usr/u12095/synaptic_reconstruction/AZ_data_after1stRevision/recorrected_length_of_AZ/wichmann_withAZ_right_rescaled"
+output_folder = "/mnt/lustre-emmy-hdd/usr/u12095/synaptic_reconstruction/AZ_data_after1stRevision/recorrected_length_of_AZ/wichmann_withAZ_rescaled_tomograms"
 os.makedirs(output_folder, exist_ok=True)
 
 # Define scaling factors

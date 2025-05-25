@@ -98,7 +98,7 @@ def train(key, ignore_label = None, training_2D = False, testset = True):
     print(len(val_paths), "tomograms for validation")
 
     patch_shape = [48, 256, 256]
-    model_name=f"3D-AZ-model-TEM_STEM_ChemFix_wichmann-v1"
+    model_name=f"3D-AZ-model-TEM_STEM_ChemFix_wichmann-v2"
 
     #checking for 2D training
     if training_2D:
