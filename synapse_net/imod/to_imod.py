@@ -239,18 +239,11 @@ def write_segmentation_to_imod_as_points(
         segmentation_key: The key to the segmentation data in case the segmentation is stored in hdf5 files.
     """
 
-    # Read the resolution information from the mrcfile.
-    with mrcfile.open(mrc_path, "r") as f:
-        resolution = f.voxel_size.tolist()
-
-    # The resolution is stored in angstrom, we convert it to nanometer.
-    resolution = [res / 10 for res in resolution]
-
     # Extract the center coordinates and radii from the segmentation.
     if isinstance(segmentation, str):
         segmentation = _load_segmentation(segmentation, segmentation_key)
     coordinates, radii = convert_segmentation_to_spheres(
-        segmentation, resolution=resolution, radius_factor=radius_factor, estimate_radius_2d=estimate_radius_2d
+        segmentation, radius_factor=radius_factor, estimate_radius_2d=estimate_radius_2d
     )
 
     # Write the point annotations to imod.
