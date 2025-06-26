@@ -128,7 +128,7 @@ def _segment_compartments_3d(
             continue
         seg_z = _segment_compartments_2d(prediction[z], distances=distances[z])
         seg_z[seg_z != 0] += offset
-        offset = int(seg_z.max())
+        offset = max(int(seg_z.max()), offset)
         seg_2d[z] = seg_z
 
     seg = _merge_segmentation_3d(seg_2d, min_z_extent)
