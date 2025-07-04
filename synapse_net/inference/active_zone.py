@@ -106,7 +106,6 @@ def segment_active_zone(
 
     # Run segmentation and rescale the result if necessary.
     foreground = pred[0]
-    print(f"shape {foreground.shape}")
 
     segmentation = _run_segmentation(foreground, verbose=verbose, min_size=min_size)
     segmentation = scaler.rescale_output(segmentation, is_segmentation=True)

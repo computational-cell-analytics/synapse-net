@@ -1,0 +1,1 @@
+{"train": ["36859_H3_SP_10_rec_2kb1dawbp_crop.h5", "36859_H3_SP_01_rec_2kb1dawbp_crop.h5", "36859_H2_SP_02_rec_2Kb1dawbp_crop.h5", "36859_H2_SP_03_rec_2Kb1dawbp_crop.h5"], "val": ["36859_H3_SP_05_rec_2kb1dawbp_crop.h5", "36859_H2_SP_01_rec_2Kb1dawbp_crop.h5"], "test": ["36859_H3_SP_07_rec_2kb1dawbp_crop.h5", "36859_J1_STEM750_66K_SP_03_rec_2kb1dawbp_crop.h5"]}

@@ -7,9 +7,14 @@ models/*/
 *.egg-info/
 run_sbatch.sbatch
 slurm/
+slurm_revision/
 scripts/cooper/evaluation_results/
 scripts/cooper/training/copy_testset.py
 scripts/rizzoli/upsample_data.py
 scripts/cooper/training/find_rec_testset.py
 synapse-net-models/
 scripts/portal/upscale_tomo.py
+analysis_results/
+scripts/cooper/revision/evaluation_results/
+scripts/cooper/revision/export_tif_to_h5.py
+scripts/cooper/revision/copy_path.py

@@ -8,6 +8,7 @@ from elf.io import open_file
 
 from synapse_net.inference.vesicles import segment_vesicles
 from synapse_net.inference.util import parse_tiling
+from synapse_net.inference.inference import get_model_path
 
 def _require_output_folders(output_folder):
     #seg_output = os.path.join(output_folder, "segmentations")
@@ -34,7 +35,7 @@ def get_volume(input_path):
         input_volume = f[key][:]
     return input_volume
 
-def run_vesicle_segmentation(input_path, output_path, model_path, mask_path, mask_key,tile_shape, halo, include_boundary, key_label):
+def run_vesicle_segmentation(input_path, output_path, mask_path, mask_key,tile_shape, halo, include_boundary, key_label, model_path=None, save_pred=False):
     tiling = parse_tiling(tile_shape, halo)
     print(f"using tiling {tiling}")
     input = get_volume(input_path)
@@ -45,7 +46,10 @@ def run_vesicle_segmentation(input_path, output_path, model_path, mask_path, mas
                         mask = f[mask_key][:]
     else:
         mask = None
-
+    
+    if model_path is None:
+        model_path = get_model_path("vesicles_3d")
+        
     segmentation, prediction = segment_vesicles(input_volume=input, model_path=model_path, verbose=False, tiling=tiling, return_predictions=True, exclude_boundary=not include_boundary, mask = mask)
     foreground, boundaries = prediction[:2]
 
@@ -63,14 +67,15 @@ def run_vesicle_segmentation(input_path, output_path, model_path, mask_path, mas
         else:
             f.create_dataset("raw", data=input, compression="gzip")
 
-        key=f"vesicles/segment_from_{key_label}"
+        key=f"predictions/{key_label}"
         if key in f:
             print("Skipping", input_path, "because", key, "exists")
         else:
             f.create_dataset(key, data=segmentation, compression="gzip")
-            f.create_dataset(f"prediction_{key_label}/foreground", data = foreground, compression="gzip")
-            f.create_dataset(f"prediction_{key_label}/boundaries", data = boundaries, compression="gzip")
-        
+            if save_pred:
+                f.create_dataset(f"prediction_{key_label}/foreground", data = foreground, compression="gzip")
+                f.create_dataset(f"prediction_{key_label}/boundaries", data = boundaries, compression="gzip")
+            
         if mask is not None:
             if mask_key in f:
                 print("mask image already saved")
@@ -97,7 +102,7 @@ def segment_folder(args):
             print(f"Mask file not found for {input_path}")
             mask_path = None
 
-        run_vesicle_segmentation(input_path, args.output_path, args.model_path, mask_path, args.mask_key, args.tile_shape, args.halo, args.include_boundary, args.key_label)
+        run_vesicle_segmentation(input_path, args.output_path, mask_path, args.mask_key, args.tile_shape, args.halo, args.include_boundary, args.key_label, args.model_path, args.save_pred)
 
 def main():
     parser = argparse.ArgumentParser(description="Segment vesicles in EM tomograms.")
@@ -110,7 +115,7 @@ def main():
         help="The filepath to directory where the segmentations will be saved."
     )
     parser.add_argument(
-        "--model_path", "-m", required=True, help="The filepath to the vesicle model."
+        "--model_path", "-m", help="The filepath to the vesicle model."
     )
     parser.add_argument(
         "--mask_path", help="The filepath to a h5 file with a mask that will be used to restrict the segmentation. Needs to be in combination with mask_key."
@@ -131,8 +136,12 @@ def main():
         help="Include vesicles that touch the top / bottom of the tomogram. By default these are excluded."
     )
     parser.add_argument(
-        "--key_label", "-k", default = "combined_vesicles",
+        "--key_label", "-k", default = "vesicle_seg",
         help="Give the key name for saving the segmentation in h5."
+    )
+    parser.add_argument(
+        "--save_pred", action="store_true",
+        help="If set to true the prediction is also saved."
     )
     args = parser.parse_args()
 
@@ -141,7 +150,7 @@ def main():
     if os.path.isdir(input_):
         segment_folder(args)
     else:
-        run_vesicle_segmentation(input_, args.output_path, args.model_path, args.mask_path, args.mask_key, args.tile_shape, args.halo, args.include_boundary, args.key_label)
+        run_vesicle_segmentation(input_, args.output_path, args.mask_path, args.mask_key, args.tile_shape, args.halo, args.include_boundary, args.key_label, args.model_path, args.save_pred)
 
     print("Finished segmenting!")
 

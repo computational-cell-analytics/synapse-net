@@ -6,6 +6,7 @@ import h5py
 import numpy as np
 import pandas as pd
 from elf.evaluation.matching import matching
+from elf.evaluation.dice import symmetric_best_dice_score
 from tqdm import tqdm
 
 INPUT_ROOT = "/mnt/lustre-emmy-hdd/projects/nim00007/data/synaptic-reconstruction/cooper/vesicles_processed_v2/testsets"  # noqa
@@ -25,11 +26,11 @@ DATASETS = [
 ]
 
 
-def evaluate_dataset(ds_name):
+def evaluate_dataset(ds_name, force):
     result_folder = "./results/cooper"
     os.makedirs(result_folder, exist_ok=True)
     result_path = os.path.join(result_folder, f"{ds_name}.csv")
-    if os.path.exists(result_path):
+    if os.path.exists(result_path) and not force:
         results = pd.read_csv(result_path)
         return results
 
@@ -44,6 +45,9 @@ def evaluate_dataset(ds_name):
         mask_key = None
 
     pred_files = sorted(glob(os.path.join(OUTPUT_ROOT, ds_name, "**/*.h5"), recursive=True))
+    if ds_name == "04":
+        pred_names = [os.path.basename(path) for path in pred_files]
+        input_files = [path for path in input_files if os.path.basename(path) in pred_names]
     assert len(input_files) == len(pred_files), f"{len(input_files)}, {len(pred_files)}"
 
     results = {
@@ -52,12 +56,13 @@ def evaluate_dataset(ds_name):
         "precision": [],
         "recall": [],
         "f1-score": [],
+        "sbd-score": [],
     }
     for inf, predf in tqdm(zip(input_files, pred_files), total=len(input_files), desc=f"Evaluate {ds_name}"):
         fname = os.path.basename(inf)
         sub_res_path = os.path.join(result_folder, f"{ds_name}_{fname}.json")
 
-        if os.path.exists(sub_res_path):
+        if os.path.exists(sub_res_path) and not force:
             print("Loading scores from", sub_res_path)
             with open(sub_res_path, "r") as f:
                 scores = json.load(f)
@@ -89,6 +94,8 @@ def evaluate_dataset(ds_name):
                 gt[mask == 0] = 0
 
             scores = matching(seg, gt)
+            sbd_score = symmetric_best_dice_score(seg, gt)
+            scores["sbd"] = sbd_score
 
             with open(sub_res_path, "w") as f:
                 json.dump(scores, f)
@@ -98,6 +105,7 @@ def evaluate_dataset(ds_name):
         results["precision"].append(scores["precision"])
         results["recall"].append(scores["recall"])
         results["f1-score"].append(scores["f1"])
+        results["sbd-score"].append(scores["sbd"])
 
     results = pd.DataFrame(results)
     results.to_csv(result_path, index=False)
@@ -105,9 +113,11 @@ def evaluate_dataset(ds_name):
 
 
 def main():
+    force = False
+
     all_results = {}
     for ds in DATASETS:
-        result = evaluate_dataset(ds)
+        result = evaluate_dataset(ds, force=force)
         all_results[ds] = result
 
     groups = {
@@ -123,15 +133,23 @@ def main():
     }
 
     for name, datasets in groups.items():
-        f1_scores = []
+        f1_scores, sbd_scores = [], []
 
         for ds in datasets:
             this_f1_scores = all_results[ds]["f1-score"].values.tolist()
+            this_sbd_scores = all_results[ds]["sbd-score"].values.tolist()
             f1_scores.extend(this_f1_scores)
+            sbd_scores.extend(this_sbd_scores)
 
         mean_f1 = np.mean(f1_scores)
         std_f1 = np.std(f1_scores)
+        print("F1-Score")
         print(name, ":", mean_f1, "+-", std_f1)
+
+        mean_sbd = np.mean(sbd_scores)
+        std_sbd = np.std(sbd_scores)
+        print("SBD-Score")
+        print(name, ":", mean_sbd, "+-", std_sbd)
 
 
 if __name__ == "__main__":
