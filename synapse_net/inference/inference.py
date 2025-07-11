@@ -22,7 +22,7 @@ from ..file_utils import get_cache_dir
 
 def _get_model_registry():
     registry = {
-        "active_zone": "a18f29168aed72edec0f5c2cb1aa9a4baa227812db6082a6538fd38d9f43afb0",
+        "active_zone": "c23652a8fe06daa113546af6d3200c4c1dcc79917056c6ed7357b8c93548372a",
         "compartments": "527983720f9eb215c45c4f4493851fd6551810361eda7b79f185a0d304274ee1",
         "mitochondria": "24625018a5968b36f39fa9d73b121a32e8f66d0f2c0540d3df2e1e39b3d58186",
         "mitochondria2": "553decafaff4838fff6cc8347f22c8db3dee5bcbeffc34ffaec152f8449af673",
@@ -37,7 +37,7 @@ def _get_model_registry():
         "vesicles_3d_innerear": "924f0f7cfb648a3a6931c1d48d8b1fdc6c0c0d2cb3330fe2cae49d13e7c3b69d",
     }
     urls = {
-        "active_zone": "https://owncloud.gwdg.de/index.php/s/zvuY342CyQebPsX/download",
+        "active_zone": "https://owncloud.gwdg.de/index.php/s/wpea9FH9waG4zJd/download",
         "compartments": "https://owncloud.gwdg.de/index.php/s/DnFDeTmDDmZrDDX/download",
         "mitochondria": "https://owncloud.gwdg.de/index.php/s/1T542uvzfuruahD/download",
         "mitochondria2": "https://owncloud.gwdg.de/index.php/s/GZghrXagc54FFXd/download",
@@ -109,6 +109,7 @@ def get_model_training_resolution(model_type: str) -> Dict[str, float]:
         Mapping of axis (x, y, z) to the voxel size (in nm) of that axis.
     """
     resolutions = {
+        # TODO update the resolution of the active zone model
         "active_zone": {"x": 1.44, "y": 1.44, "z": 1.44},
         "compartments": {"x": 3.47, "y": 3.47, "z": 3.47},
         "mitochondria": {"x": 2.07, "y": 2.07, "z": 2.07},

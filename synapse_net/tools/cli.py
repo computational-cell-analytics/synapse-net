@@ -1,7 +1,9 @@
 import argparse
+import os
 from functools import partial
 
 import torch
+import torch_em
 from ..imod.to_imod import export_helper, write_segmentation_to_imod_as_points, write_segmentation_to_imod
 from ..inference.inference import _get_model_registry, get_model, get_model_training_resolution, run_segmentation
 from ..inference.util import inference_helper, parse_tiling
@@ -155,7 +157,14 @@ def segmentation_cli():
     if args.checkpoint is None:
         model = get_model(args.model)
     else:
-        model = torch.load(args.checkpoint, weights_only=False)
+        checkpoint_path = args.checkpoint
+        if checkpoint_path.endswith("best.pt"):
+            checkpoint_path = os.path.split(checkpoint_path)[0]
+
+        if os.path.isdir(checkpoint_path):  # Load the model from a torch_em checkpoint.
+            model = torch_em.util.load_model(checkpoint=checkpoint_path)
+        else:
+            model = torch.load(checkpoint_path, weights_only=False)
         assert model is not None, f"The model from {args.checkpoint} could not be loaded."
 
     is_2d = "2d" in args.model
