@@ -100,6 +100,21 @@ class _Scaler:
         return output
 
 
+def _preprocess(input_volume, with_channels, channels_to_standardize):
+    # We standardize the data for the whole volume beforehand.
+    # If we have channels then the standardization is done independently per channel.
+    if with_channels:
+        input_volume = input_volume.astype(np.float32, copy=False)
+        # TODO Check that this is the correct axis.
+        if channels_to_standardize is None:  # assume all channels
+            channels_to_standardize = range(input_volume.shape[0])
+        for ch in channels_to_standardize:
+            input_volume[ch] = torch_em.transform.raw.standardize(input_volume[ch])
+    else:
+        input_volume = torch_em.transform.raw.standardize(input_volume)
+    return input_volume
+
+
 def get_prediction(
     input_volume: ArrayLike,  # [z, y, x]
     tiling: Optional[Dict[str, Dict[str, int]]],  # {"tile": {"z": int, ...}, "halo": {"z": int, ...}}
@@ -144,17 +159,11 @@ def get_prediction(
     if tiling is None:
         tiling = get_default_tiling()
 
-    # We standardize the data for the whole volume beforehand.
-    # If we have channels then the standardization is done independently per channel.
-    if with_channels:
-        input_volume = input_volume.astype(np.float32, copy=False)
-        # TODO Check that this is the correct axis.
-        if channels_to_standardize is None:  # assume all channels
-            channels_to_standardize = range(input_volume.shape[0])
-        for ch in channels_to_standardize:
-            input_volume[ch] = torch_em.transform.raw.standardize(input_volume[ch])
-    else:
-        input_volume = torch_em.transform.raw.standardize(input_volume)
+    # Normalize the whole input volume if it is a numpy array.
+    # Otherwise we have a zarr array or similar as input, and can't normalize it en-block.
+    # Normalization will be applied later per block in this case.
+    if isinstance(input_volume, np.ndarray):
+        input_volume = _preprocess(input_volume, with_channels, channels_to_standardize)
 
     # Run prediction with the bioimage.io library.
     if is_bioimageio:
@@ -242,10 +251,11 @@ def get_prediction_torch_em(
                 print("Run prediction with mask.")
             mask = mask.astype("bool")
 
+        preprocess = None if isinstance(input_volume, np.ndarray) else torch_em.transform.raw.standardize
         prediction = predict_with_halo(
             input_volume, model, gpu_ids=[device],
             block_shape=block_shape, halo=halo,
-            preprocess=None, with_channels=with_channels, mask=mask,
+            preprocess=preprocess, with_channels=with_channels, mask=mask,
             output=prediction,
         )
     if verbose:
