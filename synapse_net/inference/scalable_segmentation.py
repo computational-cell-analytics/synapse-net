@@ -37,6 +37,29 @@ class SelectChannel(SimpleTransformationWrapper):
         return self._volume.ndim - 1
 
 
+def _run_segmentation(pred, output, seeds, chunks, seed_threshold, min_size, verbose):
+    # Create wrappers for selecting the foreground and the boundary channel.
+    foreground = SelectChannel(pred, 0)
+    boundaries = SelectChannel(pred, 1)
+
+    # Create wrappers for subtracting and thresholding boundary subtracted from the foreground.
+    # And then compute the seeds based on this.
+    seed_input = ThresholdWrapper(
+        MultiTransformationWrapper(np.subtract, foreground, boundaries), seed_threshold
+    )
+    parallel.label(seed_input, seeds, verbose=verbose, block_shape=chunks)
+
+    # Run watershed to extend back from the seeds to the boundaries.
+    mask = ThresholdWrapper(foreground, 0.5)
+    parallel.seeded_watershed(
+        boundaries, seeds=seeds, out=output, verbose=verbose, mask=mask, block_shape=chunks, halo=3 * (16,)
+    )
+
+    # Run the size filter.
+    if min_size > 0:
+        parallel.size_filter(output, output, min_size=min_size, verbose=verbose, block_shape=chunks)
+
+
 # TODO support resizing via the wrapper
 def scalable_segmentation(
     input_: ArrayLike,
@@ -70,30 +93,11 @@ def scalable_segmentation(
         pred_chunks = (1,) + chunks
         pred = f.create_dataset("pred", shape=pred_shape, dtype="float32", chunks=pred_chunks)
 
-        # Run the prediction.
-        get_prediction(input_, prediction=pred, tiling=tiling, model=model, verbose=verbose)
-
-        # Create wrappers for selecting the foreground and the boundary channel.
-        foreground = SelectChannel(pred, 0)
-        boundaries = SelectChannel(pred, 1)
-
         # Create temporary storage for the seeds.
         tmp_seeds = os.path.join(tmp_dir, "seeds.n5")
         f = open_file(tmp_seeds, mode="a")
         seeds = f.create_dataset("seeds", shape=input_.shape, dtype="uint64", chunks=chunks)
 
-        # Create wrappers for subtracting and thresholding boundary subtracted from the foreground.
-        # And then compute the seeds based on this.
-        seed_input = ThresholdWrapper(
-            MultiTransformationWrapper(np.subtract, foreground, boundaries), seed_threshold
-        )
-        parallel.label(seed_input, seeds, verbose=verbose)
-
-        # Run watershed to extend back from the seeds to the boundaries.
-        parallel.seeded_watershed(
-            boundaries, seeds=seeds, out=output, verbose=verbose, block_shape=chunks, halo=3 * (16,)
-        )
-
-        # Run the size filter.
-        if min_size > 0:
-            parallel.size_filter(output, output, min_size=min_size, verbose=verbose)
+        # Run prediction and segmentation.
+        get_prediction(input_, prediction=pred, tiling=tiling, model=model, verbose=verbose)
+        _run_segmentation(pred, output, seeds, chunks, seed_threshold, min_size, verbose)
