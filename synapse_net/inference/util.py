@@ -18,6 +18,7 @@ import torch_em
 # import xarray
 
 from elf.io import open_file
+from numpy.typing import ArrayLike
 from scipy.ndimage import binary_closing
 from skimage.measure import regionprops
 from skimage.morphology import remove_small_holes
@@ -100,15 +101,16 @@ class _Scaler:
 
 
 def get_prediction(
-    input_volume: np.ndarray,  # [z, y, x]
+    input_volume: ArrayLike,  # [z, y, x]
     tiling: Optional[Dict[str, Dict[str, int]]],  # {"tile": {"z": int, ...}, "halo": {"z": int, ...}}
     model_path: Optional[str] = None,
     model: Optional[torch.nn.Module] = None,
     verbose: bool = True,
     with_channels: bool = False,
     channels_to_standardize: Optional[List[int]] = None,
-    mask: Optional[np.ndarray] = None,
-) -> np.ndarray:
+    mask: Optional[ArrayLike] = None,
+    prediction: Optional[ArrayLike] = None,
+) -> ArrayLike:
     """Run prediction on a given volume.
 
     This function will automatically choose the correct prediction implementation,
@@ -124,6 +126,8 @@ def get_prediction(
         channels_to_standardize: List of channels to standardize. Defaults to None.
         mask: Optional binary mask. If given, the prediction will only be run in
             the foreground region of the mask.
+        prediction: An array like object for writing the prediction.
+            If not given, the prediction will be computed in moemory.
 
     Returns:
         The predicted volume.
@@ -174,21 +178,23 @@ def get_prediction(
         for dim in tiling["tile"]:
             updated_tiling["tile"][dim] = tiling["tile"][dim] - 2 * tiling["halo"][dim]
         # print(f"updated_tiling {updated_tiling}")
-        pred = get_prediction_torch_em(
-            input_volume, updated_tiling, model_path, model, verbose, with_channels, mask=mask
+        prediction = get_prediction_torch_em(
+            input_volume, updated_tiling, model_path, model, verbose, with_channels,
+            mask=mask, prediction=prediction,
         )
 
-    return pred
+    return prediction
 
 
 def get_prediction_torch_em(
-    input_volume: np.ndarray,  # [z, y, x]
+    input_volume: ArrayLike,  # [z, y, x]
     tiling: Dict[str, Dict[str, int]],  # {"tile": {"z": int, ...}, "halo": {"z": int, ...}}
     model_path: Optional[str] = None,
     model: Optional[torch.nn.Module] = None,
     verbose: bool = True,
     with_channels: bool = False,
-    mask: Optional[np.ndarray] = None,
+    mask: Optional[ArrayLike] = None,
+    prediction: Optional[ArrayLike] = None,
 ) -> np.ndarray:
     """Run prediction using torch-em on a given volume.
 
@@ -201,6 +207,8 @@ def get_prediction_torch_em(
         with_channels: Whether to predict with channels.
         mask: Optional binary mask. If given, the prediction will only be run in
             the foreground region of the mask.
+        prediction: An array like object for writing the prediction.
+            If not given, the prediction will be computed in moemory.
 
     Returns:
         The predicted volume.
@@ -234,14 +242,15 @@ def get_prediction_torch_em(
                 print("Run prediction with mask.")
             mask = mask.astype("bool")
 
-        pred = predict_with_halo(
+        prediction = predict_with_halo(
             input_volume, model, gpu_ids=[device],
             block_shape=block_shape, halo=halo,
             preprocess=None, with_channels=with_channels, mask=mask,
+            output=prediction,
         )
     if verbose:
         print("Prediction time in", time.time() - t0, "s")
-    return pred
+    return prediction
 
 
 def _get_file_paths(input_path, ext=".mrc"):
