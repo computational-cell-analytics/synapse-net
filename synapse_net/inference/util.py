@@ -344,6 +344,7 @@ def inference_helper(
     output_key: Optional[str] = None,
     model_resolution: Optional[Tuple[float, float, float]] = None,
     scale: Optional[Tuple[float, float, float]] = None,
+    allocate_output: bool = False,
 ) -> None:
     """Helper function to run segmentation for mrc files.
 
@@ -366,6 +367,7 @@ def inference_helper(
         model_resolution: The resolution / voxel size to which the inputs should be scaled for prediction.
             If given, the scaling factor will automatically be determined based on the voxel_size of the input data.
         scale: Fixed factor for scaling the model inputs. Cannot be passed together with 'model_resolution'.
+        allocate_output: Whether to allocate the output for the segmentation function.
     """
     if (scale is not None) and (model_resolution is not None):
         raise ValueError("You must not provide both 'scale' and 'model_resolution' arguments.")
@@ -431,7 +433,11 @@ def inference_helper(
             this_scale = _derive_scale(img_path, model_resolution)
 
         # Run the segmentation.
-        segmentation = segmentation_function(input_volume, mask=mask, scale=this_scale)
+        if allocate_output:
+            segmentation = np.zeros(input_volume.shape, dtype="uint32")
+            segmentation_function(input_volume, output=segmentation, mask=mask, scale=this_scale)
+        else:
+            segmentation = segmentation_function(input_volume, mask=mask, scale=this_scale)
 
         # Write the result to tif or h5.
         os.makedirs(os.path.split(output_path)[0], exist_ok=True)

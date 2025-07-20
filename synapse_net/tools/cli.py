@@ -6,6 +6,7 @@ import torch
 import torch_em
 from ..imod.to_imod import export_helper, write_segmentation_to_imod_as_points, write_segmentation_to_imod
 from ..inference.inference import _get_model_registry, get_model, get_model_training_resolution, run_segmentation
+from ..inference.scalable_segmentation import scalable_segmentation
 from ..inference.util import inference_helper, parse_tiling
 
 
@@ -152,10 +153,9 @@ def segmentation_cli():
         "--verbose", "-v", action="store_true",
         help="Whether to print verbose information about the segmentation progress."
     )
-    # TODO scalable seg
     parser.add_argument(
-        "--", action="store_true",
-        help=""
+        "--scalable", action="store_true", help="Use the scalable segmentation implementation. "
+        "Currently this only works for vesicles, mitochondria, or active zones."
     )
     args = parser.parse_args()
 
@@ -186,11 +186,26 @@ def segmentation_cli():
         model_resolution = None
         scale = (2 if is_2d else 3) * (args.scale,)
 
-    segmentation_function = partial(
-        run_segmentation, model=model, model_type=args.model, verbose=args.verbose, tiling=tiling,
-    )
+    if args.scalable:
+        if not args.model.startswith(("vesicle", "mito", "active")):
+            raise ValueError(
+                "The scalable segmentation implementation is currently only supported for "
+                f"vesicles, mitochondria, or active zones, not for {args.model}."
+            )
+        segmentation_function = partial(
+            scalable_segmentation, model=model, tiling=tiling, verbose=args.verbose
+        )
+        allocate_output = True
+
+    else:
+        segmentation_function = partial(
+            run_segmentation, model=model, model_type=args.model, verbose=args.verbose, tiling=tiling,
+        )
+        allocate_output = False
+
     inference_helper(
         args.input_path, args.output_path, segmentation_function,
         mask_input_path=args.mask_path, force=args.force, data_ext=args.data_ext,
         output_key=args.segmentation_key, model_resolution=model_resolution, scale=scale,
+        allocate_output=allocate_output
     )

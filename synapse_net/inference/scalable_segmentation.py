@@ -78,6 +78,7 @@ def scalable_segmentation(
     min_size: int = 500,
     prediction: Optional[ArrayLike] = None,
     verbose: bool = True,
+    mask: Optional[ArrayLike] = None,
 ) -> None:
     """Run segmentation based on a prediction with foreground and boundary channel.
 
@@ -100,6 +101,8 @@ def scalable_segmentation(
             If not given will be stored in a temporary n5 array.
         verbose: Whether to print timing information.
     """
+    if mask is not None:
+        raise NotImplementedError
     assert model.out_channels == 2
 
     # Create a temporary directory for storing the predictions.
