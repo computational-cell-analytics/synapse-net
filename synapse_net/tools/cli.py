@@ -152,6 +152,11 @@ def segmentation_cli():
         "--verbose", "-v", action="store_true",
         help="Whether to print verbose information about the segmentation progress."
     )
+    # TODO scalable seg
+    parser.add_argument(
+        "--", action="store_true",
+        help=""
+    )
     args = parser.parse_args()
 
     if args.checkpoint is None:
