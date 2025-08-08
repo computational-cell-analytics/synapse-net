@@ -8,8 +8,8 @@ from sklearn.model_selection import train_test_split
 from synapse_net.training import supervised_training
 from synapse_net.training import semisupervised_training
 
-TRAIN_ROOT = "/mnt/lustre-emmy-hdd/projects/nim00007/data/synaptic-reconstruction/cooper/vesicles_processed_v2"
-OUTPUT_ROOT = "/mnt/lustre-emmy-hdd/usr/u12095/synapse_net/training_v2"
+TRAIN_ROOT = "/mnt/ceph-hdd/cold/nim00007/LDCVs_matea/extracted"
+OUTPUT_ROOT = "/mnt/ceph-hdd/cold/nim00007/models/LDCVs_matea"
 
 
 def _require_train_val_test_split(datasets):
@@ -76,14 +76,7 @@ def get_paths(split, datasets, testset=True):
 def train(key, ignore_label = None, training_2D = False, testset = True):
 
     datasets = [
-    "01_hoi_maus_2020_incomplete",
-    "02_hcc_nanogold",
-    "03_hog_cs1sy7",
-    "05_stem750_sv_training",
-    "07_hoi_s1sy7_tem250_ihgp",
-    "10_tem_single_release",
-    "11_tem_multiple_release",
-    "12_chemical_fix_cryopreparation"
+    "res_3"
 ]
     train_paths = get_paths("train", datasets=datasets, testset=testset)
     val_paths = get_paths("val", datasets=datasets, testset=testset)
@@ -92,8 +85,8 @@ def train(key, ignore_label = None, training_2D = False, testset = True):
     print(len(train_paths), "tomograms for training")
     print(len(val_paths), "tomograms for validation")
 
-    patch_shape = [48, 256, 256]
-    model_name=f"3D-vesicles-model-new_postprocessing_{key}"
+    patch_shape = [16, 256, 256]   #patch_shape = [48, 256, 256] HAD TO CHANGE THIS FOR LDCVs, NEED TO CHANGE BACK!!!!!!!!!
+    model_name=f"3D-vesicles-model-LDCV-v2"
 
     #checking for 2D training
     if training_2D:
@@ -107,11 +100,12 @@ def train(key, ignore_label = None, training_2D = False, testset = True):
         name=model_name,
         train_paths=train_paths,
         val_paths=val_paths,
-        label_key=f"/labels/vesicles/{key}",
+        label_key=f"/labels/{key}",
+        n_iterations=int(5e5),#int(1e5)
         patch_shape=patch_shape, batch_size=batch_size,
         n_samples_train=None, n_samples_val=25,
         check=check,
-        save_root="/mnt/lustre-emmy-hdd/usr/u12095/synapse_net/models_v2",
+        save_root="/mnt/ceph-hdd/cold/nim00007/models/LDCVs_matea",
         ignore_label= ignore_label,
     )
 

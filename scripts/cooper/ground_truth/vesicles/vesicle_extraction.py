@@ -4,8 +4,8 @@ from pathlib import Path
 
 from synapse_net.ground_truth import extract_vesicle_training_data
 
-ROOT = "/mnt/lustre-emmy-hdd/projects/nim00007/data/synaptic-reconstruction/cooper/original_imod_data/20240909_cp_datatransfer"  # noqa
-OUT_ROOT = "/mnt/lustre-emmy-hdd/projects/nim00007/data/synaptic-reconstruction/cooper/extracted/20240909_cp_datatransfer"  # noqa
+ROOT = "/mnt/ceph-hdd/cold/nim00007/LDCVs_matea/20250714_EEC_Gut_2D_segmentation"  # noqa
+OUT_ROOT = "/mnt/ceph-hdd/cold/nim00007/LDCVs_matea/extracted/res_3"  # noqa
 
 
 def extract_01():
@@ -288,9 +288,18 @@ def extract_12():
     )
     return output_folder
 
+def extract_LDCV():
+    input_folder = os.path.join(ROOT)
+    output_folder = os.path.join(OUT_ROOT)
 
+    extract_vesicle_training_data(
+        input_folder, input_folder, output_folder, visualize=False,
+        skip_no_labels=True,
+        exclude_labels=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10], resolution=(3, 3, 3)
+    )
+    
 def main():
-    extract_01()
+    '''extract_01()
     extract_02()
     extract_03()
     extract_04()
@@ -301,7 +310,8 @@ def main():
     extract_09()
     extract_10()
     extract_11()
-    extract_12()
+    extract_12()'''
+    extract_LDCV()
 
 
 if __name__ == "__main__":

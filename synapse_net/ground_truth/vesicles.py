@@ -227,7 +227,7 @@ def extract_vesicle_training_data(
             relative_path = os.path.relpath(file_path, data_folder)
 
             if to_label_path is None:
-                imod_path = os.path.join(gt_folder, relative_path.replace(Path(relative_path).suffix, ".imod"))
+                imod_path = os.path.join(gt_folder, relative_path.replace(Path(relative_path).suffix, ".mod"))
             else:
                 imod_path = to_label_path(gt_folder, relative_path)
 

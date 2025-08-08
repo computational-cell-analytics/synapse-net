@@ -10,7 +10,7 @@ from scipy.ndimage import maximum_filter1d
 from skimage.morphology import ball
 
 from tqdm import tqdm
-
+import math
 
 def get_label_names(
     imod_path: str,
@@ -143,7 +143,6 @@ def export_segmentation(
 
     imageio.imwrite(output_path, segmentation.astype("uint8"), compression="zlib")
 
-
 def draw_spheres(
     coordinates: np.ndarray,
     radii: np.ndarray,
@@ -162,23 +161,40 @@ def draw_spheres(
         The segmentation volume with painted spheres.
     """
     labels = np.zeros(shape, dtype="uint32")
+
     for label_id, (coord, radius) in tqdm(
         enumerate(zip(coordinates, radii), start=1), total=len(coordinates), disable=not verbose
     ):
         radius = int(radius)
         mask = ball(radius)
-        full_mask = np.zeros(shape, dtype="bool")
-        full_slice = tuple(
-            slice(max(co - radius, 0), min(co + radius, sh)) for co, sh in zip(coord, shape)
-        )
-        radius_clipped_left = [co - max(co - radius, 0) for co in coord]
-        radius_clipped_right = [min(co + radius, sh) - co for co, sh in zip(coord, shape)]
-        mask_slice = tuple(
-            slice(radius + 1 - rl, radius + 1 + rr) for rl, rr in zip(radius_clipped_left, radius_clipped_right)
-        )
+        mask_center = np.array([radius] * 3)
+
+        full_slices = []
+        mask_slices = []
+
+        for i in range(3):
+            start = coord[i] - radius
+            end = coord[i] + radius + 1
+            vol_start = max(start, 0)
+            vol_end = min(end, shape[i])
+            full_slices.append(slice(vol_start, vol_end))
+
+            mask_start = vol_start - start
+            mask_end = mask_start + (vol_end - vol_start)
+            mask_slices.append(slice(mask_start, mask_end))
+
+        full_slice = tuple(full_slices)
+        mask_slice = tuple(mask_slices)
+
+        # Skip if sphere is completely out of bounds in any dimension
+        if any(s.stop - s.start <= 0 for s in full_slice):
+            continue
+
+        full_mask = np.zeros(shape, dtype=bool)
         full_mask[full_slice] = mask[mask_slice]
         labels[full_mask] = label_id
-    return labels
+
+    return labels.astype("uint32")
 
 
 def load_points_from_imodinfo(
@@ -307,6 +323,8 @@ def load_points_from_imodinfo(
     coordinates, sizes, labels = coordinates[in_bounds], sizes[in_bounds], labels[in_bounds]
 
     if resolution is not None:
+        #resolution = math.ceil((resolution / 2) * 10) / 10
+        #print(f"the resolution is {resolution}")
         sizes /= resolution
 
     if len(coordinates) == 0:

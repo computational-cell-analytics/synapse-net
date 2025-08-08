@@ -20,3 +20,4 @@ scripts/cooper/revision/export_tif_to_h5.py
 scripts/cooper/revision/copy_path.py
 scripts/cooper/revision/view.py
 scripts/cooper/revision/count_AZ.py
+scripts/cooper/revision/emmy_cleanup.py

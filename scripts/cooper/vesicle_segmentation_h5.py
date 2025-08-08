@@ -72,9 +72,13 @@ def run_vesicle_segmentation(input_path, output_path, mask_path, mask_key,tile_s
             print("Skipping", input_path, "because", key, "exists")
         else:
             f.create_dataset(key, data=segmentation, compression="gzip")
-            if save_pred:
-                f.create_dataset(f"prediction_{key_label}/foreground", data = foreground, compression="gzip")
-                f.create_dataset(f"prediction_{key_label}/boundaries", data = boundaries, compression="gzip")
+        if save_pred:
+            if f"prediction_{key_label}/foreground" in f and f"prediction_{key_label}/boundaries" in f:
+                print(f"Skipping {input_path} because prediction_{key_label}/foreground and prediction_{key_label}/boundaries exist")
+            else:
+                f.create_dataset(f"prediction_{key_label}/foreground", data=foreground, compression="gzip")
+                f.create_dataset(f"prediction_{key_label}/boundaries", data=boundaries, compression="gzip")
+
             
         if mask is not None:
             if mask_key in f:

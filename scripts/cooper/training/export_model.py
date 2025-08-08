@@ -36,10 +36,10 @@ def export_to_bioimageio(checkpoint, output_path, name):
         tags = ["unet", "synaptic-vesicles", "instance-segmentation", "electron-microscopy", "2d"]
     else:
         print("It's a 3D model.")
-        input_path = "/mnt/lustre-emmy-hdd/projects/nim00007/data/synaptic-reconstruction/cooper/vesicles_processed/01_hoi_maus_2020_incomplete/tomogram-010.h5"
+        input_path = "/mnt/ceph-hdd/cold/nim00007/new_AZ_train_data/tem/20190524_09204_F4_SC_01_SP.h5"
         input_data = _load_data(input_path).astype('float32')
-        description = "Segment vesicles in 3d"
-        tags = ["unet", "synaptic-vesicles", "instance-segmentation", "electron-microscopy", "3d"]
+        description = "Segment AZ in 3d"
+        tags = ["unet", "AZ", "instance-segmentation", "electron-microscopy", "3d"]
 
     # eventually we should refactor the citation logic
     cite = get_default_citations(model="AnisotropicUNet")
@@ -51,7 +51,7 @@ def export_to_bioimageio(checkpoint, output_path, name):
         input_data=input_data,
         name=name,
         description=description,
-        authors=[{"name": "Constantin Pape; @constantinpape"}],
+        authors=[{"name": "Sarah Muth; @SarahMuth"}],
         tags=tags,
         license="CC-BY-4.0",
         documentation=doc,
