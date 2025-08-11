@@ -176,7 +176,7 @@ def write_points_to_imod(
     """Write point annotations to a .mod file for IMOD.
 
     Args:
-        coordinates: Array with the point coordinates.
+        coordinates: Array with the point coordinates. #2D or 3D
         radii: Array with the point radii.
         shape: Shape of the volume to be exported.
         min_radius: Minimum radius for export.
@@ -193,16 +193,28 @@ def write_points_to_imod(
         pw = plen * " "
         return f"{pw}{inp}.00"
 
+    is_3d = coordinates.shape[1] == 3
+    if not is_3d and coordinates.shape[1] != 2:
+        raise ValueError("Coordinates must have shape (N, 2) for 2D or (N, 3) for 3D.")
+
     with tempfile.NamedTemporaryFile() as tmp_file:
         fname = tmp_file.name
         with open(fname, "w") as f:
             for coord, radius in zip(coordinates, radii):
                 if radius < min_radius:
                     continue
-                # IMOD needs peculiar whitespace padding
-                x = _pad(coord[2])
-                y = _pad(shape[1] - coord[1])
-                z = _pad(coord[0])
+
+                if is_3d:
+                    # (z, y, x) indexing
+                    x = _pad(coord[2])
+                    y = _pad(shape[1] - coord[1])
+                    z = _pad(coord[0])
+                else:
+                    # (y, x) indexing, single z-plane
+                    x = _pad(coord[1])
+                    y = _pad(shape[0] - coord[0])
+                    z = _pad(1)  # all points in z=0 plane
+
                 f.write(f"{x}{y}{z}{_pad(radius, 2)}\n")
 
         cmd = [cmd, "-si", "-scat", fname, output_path]
@@ -212,6 +224,7 @@ def write_points_to_imod(
             cmd += ["-co", f"{r} {g} {b}"]
 
         run(cmd)
+
 
 
 def write_segmentation_to_imod_as_points(
