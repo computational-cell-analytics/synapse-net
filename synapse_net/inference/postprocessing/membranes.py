@@ -85,7 +85,19 @@ def segment_membrane_distance_based(
     n_slices_exclude: int,
     max_distance: float,
     resolution: Optional[float] = None,
+    min_size: int = 0,
 ):
+    """Derive boundary segmentation from boundary predictions by selecting the fragment closest to the ribbon.
+
+    Args:
+        boundary_prediction: Binary prediction for boundaries in the tomogram.
+        reference_segmentation: The reference segmentation, typically of the ribbon.
+        n_slices_exclude: The number of slices to exclude on the top / bottom
+            in order to avoid segmentation errors due to imaging artifacts in top and bottom.
+        max_distance: The maximal distance from the ribbon to consider.
+        resolution: The resolution / voxel size of the data.
+        min_size: The minimal size of a boundary fragment to be included.
+    """
     assert boundary_prediction.shape == reference_segmentation.shape
 
     original_shape = boundary_prediction.shape
@@ -94,6 +106,12 @@ def segment_membrane_distance_based(
     slice_mask = np.s_[n_slices_exclude:-n_slices_exclude]
     boundary_prediction = boundary_prediction[slice_mask]
     reference_segmentation = reference_segmentation[slice_mask]
+
+    if min_size > 0:
+        boundary_prediction = label(boundary_prediction, block_shape=(32, 256, 256))
+        ids, sizes = np.unique(boundary_prediction, return_counts=True)
+        keep_ids = ids[sizes > min_size]
+        boundary_prediction = np.isin(boundary_prediction, keep_ids)
 
     # Get the unique objects in the reference segmentation.
     reference_ids = np.unique(reference_segmentation)
