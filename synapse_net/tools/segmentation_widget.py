@@ -122,7 +122,10 @@ class SegmentationWidget(BaseWidget):
 
         # Exclude the models that are only offered through the CLI and not in the plugin.
         model_list = set(_get_model_registry().urls.keys())
-        excluded_models = ["vesicles_2d_maus", "vesicles_3d_endbulb", "vesicles_3d_innerear"]
+        # These are the models exlcuded due to their specificity and to keep the menu simple.
+        # TODO: we should at some point update the logic here, to make it easier to support further models
+        # without cluttering the UI.
+        excluded_models = ["vesicles_2d_maus"]
         model_list = [name for name in model_list if name not in excluded_models]
 
         models = ["- choose -"] + model_list
