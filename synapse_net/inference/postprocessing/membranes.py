@@ -110,6 +110,7 @@ def segment_membrane_distance_based(
     if min_size > 0:
         boundary_prediction = label(boundary_prediction, block_shape=(32, 256, 256))
         ids, sizes = np.unique(boundary_prediction, return_counts=True)
+        ids, sizes = ids[1:], sizes[1:]
         keep_ids = ids[sizes > min_size]
         boundary_prediction = np.isin(boundary_prediction, keep_ids)
 
