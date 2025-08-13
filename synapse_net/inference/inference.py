@@ -155,7 +155,7 @@ def compute_scale_from_voxel_size(
 #
 
 
-def _ribbon_AZ_postprocessing(predictions, vesicles, n_slices_exclude, n_ribbons):
+def _ribbon_AZ_postprocessing(predictions, vesicles, n_slices_exclude, n_ribbons, resolution, min_membrane_size):
     from synapse_net.inference.postprocessing import (
         segment_ribbon, segment_presynaptic_density, segment_membrane_distance_based,
     )
@@ -170,6 +170,7 @@ def _ribbon_AZ_postprocessing(predictions, vesicles, n_slices_exclude, n_ribbons
     ref_segmentation = PD if PD.sum() > 0 else ribbon
     membrane = segment_membrane_distance_based(
         predictions["membrane"], ref_segmentation, max_distance=500, n_slices_exclude=n_slices_exclude,
+        resolution=resolution, min_size=min_membrane_size,
     )
 
     segmentations = {"ribbon": ribbon, "PD": PD, "membrane": membrane}
@@ -182,6 +183,8 @@ def _segment_ribbon_AZ(image, model, tiling, scale, verbose, return_predictions=
     threshold = kwargs.pop("threshold", 0.5)
     n_slices_exclude = kwargs.pop("n_slices_exclude", 20)
     n_ribbons = kwargs.pop("n_slices_exclude", 1)
+    resolution = kwargs.pop("resolution", None)
+    min_membrane_size = kwargs.pop("min_membrane_size", 0)
 
     predictions = segment_ribbon_synapse_structures(
         image, model=model, tiling=tiling, scale=scale, verbose=verbose, threshold=threshold, **kwargs
@@ -197,7 +200,9 @@ def _segment_ribbon_AZ(image, model, tiling, scale, verbose, return_predictions=
     else:
         if verbose:
             print("Vesicle segmentation was passed, WILL run post-processing.")
-        segmentations = _ribbon_AZ_postprocessing(predictions, vesicles, n_slices_exclude, n_ribbons)
+        segmentations = _ribbon_AZ_postprocessing(
+            predictions, vesicles, n_slices_exclude, n_ribbons, resolution, min_membrane_size
+        )
 
     if return_predictions:
         return segmentations, predictions
