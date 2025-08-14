@@ -125,6 +125,7 @@ def get_prediction(
     channels_to_standardize: Optional[List[int]] = None,
     mask: Optional[ArrayLike] = None,
     prediction: Optional[ArrayLike] = None,
+    devices: Optional[List[str]] = None,
 ) -> ArrayLike:
     """Run prediction on a given volume.
 
@@ -143,6 +144,8 @@ def get_prediction(
             the foreground region of the mask.
         prediction: An array like object for writing the prediction.
             If not given, the prediction will be computed in moemory.
+        devices: The devices for running prediction. If not given will use the GPU
+            if available, otherwise the CPU.
 
     Returns:
         The predicted volume.
@@ -189,7 +192,7 @@ def get_prediction(
         # print(f"updated_tiling {updated_tiling}")
         prediction = get_prediction_torch_em(
             input_volume, updated_tiling, model_path, model, verbose, with_channels,
-            mask=mask, prediction=prediction,
+            mask=mask, prediction=prediction, devices=devices,
         )
 
     return prediction
@@ -204,6 +207,7 @@ def get_prediction_torch_em(
     with_channels: bool = False,
     mask: Optional[ArrayLike] = None,
     prediction: Optional[ArrayLike] = None,
+    devices: Optional[List[str]] = None,
 ) -> np.ndarray:
     """Run prediction using torch-em on a given volume.
 
@@ -218,6 +222,8 @@ def get_prediction_torch_em(
             the foreground region of the mask.
         prediction: An array like object for writing the prediction.
             If not given, the prediction will be computed in moemory.
+        devices: The devices for running prediction. If not given will use the GPU
+            if available, otherwise the CPU.
 
     Returns:
         The predicted volume.
@@ -227,14 +233,15 @@ def get_prediction_torch_em(
     halo = [tiling["halo"]["z"], tiling["halo"]["x"], tiling["halo"]["y"]]
 
     t0 = time.time()
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    if devices is None:
+        devices = ["cuda" if torch.cuda.is_available() else "cpu"]
 
     # Suppress warning when loading the model.
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         if model is None:
             if os.path.isdir(model_path):  # Load the model from a torch_em checkpoint.
-                model = torch_em.util.load_model(checkpoint=model_path, device=device)
+                model = torch_em.util.load_model(checkpoint=model_path, device=devices[0])
             else:  # Load the model directly from a serialized pytorch model.
                 model = torch.load(model_path, weights_only=False)
 
@@ -253,7 +260,7 @@ def get_prediction_torch_em(
 
         preprocess = None if isinstance(input_volume, np.ndarray) else torch_em.transform.raw.standardize
         prediction = predict_with_halo(
-            input_volume, model, gpu_ids=[device],
+            input_volume, model, gpu_ids=devices,
             block_shape=block_shape, halo=halo,
             preprocess=preprocess, with_channels=with_channels, mask=mask,
             output=prediction,

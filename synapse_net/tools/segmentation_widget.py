@@ -122,7 +122,10 @@ class SegmentationWidget(BaseWidget):
 
         # Exclude the models that are only offered through the CLI and not in the plugin.
         model_list = set(_get_model_registry().urls.keys())
-        excluded_models = ["vesicles_2d_maus", "vesicles_3d_endbulb", "vesicles_3d_innerear"]
+        # These are the models exlcuded due to their specificity and to keep the menu simple.
+        # TODO: we should at some point update the logic here, to make it easier to support further models
+        # without cluttering the UI.
+        excluded_models = ["vesicles_2d_maus"]
         model_list = [name for name in model_list if name not in excluded_models]
 
         models = ["- choose -"] + model_list
@@ -187,7 +190,8 @@ class SegmentationWidget(BaseWidget):
         # For these models we read out the 'Extra Segmentation' widget.
         if model_type == "ribbon":  # Currently only the ribbon model needs the extra seg.
             extra_seg = self._get_layer_selector_data(self.extra_seg_selector_name)
-            kwargs = {"extra_segmentation": extra_seg}
+            resolution = tuple(voxel_size[ax] for ax in "zyx")
+            kwargs = {"extra_segmentation": extra_seg, "resolution": resolution, "min_membrane_size": 50_000}
         elif model_type == "cristae":  # Cristae model expects 2 3D volumes
             kwargs = {
                 "extra_segmentation": self._get_layer_selector_data(self.extra_seg_selector_name),

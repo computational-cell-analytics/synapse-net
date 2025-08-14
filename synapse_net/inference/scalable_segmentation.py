@@ -79,6 +79,7 @@ def scalable_segmentation(
     prediction: Optional[ArrayLike] = None,
     verbose: bool = True,
     mask: Optional[ArrayLike] = None,
+    devices: Optional[List[str]] = None,
 ) -> None:
     """Run segmentation based on a prediction with foreground and boundary channel.
 
@@ -100,6 +101,8 @@ def scalable_segmentation(
             If given, this can be a numpy array, a zarr array, or similar
             If not given will be stored in a temporary n5 array.
         verbose: Whether to print timing information.
+        devices: The devices for running prediction. If not given will use the GPU
+            if available, otherwise the CPU.
     """
     if mask is not None:
         raise NotImplementedError
@@ -133,5 +136,5 @@ def scalable_segmentation(
         seeds = f.create_dataset("seeds", shape=input_.shape, dtype="uint64", chunks=chunks)
 
         # Run prediction and segmentation.
-        get_prediction(input_, prediction=prediction, tiling=tiling, model=model, verbose=verbose)
+        get_prediction(input_, prediction=prediction, tiling=tiling, model=model, verbose=verbose, devices=devices)
         _run_segmentation(prediction, output, seeds, chunks, seed_threshold, min_size, verbose, original_shape)
