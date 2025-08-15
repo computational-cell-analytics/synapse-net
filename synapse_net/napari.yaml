@@ -25,6 +25,9 @@ contributions:
     - id: synapse_net.postprocessing
       python_name: synapse_net.tools.postprocessing_widget:PostprocessingWidget
       title: Segmentation Postprocessing
+    - id: synapse_net.size_filter
+      python_name: synapse_net.tools.size_filter_widget:SizeFilterWidget
+      title: Size Filter
 
     # Commands for sample data.
     - id: synapse_net.sample_data_tem_2d
@@ -59,6 +62,8 @@ contributions:
       display_name: Pool Assignment
     - command: synapse_net.postprocessing
       display_name: Segmentation Postprocessing
+    - command: synapse_net.size_filter
+      display_name: Size Filter
 
   sample_data:
     - command: synapse_net.sample_data_tem_2d
