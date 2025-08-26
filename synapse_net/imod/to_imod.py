@@ -216,8 +216,10 @@ def write_points_to_imod(
                     z = _pad(1)  # all points in z=0 plane
 
                 f.write(f"{x}{y}{z}{_pad(radius, 2)}\n")
-
-        cmd = [cmd, "-si", "-scat", fname, output_path]
+        if is_3d:
+            cmd = [cmd, "-si", "-scat", fname, output_path]
+        else:
+            cmd = [cmd, "-sc", fname, output_path]
         if color is not None:
             assert len(color) == 3
             r, g, b = [str(co) for co in color]
