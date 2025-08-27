@@ -1,7 +1,7 @@
 channels:
     - conda-forge
 name:
-    synapse-net-cpu
+    synapse-net
 dependencies:
     - bioimageio.core
     - kornia

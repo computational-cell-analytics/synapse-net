@@ -76,7 +76,7 @@ def get_paths(split, datasets, testset=True):
 def train(key, ignore_label = None, training_2D = False, testset = True):
 
     datasets = [
-    "res_3"
+    "res_2_75"
 ]
     train_paths = get_paths("train", datasets=datasets, testset=testset)
     val_paths = get_paths("val", datasets=datasets, testset=testset)
@@ -86,7 +86,7 @@ def train(key, ignore_label = None, training_2D = False, testset = True):
     print(len(val_paths), "tomograms for validation")
 
     patch_shape = [16, 256, 256]   #patch_shape = [48, 256, 256] HAD TO CHANGE THIS FOR LDCVs, NEED TO CHANGE BACK!!!!!!!!!
-    model_name=f"3D-vesicles-model-LDCV-v2"
+    model_name=f"3D-vesicles-model-LDCV-v3"
 
     #checking for 2D training
     if training_2D:

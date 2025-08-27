@@ -5,7 +5,7 @@ from pathlib import Path
 from synapse_net.ground_truth import extract_vesicle_training_data
 
 ROOT = "/mnt/ceph-hdd/cold/nim00007/LDCVs_matea/20250714_EEC_Gut_2D_segmentation"  # noqa
-OUT_ROOT = "/mnt/ceph-hdd/cold/nim00007/LDCVs_matea/extracted/res_3"  # noqa
+OUT_ROOT = "/mnt/ceph-hdd/cold/nim00007/LDCVs_matea/extracted/res_2_75"  # noqa
 
 
 def extract_01():
@@ -295,7 +295,7 @@ def extract_LDCV():
     extract_vesicle_training_data(
         input_folder, input_folder, output_folder, visualize=False,
         skip_no_labels=True,
-        exclude_labels=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10], resolution=(3, 3, 3)
+        exclude_labels=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10], resolution=(2.75, 2.75, 2.75)
     )
     
 def main():
