@@ -209,17 +209,16 @@ def write_points_to_imod(
                     x = _pad(coord[2])
                     y = _pad(shape[1] - coord[1])
                     z = _pad(coord[0])
+                    
                 else:
                     # (y, x) indexing, single z-plane
                     x = _pad(coord[1])
                     y = _pad(shape[0] - coord[0])
-                    z = _pad(1)  # all points in z=0 plane
-
+                    z=_pad(1)
+                    
                 f.write(f"{x}{y}{z}{_pad(radius, 2)}\n")
-        if is_3d:
-            cmd = [cmd, "-si", "-scat", fname, output_path]
-        else:
-            cmd = [cmd, "-sc", fname, output_path]
+        cmd = [cmd, "-si", "-scat", fname, output_path]
+
         if color is not None:
             assert len(color) == 3
             r, g, b = [str(co) for co in color]
