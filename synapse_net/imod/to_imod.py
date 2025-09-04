@@ -214,7 +214,7 @@ def write_points_to_imod(
                     # (y, x) indexing, single z-plane
                     x = _pad(coord[1])
                     y = _pad(shape[0] - coord[0])
-                    z=_pad(1)
+                    z=_pad(0)
                     
                 f.write(f"{x}{y}{z}{_pad(radius, 2)}\n")
         cmd = [cmd, "-si", "-scat", fname, output_path]
