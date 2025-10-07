@@ -108,6 +108,11 @@ class VesiclePoolWidget(BaseWidget):
             next_color = pool_color
         self.pool_colors[pool_name] = next_color
 
+    def _add_colors(self, pool_properties, vesicle_colors):
+        colors = np.array([vesicle_colors[label_id] for label_id in pool_properties.label.values])
+        pool_properties["color"] = colors
+        return pool_properties
+
     def _compute_vesicle_pool(
         self,
         segmentation: np.ndarray,
@@ -136,9 +141,9 @@ class VesiclePoolWidget(BaseWidget):
             show_info("ERROR: Neither distances nor vesicle morphology were found.")
             return
         elif distances is None and morphology is not None:  # Only morphology props were found.
-            merged_df = pd.DataFrame(morphology).drop(columns=["index"])
+            merged_df = pd.DataFrame(morphology).drop(columns=["index"], errors="ignore")
         elif distances is not None and morphology is None:  # Only distances were found.
-            merged_df = pd.DataFrame(distances).drop(columns=["index"])
+            merged_df = pd.DataFrame(distances).drop(columns=["index"], errors="ignore")
         else:  # Both were found.
             distance_ids = distances.get("label", [])
             morphology_ids = morphology.get("label", [])
@@ -190,7 +195,7 @@ class VesiclePoolWidget(BaseWidget):
             # Overwrite the intersection of the two pool assignments with the new pool.
             pool_intersections = np.intersect1d(pool_vesicle_ids, old_pool_ids)
             old_pool_ids = [item for item in old_pool_ids if item not in pool_intersections]
-            pool_properties = pool_properties[~pool_properties['label'].isin(pool_intersections)]
+            pool_properties = pool_properties[~pool_properties["label"].isin(pool_intersections)]
 
             pool_assignments = sorted(pool_vesicle_ids + old_pool_ids)
 
@@ -242,6 +247,7 @@ class VesiclePoolWidget(BaseWidget):
         else:
             pool_layer = self.viewer.add_labels(vesicle_pools, name=pool_layer_name, colormap=vesicle_colors)
 
+        pool_properties = self._add_colors(pool_properties, vesicle_colors)
         self._add_properties_and_table(pool_layer, pool_properties, save_path=self.save_path.text())
         pool_layer.refresh()
 
