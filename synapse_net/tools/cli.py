@@ -8,6 +8,7 @@ from ..imod.to_imod import export_helper, write_segmentation_to_imod_as_points, 
 from ..inference.inference import _get_model_registry, get_model, get_model_training_resolution, run_segmentation
 from ..inference.scalable_segmentation import scalable_segmentation
 from ..inference.util import inference_helper, parse_tiling
+from .pool_visualization import _visualize_vesicle_pools
 
 
 def imod_point_cli():
@@ -97,6 +98,25 @@ def imod_object_cli():
         force=args.force,
         segmentation_key=args.segmentation_key,
     )
+
+
+def pool_visualization_cli():
+    parser = argparse.ArgumentParser(description="Load tomogram data, vesicle pools and additional segmentations for viualization.")  # noqa
+    parser.add_argument(
+        "--input_path", "-i", required=True,
+        help="The filepath to the mrc file containing the tomogram data."
+    )
+    parser.add_argument(
+        "--vesicle_path", "-v", required=True, help="The filepath to the tif file containing the vesicle segmentation."
+    )
+    parser.add_argument(
+        "--table_path", "-t", required=True, help="The filepath to the table with the vesicle pool assignments."
+    )
+    parser.add_argument(
+        "-s", "--segmentation_paths", nargs="+", help="Filepaths for additional segmentations."
+    )
+    args = parser.parse_args()
+    _visualize_vesicle_pools(args.input_path, args.vesicle_path, args.table_path, args.segmentation_paths)
 
 
 # TODO: handle kwargs
