@@ -17,7 +17,29 @@ def _create_pools(vesicles, table):
     return pools, colormap
 
 
-def _visualize_vesicle_pools(input_path, vesicle_path, table_path, segmentation_paths):
+def _parse_tables(table_paths):
+    def load_table(path):
+        if path.endswith(".csv"):
+            return pd.read_csv(path)
+        elif path.endswith(".xlsx"):
+            return pd.read_excel(path)
+        else:
+            raise RuntimeError("Unknown file ending.")
+
+    if len(table_paths) == 1:
+        table = load_table(table_paths[0])
+    else:
+        table = []
+        for table_path in table_paths:
+            this_table = load_table(table_path)
+            pool_name = Path(table_path).stem
+            this_table["pool"] = [pool_name] * len(this_table)
+            table.append(this_table)
+        table = pd.concat(table)
+    return table
+
+
+def _visualize_vesicle_pools(input_path, vesicle_path, table_paths, segmentation_paths):
     # Load the tomogram data, including scale information.
     data, voxel_size = read_mrc(input_path)
     axes = "zyx" if data.ndim == 3 else "yx"
@@ -27,9 +49,9 @@ def _visualize_vesicle_pools(input_path, vesicle_path, table_path, segmentation_
     # Load the vesicle layer.
     vesicles = imageio.imread(vesicle_path)
 
-    # Load the table with the pool assignments.
+    # Load the tables with the pool assignments.
     # Create and add the pool layer.
-    table = pd.read_excel(table_path)
+    table = _parse_tables(table_paths)
     pools, colormap = _create_pools(vesicles, table)
 
     viewer = napari.Viewer()

@@ -110,13 +110,14 @@ def pool_visualization_cli():
         "--vesicle_path", "-v", required=True, help="The filepath to the tif file containing the vesicle segmentation."
     )
     parser.add_argument(
-        "--table_path", "-t", required=True, help="The filepath to the table with the vesicle pool assignments."
+        "--table_paths", "-t", required=True, nargs="+",
+        help="The filepath to the table with the vesicle pool assignments."
     )
     parser.add_argument(
         "-s", "--segmentation_paths", nargs="+", help="Filepaths for additional segmentations."
     )
     args = parser.parse_args()
-    _visualize_vesicle_pools(args.input_path, args.vesicle_path, args.table_path, args.segmentation_paths)
+    _visualize_vesicle_pools(args.input_path, args.vesicle_path, args.table_paths, args.segmentation_paths)
 
 
 # TODO: handle kwargs
