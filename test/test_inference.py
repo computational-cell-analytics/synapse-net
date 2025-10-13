@@ -4,6 +4,7 @@ from functools import partial
 from shutil import rmtree
 
 import imageio.v3 as imageio
+import requests
 from synapse_net.file_utils import read_mrc
 from synapse_net.sample_data import get_sample_data
 
@@ -22,6 +23,26 @@ class TestInference(unittest.TestCase):
             rmtree(self.tmp_dir)
         except OSError:
             pass
+
+    # Test that all models can be accessed by pooch and have the necessary resolution information.
+    def test_models(self):
+        from synapse_net.inference.inference import _get_model_registry, get_model_training_resolution
+
+        def check_url(url):
+            try:
+                # Make a HEAD request to the URL, which fetches HTTP headers but no content.
+                response = requests.head(url, allow_redirects=True)
+                # Check if the HTTP status code is one that indicates availability (200 <= code < 400).
+                return response.status_code < 400
+            except requests.RequestException:
+                # Handle connection exceptions
+                return False
+
+        registry = _get_model_registry()
+        for name in registry.registry.keys():
+            url_exists = check_url(registry.get_url(name))
+            self.assertTrue(url_exists)
+            get_model_training_resolution(name)
 
     def test_run_segmentation(self):
         from synapse_net.inference import run_segmentation, get_model
