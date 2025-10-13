@@ -107,17 +107,23 @@ def pool_visualization_cli():
         help="The filepath to the mrc file containing the tomogram data."
     )
     parser.add_argument(
-        "--vesicle_path", "-v", required=True, help="The filepath to the tif file containing the vesicle segmentation."
+        "--vesicle_paths", "-v", required=True, nargs="+",
+        help="The filepath(s) to the tif file(s) containing the vesicle segmentation."
     )
     parser.add_argument(
         "--table_paths", "-t", required=True, nargs="+",
-        help="The filepath to the table with the vesicle pool assignments."
+        help="The filepath(s) to the table(s) with the vesicle pool assignments."
     )
     parser.add_argument(
         "-s", "--segmentation_paths", nargs="+", help="Filepaths for additional segmentations."
     )
+    parser.add_argument(
+        "--split_pools", action="store_true", help="Whether to split the pools into individual layers.",
+    )
     args = parser.parse_args()
-    _visualize_vesicle_pools(args.input_path, args.vesicle_path, args.table_paths, args.segmentation_paths)
+    _visualize_vesicle_pools(
+        args.input_path, args.vesicle_paths, args.table_paths, args.segmentation_paths, args.split_pools
+    )
 
 
 # TODO: handle kwargs
