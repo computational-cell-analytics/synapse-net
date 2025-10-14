@@ -113,7 +113,7 @@ def get_model_training_resolution(model_type: str) -> Dict[str, float]:
         "compartments": {"x": 3.47, "y": 3.47, "z": 3.47},
         "mitochondria": {"x": 2.07, "y": 2.07, "z": 2.07},
         # TODO: this is just copied from the previous mito model, it may be necessary to update this.
-        "mitochondria2": {"x": 2.07, "y": 2.07, "z": 2.07},
+        "mitochondria2": {"x": 1.45, "y": 1.45, "z": 1.45},
         "cristae": {"x": 1.44, "y": 1.44, "z": 1.44},
         "ribbon": {"x": 1.188, "y": 1.188, "z": 1.188},
         "vesicles_2d": {"x": 1.35, "y": 1.35},
