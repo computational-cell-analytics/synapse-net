@@ -201,6 +201,7 @@ def supervised_training(
     in_channels: int = 1,
     out_channels: int = 2,
     mask_channel: bool = False,
+    checkpoint_path: Optional[str] = None,
     **loader_kwargs,
 ):
     """Run supervised segmentation training.
@@ -265,6 +266,9 @@ def supervised_training(
         model = get_2d_model(out_channels=out_channels, in_channels=in_channels)
     else:
         model = get_3d_model(out_channels=out_channels, in_channels=in_channels)
+    
+    if checkpoint_path:
+        model = torch_em.util.load_model(checkpoint=checkpoint_path)
 
     loss, metric = None, None
     # No ignore label -> we can use default loss.
