@@ -1,32 +1,77 @@
 import os
 from synapse_net.training.domain_adaptation import mean_teacher_adaptation
+from pathlib import Path
+from torch_em.data.sampler import MinForegroundSampler
 
-ROOT = "/mnt/lustre-emmy-hdd/projects/nim00007/data/synaptic-reconstruction/fernandez-busnadiego/from_arsen/tomos_actin_18924"  # noqa
+def actin_adaptation_deepict2opto():
+    PARENT_DIR = Path("/mnt/data1/sage/actin-segmentation/data/EMPIAR-12292/h5")
+   
+    all_paths = [str(p) for p in PARENT_DIR.glob("*.h5")]
+    train_paths = all_paths[:10]
+    val_paths = all_paths[10:12]
 
-
-def actin_adaptation_v1():
-    train_paths = [
-        os.path.join(ROOT, "Lam12_ts_006_newstack_rec_deconv_bin4_250823.mrc"),
-        os.path.join(ROOT, "Lam13_ts_003_dimi_resize.mrc")
-    ]
-    val_paths = [
-        os.path.join(ROOT, "2023_08_10_lam9_ts_002_resize.mrc")
-    ]
     patch_shape = (64, 384, 384)
     mean_teacher_adaptation(
-        name="actin-adapted-v1",
+        name="actin-adapted-deepict2opto-v1",
         unsupervised_train_paths=train_paths,
         unsupervised_val_paths=val_paths,
-        raw_key="data",
+        raw_key="raw",
         patch_shape=patch_shape,
-        save_root=".",
-        source_checkpoint="./checkpoints/actin-deepict",
+        n_iterations=int(25000),
+        save_root="./output/experiment1/run2",
+        source_checkpoint="./output/experiment1/run1/checkpoints/actin-deepict-v3",
         confidence_threshold=0.75,
+        device=1,
     )
 
 
+def actin_adaptation_opto2deepict_v1():
+    PARENT_DIR = Path("/mnt/data1/sage/actin-segmentation/data/deepict/deepict_actin/")
+    DATA_DIR = PARENT_DIR / "raw"
+    BOUNDARY_MASK_DIR = PARENT_DIR / "boundary_masks"
+    BACKGROUND_MASK_DIR = PARENT_DIR / "background_masks"
+    
+    data_paths = [str(p) for p in DATA_DIR.glob("*.mrc")]
+    smpl_mask_paths = [str(p) for p in BOUNDARY_MASK_DIR.glob("*.mrc")] 
+    bg_mask_paths = [str(p) for p in BACKGROUND_MASK_DIR.glob("*.mrc")]
+    
+    # train - 00004, val - 00011, test - 00012
+    train_data_paths = [data_paths[2]]
+    train_sample_mask_paths = [smpl_mask_paths[2]]
+    train_background_mask_paths = [bg_mask_paths[2]]
+    val_data_paths = [data_paths[0]]
+    val_sample_mask_paths = [smpl_mask_paths[0]]
+
+    print("train data paths:", train_data_paths)
+    print("train sample paths:", train_sample_mask_paths)
+    print("train background paths:", train_background_mask_paths)
+    print("val data paths:", val_data_paths)
+    print("val sample paths:", val_sample_mask_paths)
+
+    patch_shape = (64, 384, 384)
+    patch_sampler = MinForegroundSampler(min_fraction=0.95)
+
+    mean_teacher_adaptation(
+        name="actin-adapted-opto2deepict-v1",
+        unsupervised_train_paths=train_data_paths,
+        unsupervised_val_paths=val_data_paths,
+        raw_key="raw",
+        patch_shape=patch_shape,
+        save_root="./output/experiment2/run2",
+        source_checkpoint="./output/experiment2/run1/checkpoints/actin-opto-v1",
+        confidence_threshold=0.75,
+        batch_size=1,
+        n_iterations=int(25000),
+        train_sample_mask_paths=train_sample_mask_paths,
+        val_sample_mask_paths=val_sample_mask_paths,
+        train_background_mask_paths=train_background_mask_paths,
+        patch_sampler=patch_sampler,
+        device=2,
+    )
+ 
 def main():
-    actin_adaptation_v1()
+    #actin_adaptation_deepict2opto()
+    actin_adaptation_opto2deepict_v1()
 
 
 if __name__ == "__main__":

@@ -201,6 +201,7 @@ def supervised_training(
     in_channels: int = 1,
     out_channels: int = 2,
     mask_channel: bool = False,
+    device: int = 0,
     **loader_kwargs,
 ):
     """Run supervised segmentation training.
@@ -243,6 +244,7 @@ def supervised_training(
         out_channels: The number of output channels of the UNet.
         mask_channel: Whether the last channels in the labels should be used for masking the loss.
             This can be used to implement more complex masking operations and is not compatible with `ignore_label`.
+        device: GPU ID for training. 
         loader_kwargs: Additional keyword arguments for the dataloader.
     """
     train_loader = get_supervised_loader(train_paths, raw_key, label_key, patch_shape, batch_size,
@@ -290,6 +292,7 @@ def supervised_training(
     else:
         raise ValueError
 
+    device = torch.device(f"cuda:{device}") if torch.cuda.is_available() else torch.device("cpu")
     trainer = torch_em.default_segmentation_trainer(
         name=name,
         model=model,
@@ -302,6 +305,7 @@ def supervised_training(
         save_root=save_root,
         loss=loss,
         metric=metric,
+        device=device
     )
     trainer.fit(n_iterations)
 

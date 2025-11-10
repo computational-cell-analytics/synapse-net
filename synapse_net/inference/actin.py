@@ -23,6 +23,7 @@ def segment_actin(
     return_predictions: bool = False,
     scale: Optional[List[float]] = None,
     mask: Optional[np.ndarray] = None,
+    devices: Optional[List[str]] = None,
 ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
     """Segment actin in an input volume.
 
@@ -37,6 +38,8 @@ def segment_actin(
         return_predictions: Whether to return the predictions (foreground, boundaries) alongside the segmentation.
         scale: The scale factor to use for rescaling the input volume before prediction.
         mask: An optional mask that is used to restrict the segmentation.
+        devices: The devices for running prediction. If not given will use the GPU
+            if available, otherwise the CPU.
 
     Returns:
         The segmentation mask as a numpy array, or a tuple containing the segmentation mask
@@ -51,8 +54,12 @@ def segment_actin(
     # Run the prediction.
     if mask is not None:
         mask = scaler.scale_input(mask, is_segmentation=True)
-    pred = get_prediction(input_volume, model=model, model_path=model_path, tiling=tiling, verbose=verbose)
-    foreground, boundaries = pred[:2]
+    pred = get_prediction(input_volume, model=model, model_path=model_path, tiling=tiling, verbose=verbose, devices=devices)
+   
+    if pred.shape[0] == 2:
+        foreground, boundaries = pred[:2]    # out_channels = 2
+    else:
+        foreground = pred[0]                 # out_channels = 1
 
     # TODO proper segmentation procedure
     # NOTE: actin fiber recall may improve by choosing a lower foreground threshold
