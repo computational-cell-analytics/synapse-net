@@ -26,6 +26,7 @@ def _get_model_registry():
         "compartments": "527983720f9eb215c45c4f4493851fd6551810361eda7b79f185a0d304274ee1",
         "mitochondria": "24625018a5968b36f39fa9d73b121a32e8f66d0f2c0540d3df2e1e39b3d58186",
         "mitochondria2": "553decafaff4838fff6cc8347f22c8db3dee5bcbeffc34ffaec152f8449af673",
+        "mitochondria3": "aa690c49017f84fd333436ddcb995ffeaf9b8174e9505586a4caf735a5805e7c",
         "cristae": "f96c90484f4ea92ac0515a06e389cc117580f02c2aacdc44b5828820cf38c3c3",
         "ribbon": "7c947f0ddfabe51a41d9d05c0a6ca7d6b238f43df2af8fffed5552d09bb075a9",
         "vesicles_2d": "eb0b74f7000a0e6a25b626078e76a9452019f2d1ea6cf2033073656f4f055df1",
@@ -41,6 +42,7 @@ def _get_model_registry():
         "compartments": "https://owncloud.gwdg.de/index.php/s/DnFDeTmDDmZrDDX/download",
         "mitochondria": "https://owncloud.gwdg.de/index.php/s/1T542uvzfuruahD/download",
         "mitochondria2": "https://owncloud.gwdg.de/index.php/s/GZghrXagc54FFXd/download",
+        "mitochondria3": "https://owncloud.gwdg.de/index.php/s/FwLQRCV2HnXDxsT/download",
         "cristae": "https://owncloud.gwdg.de/index.php/s/Df7OUOyQ1Kc2eEO/download",
         "ribbon": "https://owncloud.gwdg.de/index.php/s/S3b5l0liPP1XPYA/download",
         "vesicles_2d": "https://owncloud.gwdg.de/index.php/s/d72QIvdX6LsgXip/download",
@@ -114,6 +116,7 @@ def get_model_training_resolution(model_type: str) -> Dict[str, float]:
         "mitochondria": {"x": 2.07, "y": 2.07, "z": 2.07},
         # TODO: this is just copied from the previous mito model, it may be necessary to update this.
         "mitochondria2": {"x": 1.45, "y": 1.45, "z": 1.45},
+        "mitochondria3": {"x": 2.87, "y": 2.87, "z": 2.87},
         "cristae": {"x": 1.44, "y": 1.44, "z": 1.44},
         "ribbon": {"x": 1.188, "y": 1.188, "z": 1.188},
         "vesicles_2d": {"x": 1.35, "y": 1.35},
@@ -237,7 +240,7 @@ def run_segmentation(
     """
     if model_type.startswith("vesicles"):
         segmentation = segment_vesicles(image, model=model, tiling=tiling, scale=scale, verbose=verbose, **kwargs)
-    elif model_type == "mitochondria" or model_type == "mitochondria2":
+    elif model_type == "mitochondria" or model_type == "mitochondria2" or model_type == "mitochondria3":
         segmentation = segment_mitochondria(image, model=model, tiling=tiling, scale=scale, verbose=verbose, **kwargs)
     elif model_type == "active_zone":
         segmentation = segment_active_zone(image, model=model, tiling=tiling, scale=scale, verbose=verbose, **kwargs)
