@@ -1,5 +1,5 @@
 import time
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import elf.parallel as parallel
 import numpy as np
@@ -65,6 +65,7 @@ def segment_mitochondria(
     ws_halo: Tuple[int, ...] = (48, 48, 48),
     boundary_threshold: float = 0.25,
     area_threshold: int = 5000,
+    preprocess: Callable = None,
 ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
     """Segment mitochondria in an input volume.
 
@@ -99,7 +100,10 @@ def segment_mitochondria(
     # Rescale the mask if it was given and run prediction.
     if mask is not None:
         mask = scaler.scale_input(mask, is_segmentation=True)
-    pred = get_prediction(input_volume, model_path=model_path, model=model, tiling=tiling, mask=mask, verbose=verbose)
+    pred = get_prediction(
+        input_volume, model_path=model_path, model=model, tiling=tiling, mask=mask, verbose=verbose,
+        preprocess=preprocess
+    )
 
     # Run segmentation and rescale the result if necessary.
     foreground, boundaries = pred[:2]

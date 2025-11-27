@@ -126,6 +126,7 @@ def get_prediction(
     mask: Optional[ArrayLike] = None,
     prediction: Optional[ArrayLike] = None,
     devices: Optional[List[str]] = None,
+    preprocess: Optional[callable] = None,
 ) -> ArrayLike:
     """Run prediction on a given volume.
 
@@ -192,7 +193,7 @@ def get_prediction(
         # print(f"updated_tiling {updated_tiling}")
         prediction = get_prediction_torch_em(
             input_volume, updated_tiling, model_path, model, verbose, with_channels,
-            mask=mask, prediction=prediction, devices=devices,
+            mask=mask, prediction=prediction, devices=devices, preprocess=preprocess,
         )
 
     return prediction
@@ -208,6 +209,7 @@ def get_prediction_torch_em(
     mask: Optional[ArrayLike] = None,
     prediction: Optional[ArrayLike] = None,
     devices: Optional[List[str]] = None,
+    preprocess: Optional[callable] = None,
 ) -> np.ndarray:
     """Run prediction using torch-em on a given volume.
 
@@ -258,7 +260,10 @@ def get_prediction_torch_em(
                 print("Run prediction with mask.")
             mask = mask.astype("bool")
 
-        preprocess = None if isinstance(input_volume, np.ndarray) else torch_em.transform.raw.standardize
+        if preprocess is None:
+            preprocess = None if isinstance(input_volume, np.ndarray) else torch_em.transform.raw.standardize
+        else:
+            preprocess = preprocess
         prediction = predict_with_halo(
             input_volume, model, gpu_ids=devices,
             block_shape=block_shape, halo=halo,
