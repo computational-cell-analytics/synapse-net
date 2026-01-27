@@ -169,11 +169,32 @@ SynapseNet provides functionality for training a UNet for segmentation tasks usi
 In this case, you have to provide data **and** (manual) annotations for the structure(s) you want to segment.
 This functionality is implemented in `synapse_net.training.supervised_training`. You can find an example script that shows how to use it [here](https://github.com/computational-cell-analytics/synapse-net/blob/main/examples/network_training.py).
 
-We also provide a command line function to run supervised training: `synapse_net.run_supervised_training`. Run
+We also provide a command line function to run supervised training: `synapse_net.run_supervised_training`.
+It enables training on data and labels stored in files. Multiple file formats, such as mrc, tif, and hdf5 are supported.
+
+For example, to train a network for vesicle segmentation from mrc files stored in separate folders for training and validation data:
+```bash
+synapse_net.run_supervised_training \
+    -n my-vesicle-model \  # The name of the model checkpoint.
+    --train_folder /path/to/train/tomograms \ # The path to the tomograms to use for training.
+    --image_file_pattern *.mrc \ # For mrc files, replace if you have a different file type.
+    --label_folder /path/to/train/labels  \ # The path to the vesicle annotations for training.
+    --label_file_pattern *.mrc \ # For labels stored as mrc, replace if you have a different file type.
+    --val_folder /path/to/val/tomograms \ # The path to the tomograms to use for validation.
+    --val_label_folder /path/to/val/labels \ # The path to the vesicle annotations for training.
+    --patch_shape 48 256 256 \ # The patch shape in ZYX.
+    --batch_size 2 \ # The batch size for training.
+    --initial_model vesicles_3d \ # The model to use for weight initialization.
+    --n_iterations 25000 \ # The number of iterations to train for.
+```
+In this case, the model is initialized with the weight's of the 3d vesicle segmentation model due to the choice of `initial_model`. You can also choose a model for a different task here, e.g. `mitochondria` or leave out this argument to train a randomly initialized model.
+
+Run
 ```bash
 synapse_net.run_supervised_training -h
 ```
-for more information and instructions on how to use it.
+for more information and instructions on how to use the command.
+
 
 ### Domain Adaptation
 
@@ -181,11 +202,25 @@ SynapseNet provides functionality for (unsupervised) domain adaptation.
 This functionality is implemented through a student-teacher training approach that can improve segmentation for data from a different condition (for example different sample preparation, imaging technique, or different specimen), **without requiring additional annotated structures**.
 Domain adaptation is implemented in `synapse_net.training.domain_adaptation`. You can find an example script that shows how to use it [here](https://github.com/computational-cell-analytics/synapse-net/blob/main/examples/domain_adaptation.py).
 
-We also provide a command line function to run domain adaptation: `synapse_net.run_domain_adaptation`. Run
+We also provide a command line function to run domain adaptation: `synapse_net.run_domain_adaptation`.
+It enables training on data in local files. Multiple file formats, such as mrc, tif, and hdf5 are supported.
+
+For example, to adapt the network for vesicle segmentation based on mrc files:
+```bash
+synapse_net.run_domain_adaptation \
+    -n my-adapted-vesicle-model \  # The name of the model checkpoint.
+    --input_folder /path/to/tomograms  \  # The folder with the tomograms to train on.
+    --file_pattern *.mrc \ # For mrc files, replace if you have a different file type.
+    --source_model vesicles_3d \ # To adapt the model for 3D vesicle segmentation.
+    --patch_shape 48 256 256 \ # The patch shape for training.
+    --n_iterations 10000 \ # The number of iterations to train for
+```
+
+Run
 ```bash
 synapse_net.run_domain_adaptation -h
 ```
-for more information and instructions on how to use it.
+for more information and instructions on how to use the command.
 
 > Note: Domain adaptation only works if the initial model already finds some of the structures in the data from a new condition. If it does not work you will have to train a network on annotated data.
 
