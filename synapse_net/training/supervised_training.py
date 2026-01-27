@@ -7,6 +7,8 @@ import torch_em
 from sklearn.model_selection import train_test_split
 from torch_em.model import AnisotropicUNet, UNet2d
 
+from synapse_net.inference.inference import get_model_path, get_available_models
+
 
 def get_3d_model(
     out_channels: int,
@@ -263,13 +265,12 @@ def supervised_training(
         return
 
     is_2d, _ = _determine_ndim(patch_shape)
-    if is_2d:
+    if checkpoint_path is not None:
+        model = torch_em.util.load_model(checkpoint=checkpoint_path)
+    elif is_2d:
         model = get_2d_model(out_channels=out_channels, in_channels=in_channels)
     else:
         model = get_3d_model(out_channels=out_channels, in_channels=in_channels)
-
-    if checkpoint_path:
-        model = torch_em.util.load_model(checkpoint=checkpoint_path)
 
     loss, metric = None, None
     # No ignore label -> we can use default loss.
@@ -368,7 +369,15 @@ def _parse_input_files(args):
     return train_image_paths, train_label_paths, val_image_paths, val_label_paths, raw_key, label_key
 
 
-# TODO enable initialization with a pre-trained model.
+def _parse_checkpoint(initial_model):
+    if initial_model is None:
+        return None
+    if os.path.exists(initial_model):
+        return initial_model
+    model_path = get_model_path(initial_model)
+    return model_path
+
+
 def main():
     """@private
     """
@@ -404,6 +413,16 @@ def main():
     parser.add_argument("--val_label_folder",
                         help="The input folder with the validation labels. If not given the training data will be split for validation.")  # noqa
 
+    # Optional: choose a model for initializing the weights.
+    available_models = get_available_models()
+    parser.add_argument(
+        "--initial_model",
+        help="Choose a model checkpoint for weight initialization.\n"
+        "This may either be the path to an existing model checkpoint or the name of a pretrained model.\n"
+        f"The following pretrained models are available: {available_models}.\n"
+        "If not given, the model will be randomly initialized."
+    )
+
     # More optional argument:
     parser.add_argument("--batch_size", type=int, default=1, help="The batch size for training.")
     parser.add_argument("--n_samples_train", type=int, help="The number of samples per epoch for training. If not given will be derived from the data size.")  # noqa
@@ -416,6 +435,7 @@ def main():
 
     train_image_paths, train_label_paths, val_image_paths, val_label_paths, raw_key, label_key =\
         _parse_input_files(args)
+    checkpoint_path = _parse_checkpoint(args.initial_model)
 
     supervised_training(
         name=args.name, train_paths=train_image_paths, val_paths=val_image_paths,
@@ -423,4 +443,5 @@ def main():
         raw_key=raw_key, label_key=label_key, patch_shape=args.patch_shape, batch_size=args.batch_size,
         n_samples_train=args.n_samples_train, n_samples_val=args.n_samples_val,
         check=args.check, n_iterations=args.n_iterations, save_root=args.save_root,
+        checkpoint_path=checkpoint_path
     )

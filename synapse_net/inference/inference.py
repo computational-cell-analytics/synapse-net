@@ -63,6 +63,16 @@ def _get_model_registry():
     return models
 
 
+def get_available_models() -> List[str]:
+    """Get the names of all available pretrained models.
+
+    Returns:
+        The list of available model names.
+    """
+    model_registry = _get_model_registry()
+    return list(model_registry.urls.keys())
+
+
 def get_model_path(model_type: str) -> str:
     """Get the local path to a pretrained model.
 
