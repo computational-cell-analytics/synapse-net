@@ -267,7 +267,7 @@ def supervised_training(
         model = get_2d_model(out_channels=out_channels, in_channels=in_channels)
     else:
         model = get_3d_model(out_channels=out_channels, in_channels=in_channels)
-    
+
     if checkpoint_path:
         model = torch_em.util.load_model(checkpoint=checkpoint_path)
 
@@ -362,8 +362,8 @@ def _parse_input_files(args):
     else:
         if args.val_label_folder is None:
             raise ValueError("You have passed a val_folder, but not a val_label_folder.")
-        val_image_paths = _parse_input_folder(args.val_image_folder, args.image_file_pattern, raw_key)
-        val_label_paths = _parse_input_folder(args.val_label_folder, args.label_file_pattern, label_key)
+        val_image_paths, _ = _parse_input_folder(args.val_folder, args.image_file_pattern, raw_key)
+        val_label_paths, _ = _parse_input_folder(args.val_label_folder, args.label_file_pattern, label_key)
 
     return train_image_paths, train_label_paths, val_image_paths, val_label_paths, raw_key, label_key
 
@@ -410,6 +410,8 @@ def main():
     parser.add_argument("--n_samples_val", type=int, help="The number of samples per epoch for validation. If not given will be derived from the data size.")  # noqa
     parser.add_argument("--val_fraction", type=float, default=0.15, help="The fraction of the data to use for validation. This has no effect if 'val_folder' and 'val_label_folder' were passed.")  # noqa
     parser.add_argument("--check", action="store_true", help="Visualize samples from the data loaders to ensure correct data instead of running training.")  # noqa
+    parser.add_argument("--n_iterations", type=int, default=int(1e5), help="The maximal number of iterations to train for.")  # noqa
+    parser.add_argument("--save_root", help="Root path for saving the checkpoint and log dir.")
     args = parser.parse_args()
 
     train_image_paths, train_label_paths, val_image_paths, val_label_paths, raw_key, label_key =\
@@ -420,5 +422,5 @@ def main():
         train_label_paths=train_label_paths, val_label_paths=val_label_paths,
         raw_key=raw_key, label_key=label_key, patch_shape=args.patch_shape, batch_size=args.batch_size,
         n_samples_train=args.n_samples_train, n_samples_val=args.n_samples_val,
-        check=args.check,
+        check=args.check, n_iterations=args.n_iterations, save_root=args.save_root,
     )
