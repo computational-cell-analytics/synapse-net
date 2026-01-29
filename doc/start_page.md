@@ -213,7 +213,7 @@ synapse_net.run_domain_adaptation \
     --file_pattern *.mrc \ # For mrc files, replace if you have a different file type.
     --source_model vesicles_3d \ # To adapt the model for 3D vesicle segmentation.
     --patch_shape 48 256 256 \ # The patch shape for training.
-    --n_iterations 10000 \ # The number of iterations to train for
+    --n_iterations 10000 \ # The number of iterations to train for.
 ```
 
 Run
