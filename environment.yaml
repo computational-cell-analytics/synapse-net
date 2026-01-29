@@ -13,7 +13,7 @@ dependencies:
     - python-elf
     - pytorch
     - tensorboard
-    - torch_em
+    - torch_em >=0.8.1
     - torchvision
     - trimesh
     - zarr <3

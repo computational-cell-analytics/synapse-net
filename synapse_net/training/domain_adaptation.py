@@ -15,8 +15,9 @@ from .semisupervised_training import get_unsupervised_loader
 from .supervised_training import (
     get_2d_model, get_3d_model, get_supervised_loader, _determine_ndim, _derive_key_from_files
 )
-from ..inference.inference import get_model_path, compute_scale_from_voxel_size
+from ..inference.inference import get_model_path, compute_scale_from_voxel_size, get_available_models
 from ..inference.util import _Scaler
+
 
 def mean_teacher_adaptation(
     name: str,
@@ -41,6 +42,7 @@ def mean_teacher_adaptation(
     patch_sampler: Optional[callable] = None,
     pseudo_label_sampler: Optional[callable] = None,
     device: int = 0,
+    check: bool = False,
 ) -> None:
     """Run domain adaptation to transfer a network trained on a source domain for a supervised
     segmentation task to perform this task on a different target domain.
@@ -85,12 +87,13 @@ def mean_teacher_adaptation(
             based on the patch_shape and size of the volumes used for training.
         n_samples_val: The number of val samples per epoch. By default this will be estimated
             based on the patch_shape and size of the volumes used for validation.
-        train_mask_paths: Sample masks used by the patch sampler to accept or reject patches for training. 
-        val_mask_paths: Sample masks used by the patch sampler to accept or reject patches for validation. 
+        train_mask_paths: Sample masks used by the patch sampler to accept or reject patches for training.
+        val_mask_paths: Sample masks used by the patch sampler to accept or reject patches for validation.
         patch_sampler: Accept or reject patches based on a condition.
-        pseudo_label_sampler: Mask out regions of the pseudo labels where the teacher is not confident before updating the gradients. 
-        device: GPU ID for training. 
-    """
+        pseudo_label_sampler: Mask out regions of the pseudo labels where the teacher is not confident before updating the gradients.
+        device: GPU ID for training.
+        check: Whether to check the training and validation loaders instead of running training.
+    """  # noqa
     assert (supervised_train_paths is None) == (supervised_val_paths is None)
     is_2d, _ = _determine_ndim(patch_shape)
 
@@ -119,23 +122,23 @@ def mean_teacher_adaptation(
     pseudo_labeler = self_training.DefaultPseudoLabeler(confidence_threshold=confidence_threshold)
     loss = self_training.DefaultSelfTrainingLoss()
     loss_and_metric = self_training.DefaultSelfTrainingLossAndMetric()
-    
+
     unsupervised_train_loader = get_unsupervised_loader(
-        data_paths=unsupervised_train_paths, 
-        raw_key=raw_key, 
-        patch_shape=patch_shape, 
-        batch_size=batch_size, 
-        n_samples=n_samples_train, 
-        sample_mask_paths=train_mask_paths, 
+        data_paths=unsupervised_train_paths,
+        raw_key=raw_key,
+        patch_shape=patch_shape,
+        batch_size=batch_size,
+        n_samples=n_samples_train,
+        sample_mask_paths=train_mask_paths,
         sampler=patch_sampler
     )
     unsupervised_val_loader = get_unsupervised_loader(
-        data_paths=unsupervised_val_paths, 
-        raw_key=raw_key, 
-        patch_shape=patch_shape, 
-        batch_size=batch_size, 
-        n_samples=n_samples_val, 
-        sample_mask_paths=val_mask_paths, 
+        data_paths=unsupervised_val_paths,
+        raw_key=raw_key,
+        patch_shape=patch_shape,
+        batch_size=batch_size,
+        n_samples=n_samples_val,
+        sample_mask_paths=val_mask_paths,
         sampler=patch_sampler
     )
 
@@ -152,6 +155,15 @@ def mean_teacher_adaptation(
     else:
         supervised_train_loader = None
         supervised_val_loader = None
+
+    if check:
+        from torch_em.util.debug import check_loader
+        check_loader(unsupervised_train_loader, n_samples=4)
+        check_loader(unsupervised_val_loader, n_samples=4)
+        if supervised_train_loader is not None:
+            check_loader(supervised_train_loader, n_samples=4)
+            check_loader(supervised_val_loader, n_samples=4)
+        return
 
     device = torch.device(f"cuda:{device}") if torch.cuda.is_available() else torch.device("cpu")
     trainer = self_training.MeanTeacherTrainer(
@@ -178,8 +190,8 @@ def mean_teacher_adaptation(
         sampler=pseudo_label_sampler,
     )
     trainer.fit(n_iterations)
-    
-    
+
+
 # TODO patch shapes for other models
 PATCH_SHAPES = {
     "vesicles_3d": [48, 256, 256],
@@ -248,6 +260,7 @@ def _parse_patch_shape(patch_shape, model_name):
         patch_shape = PATCH_SHAPES[model_name]
     return patch_shape
 
+
 def main():
     """@private
     """
@@ -267,11 +280,13 @@ def main():
     parser.add_argument("--file_pattern", default="*",
                         help="The pattern for selecting files for training. For example '*.mrc' to select mrc files.")
     parser.add_argument("--key", help="The internal file path for the training data. Will be derived from the file extension by default.")  # noqa
+    available_models = get_available_models()
     parser.add_argument(
         "--source_model",
         default="vesicles_3d",
         help="The source model used for weight initialization of teacher and student model. "
-        "By default the model 'vesicles_3d' for vesicle segmentation in volumetric data is used."
+        "By default the model 'vesicles_3d' for vesicle segmentation in volumetric data is used.\n"
+        f"The following source models are available: {available_models}"
     )
     parser.add_argument(
         "--resize_training_data", action="store_true",
@@ -289,6 +304,7 @@ def main():
     parser.add_argument("--n_samples_val", type=int, help="The number of samples per epoch for validation. If not given will be derived from the data size.")  # noqa
     parser.add_argument("--val_fraction", type=float, default=0.15, help="The fraction of the data to use for validation. This has no effect if 'val_folder' and 'val_label_folder' were passed.")  # noqa
     parser.add_argument("--check", action="store_true", help="Visualize samples from the data loaders to ensure correct data instead of running training.")  # noqa
+    parser.add_argument("--save_root", help="Root path for saving the checkpoint and log dir.")
 
     args = parser.parse_args()
 
@@ -296,7 +312,8 @@ def main():
     patch_shape = _parse_patch_shape(args.patch_shape, args.source_model)
     with tempfile.TemporaryDirectory() as tmp_dir:
         unsupervised_train_paths, unsupervised_val_paths = _get_paths(
-            args.input, args.pattern, args.resize_training_data, args.source_model, tmp_dir, args.val_fraction,
+            args.input_folder, args.file_pattern, args.resize_training_data,
+            args.source_model, tmp_dir, args.val_fraction,
         )
         unsupervised_train_paths, raw_key = _derive_key_from_files(unsupervised_train_paths, args.key)
 
@@ -312,4 +329,5 @@ def main():
             n_samples_train=args.n_samples_train,
             n_samples_val=args.n_samples_val,
             check=args.check,
+            save_root=args.save_root,
         )
