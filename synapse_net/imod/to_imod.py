@@ -14,6 +14,7 @@ import mrcfile
 import numpy as np
 from scipy.ndimage import distance_transform_edt
 from skimage.measure import regionprops
+from skimage.segmentation import find_boundaries
 from tqdm import tqdm
 
 
@@ -27,6 +28,14 @@ def _load_segmentation(segmentation_path, segmentation_key):
     return seg
 
 
+def _separate_instances(segmentation):
+    boundaries = find_boundaries(segmentation, mode="outer")
+    boundaries &= (segmentation != 0)
+    segmentation = segmentation.copy()
+    segmentation[boundaries] = 0
+    return segmentation
+
+
 # TODO: this has still some issues with some tomograms that has an offset info.
 # For now, this occurs for the inner ear data tomograms; it works for Fidi's STEM tomograms.
 # Ben's theory is that this might be due to data form JEOL vs. ThermoFischer microscopes.
@@ -37,6 +46,7 @@ def write_segmentation_to_imod(
     segmentation: Union[str, np.ndarray],
     output_path: str,
     segmentation_key: Optional[str] = None,
+    separate_instances: bool = True,
 ) -> None:
     """Write a segmentation to a mod file as closed contour object(s).
 
@@ -45,6 +55,7 @@ def write_segmentation_to_imod(
         segmentation: The segmentation (either as numpy array or filepath to a .tif file).
         output_path: The output path where the mod file will be saved.
         segmentation_key: The key to the segmentation data in case the segmentation is stored in hdf5 files.
+        separate_instances: Whether to seperate touching instances before the export.
     """
     cmd = "imodauto"
     cmd_path = shutil.which(cmd)
@@ -55,6 +66,8 @@ def write_segmentation_to_imod(
         segmentation = _load_segmentation(segmentation, segmentation_key)
 
     # Binarize the segmentation and flip its axes to match the IMOD axis convention.
+    if separate_instances:
+        segmentation = _separate_instances(segmentation)
     segmentation = (segmentation > 0).astype("uint8")
     segmentation = np.flip(segmentation, axis=1)
 
@@ -209,13 +222,13 @@ def write_points_to_imod(
                     x = _pad(coord[2])
                     y = _pad(shape[1] - coord[1])
                     z = _pad(coord[0])
-                    
+
                 else:
                     # (y, x) indexing, single z-plane
                     x = _pad(coord[1])
                     y = _pad(shape[0] - coord[0])
-                    z=_pad(0)
-                    
+                    z = _pad(0)
+
                 f.write(f"{x}{y}{z}{_pad(radius, 2)}\n")
         cmd = [cmd, "-si", "-scat", fname, output_path]
 
@@ -225,7 +238,6 @@ def write_points_to_imod(
             cmd += ["-co", f"{r} {g} {b}"]
 
         run(cmd)
-
 
 
 def write_segmentation_to_imod_as_points(
