@@ -6,6 +6,8 @@ models/*/
 *.out
 *.egg-info/
 run_sbatch.sbatch
+run_sbatch_revision.sbatch
+run_sbatch_emcapsulin.sbatch
 slurm/
 slurm_revision/
 scripts/cooper/evaluation_results/
