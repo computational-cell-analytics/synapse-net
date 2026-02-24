@@ -245,7 +245,7 @@ def mean_teacher_adaptation(
             On-the-fly rescaling is currently only implemented for unsupervised training. 
             `unsupervised_train_paths` and `unsupervised_val_paths` must be mrc files to read input voxel size 
             and determine scale factor.
-        device: GPU ID for training. 
+        device: GPU device for training. 
         check: Whether to check the training and validation loaders instead of running training.
     """ # noqa
     assert (supervised_train_paths is None) == (supervised_val_paths is None)
@@ -328,7 +328,7 @@ def mean_teacher_adaptation(
     loss = self_training.DefaultSelfTrainingLoss()
     loss_and_metric = self_training.DefaultSelfTrainingLossAndMetric()
 
-    device = torch.device(f"cuda:{device}") if torch.cuda.is_available() else torch.device("cpu")
+    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     trainer = trainer_class(
         name=name,
         model=model,
