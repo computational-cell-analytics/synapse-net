@@ -169,6 +169,7 @@ def get_unsupervised_loader(
     Returns:
         The PyTorch dataloader.
     """
+    
     # We exclude the top and bottom slices where the tomogram reconstruction is bad.
     if exclude_top_and_bottom:
         roi = np.s_[5:-5, :, :]
@@ -236,7 +237,6 @@ def get_unsupervised_loader(
         raw_transform = ComposedTransform(channelwise_raw_transform, drop_channel)
         augmentations = (ChannelWiseAugmentations(), ChannelWiseAugmentations())
         sampler = ChannelSplitterSampler(sampler)
-        with_channels = True 
 
     # Case 2: only sample masks are provided, e.g., for the validation data loader
     elif has_sample_mask:
@@ -266,7 +266,6 @@ def get_unsupervised_loader(
         raw_transform = ComposedTransform(channelwise_raw_transform, drop_channel)
         augmentations = (weak_augmentations(), weak_augmentations())
         sampler = ChannelSplitterSampler(sampler)
-        with_channels = True 
 
     # Case 3: only background masks are provided 
     elif has_background_mask:
@@ -294,11 +293,11 @@ def get_unsupervised_loader(
         raw_transform = base_transform
         augmentations = (ChannelWiseAugmentations(), ChannelWiseAugmentations())
         sampler = None
-        with_channels = True 
 
     # Case 4: neither mask is present, use default behavior
     else:
         for i, data_path in enumerate(data_paths):
+            
             if Path(data_path).suffix == ".h5":
                 with h5py.File(data_path, "r") as f:
                     raw = f[raw_key][:]
@@ -308,7 +307,7 @@ def get_unsupervised_loader(
             if apply_rescale:
                 raw = rescale_raw(raw)
                 print(f"{Path(data_path).stem}: rescaled inputs to {target_vsize}A with shape {raw.shape}")
-
+ 
             stacked_path = get_stacked_path([raw])
             stacked_paths.append(stacked_path)
         
@@ -317,11 +316,11 @@ def get_unsupervised_loader(
         raw_transform = base_transform
         augmentations = (weak_augmentations(), weak_augmentations())
         sampler = None
-        with_channels = False
     
     raw_key = "raw"
     _, ndim = _determine_ndim(patch_shape)
     transform = torch_em.transform.get_augmentations(ndim=ndim)
+    with_channels = True
 
     if n_samples is None:
         n_samples_per_ds = None
@@ -334,6 +333,7 @@ def get_unsupervised_loader(
         for path in data_paths
     ]
     ds = torch.utils.data.ConcatDataset(datasets)
+
     num_workers = 4 * batch_size 
     loader = torch_em.segmentation.get_data_loader(ds, batch_size=batch_size,
                                                    num_workers=num_workers, shuffle=True)
