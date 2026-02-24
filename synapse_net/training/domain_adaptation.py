@@ -251,6 +251,51 @@ def mean_teacher_adaptation(
     assert (supervised_train_paths is None) == (supervised_val_paths is None)
     is_2d, _ = _determine_ndim(patch_shape)
 
+    unsupervised_train_loader = get_unsupervised_loader(
+        data_paths=unsupervised_train_paths, 
+        raw_key=raw_key, 
+        patch_shape=patch_shape, 
+        batch_size=batch_size, 
+        n_samples=n_samples_train, 
+        sample_mask_paths=train_sample_mask_paths, 
+        background_mask_paths=train_background_mask_paths,
+        sampler=patch_sampler,
+        target_vsize=target_vsize,
+    )
+    unsupervised_val_loader = get_unsupervised_loader(
+        data_paths=unsupervised_val_paths, 
+        raw_key=raw_key, 
+        patch_shape=patch_shape, 
+        batch_size=batch_size, 
+        n_samples=n_samples_val, 
+        sample_mask_paths=val_sample_mask_paths, 
+        background_mask_paths=None,
+        sampler=patch_sampler,
+        target_vsize=target_vsize,
+    )
+    if supervised_train_paths is not None:
+        assert label_key is not None
+        supervised_train_loader = get_supervised_loader(
+            supervised_train_paths, raw_key_supervised, label_key,
+            patch_shape, batch_size, n_samples=n_samples_train,
+        )
+        supervised_val_loader = get_supervised_loader(
+            supervised_val_paths, raw_key_supervised, label_key,
+            patch_shape, batch_size, n_samples=n_samples_val,
+        )
+    else:
+        supervised_train_loader = None
+        supervised_val_loader = None
+
+    if check:
+        from torch_em.util.debug import check_loader
+        check_loader(unsupervised_train_loader, n_samples=4)
+        check_loader(unsupervised_val_loader, n_samples=4)
+        if supervised_train_loader is not None:
+            check_loader(supervised_train_loader, n_samples=4)
+            check_loader(supervised_val_loader, n_samples=4)
+        return
+    
     if source_checkpoint is None:
         # training from scratch only makes sense if we have supervised training data
         # that's why we have the assertion here.
@@ -282,55 +327,9 @@ def mean_teacher_adaptation(
 
     loss = self_training.DefaultSelfTrainingLoss()
     loss_and_metric = self_training.DefaultSelfTrainingLossAndMetric()
-   
-    unsupervised_train_loader = get_unsupervised_loader(
-        data_paths=unsupervised_train_paths, 
-        raw_key=raw_key, 
-        patch_shape=patch_shape, 
-        batch_size=batch_size, 
-        n_samples=n_samples_train, 
-        sample_mask_paths=train_sample_mask_paths, 
-        background_mask_paths=train_background_mask_paths,
-        sampler=patch_sampler,
-        target_vsize=target_vsize,
-    )
-    unsupervised_val_loader = get_unsupervised_loader(
-        data_paths=unsupervised_val_paths, 
-        raw_key=raw_key, 
-        patch_shape=patch_shape, 
-        batch_size=batch_size, 
-        n_samples=n_samples_val, 
-        sample_mask_paths=val_sample_mask_paths, 
-        background_mask_paths=None,
-        sampler=patch_sampler,
-        target_vsize=target_vsize,
-    )
-
-    if supervised_train_paths is not None:
-        assert label_key is not None
-        supervised_train_loader = get_supervised_loader(
-            supervised_train_paths, raw_key_supervised, label_key,
-            patch_shape, batch_size, n_samples=n_samples_train,
-        )
-        supervised_val_loader = get_supervised_loader(
-            supervised_val_paths, raw_key_supervised, label_key,
-            patch_shape, batch_size, n_samples=n_samples_val,
-        )
-    else:
-        supervised_train_loader = None
-        supervised_val_loader = None
-
-    if check:
-        from torch_em.util.debug import check_loader
-        check_loader(unsupervised_train_loader, n_samples=4)
-        check_loader(unsupervised_val_loader, n_samples=4)
-        if supervised_train_loader is not None:
-            check_loader(supervised_train_loader, n_samples=4)
-            check_loader(supervised_val_loader, n_samples=4)
-        return
 
     device = torch.device(f"cuda:{device}") if torch.cuda.is_available() else torch.device("cpu")
-    trainer = self_training.MeanTeacherTrainer(
+    trainer = trainer_class(
         name=name,
         model=model,
         optimizer=optimizer,

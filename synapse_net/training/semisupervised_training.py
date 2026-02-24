@@ -1,5 +1,5 @@
-from typing import Optional, Tuple
-
+from typing import Optional, Tuple, List
+import os
 import numpy as np
 import uuid
 import h5py
@@ -103,22 +103,38 @@ class ChannelSplitterSampler:
     def __call__(self, x):
         raw, mask = x[0], x[1]
         return self.sampler(raw, mask)
-    
+
 def get_stacked_path(inputs: List[np.ndarray]):
-    """Helper function to get_unsupervised_loader(). In cases where a mask input is given, creates a temporary 
-     h5 file containing the stacked inputs (raw, sample_mask, background mask) to be used to RawDataset().
+    """
+    Helper function to get_unsupervised_loader(). Stacks inputs along the channel axis then writes 
+    to temporary h5 files for use by RawDataset()
 
     Args:
         inputs: List of numpy arrays to be stacked along axis 0.
 
     Returns: Path to temporary h5 file containing stacked inputs.
     """
-    stacked = np.stack(inputs, axis=0)
-    tmp_path = f"/tmp/stacked_{uuid.uuid4().hex}.h5"
-    with h5py.File(tmp_path, "w") as f:
-        f.create_dataset("raw", data=stacked, compression="gzip")
-    return tmp_path
+    TMP_ROOT = os.environ.get("TMPDIR", "/tmp")
+    tmp_path = f"{TMP_ROOT}/stacked_{uuid.uuid4().hex}.h5"
     
+    c = len(inputs)
+    ref_shape = inputs[0].shape
+    for i, arr in enumerate(inputs):
+        if arr.shape != ref_shape:
+            raise ValueError(f"Shape mistmatch for input {i}: {arr.shape} != {ref_shape}")
+
+    with h5py.File(tmp_path, "w") as f:
+        ds = f.create_dataset("raw", shape = (c, *ref_shape), dtype=inputs[0].dtype,
+            compression=None, chunks=(1, 32, 256, 256))
+        
+        for i, arr in enumerate(inputs):
+            # cast all inputs to the same dtype
+            if arr.dtype != ds.dtype:
+                arr = arr.astype(ds.dtype, copy=False)
+            ds[i] = arr
+
+    return tmp_path
+
 def get_unsupervised_loader(
     data_paths: Tuple[str],
     raw_key: str,
@@ -206,11 +222,11 @@ def get_unsupervised_loader(
             sample_mask = read_mrc(sample_mask_path)[0]
             background_mask = read_mrc(background_mask_path)[0]
 
-            # rescaling is performed differently for to float and int data 
             if apply_rescale:
                 raw = rescale_raw(raw)
                 sample_mask = rescale_mask(sample_mask)
                 background_mask = rescale_mask(background_mask)
+                print(f"{Path(data_path).stem}: rescaled inputs to {target_vsize}A with shape {raw.shape}")
 
             stacked_path = get_stacked_path([raw, sample_mask, background_mask])
             stacked_paths.append(stacked_path)
@@ -238,8 +254,11 @@ def get_unsupervised_loader(
             if apply_rescale:
                 raw = rescale_raw(raw)
                 sample_mask = rescale_mask(sample_mask)
+                print(f"{Path(data_path).stem}: rescaled inputs to {target_vsize}A with shape {raw.shape}")
             
             stacked_path = get_stacked_path([raw, sample_mask])
+            
+
             stacked_paths.append(stacked_path)
 
         # update variables for RawDataset()
@@ -265,6 +284,7 @@ def get_unsupervised_loader(
             if apply_rescale:
                 raw = rescale_raw(raw)
                 background_mask = rescale_mask(background_mask)
+                print(f"{Path(data_path).stem}: rescaled inputs to {target_vsize}A with shape {raw.shape}")
 
             stacked_path = get_stacked_path([raw, background_mask])
             stacked_paths.append(stacked_path)
@@ -287,6 +307,7 @@ def get_unsupervised_loader(
 
             if apply_rescale:
                 raw = rescale_raw(raw)
+                print(f"{Path(data_path).stem}: rescaled inputs to {target_vsize}A with shape {raw.shape}")
 
             stacked_path = get_stacked_path([raw])
             stacked_paths.append(stacked_path)
@@ -313,10 +334,10 @@ def get_unsupervised_loader(
         for path in data_paths
     ]
     ds = torch.utils.data.ConcatDataset(datasets)
-
-    num_workers = 4 * batch_size
+    num_workers = 4 * batch_size 
     loader = torch_em.segmentation.get_data_loader(ds, batch_size=batch_size,
                                                    num_workers=num_workers, shuffle=True)
+    
     return loader
 
 # TODO: use different paths for supervised and unsupervised training
