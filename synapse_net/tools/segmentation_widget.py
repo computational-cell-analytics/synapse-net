@@ -192,7 +192,7 @@ class SegmentationWidget(BaseWidget):
             extra_seg = self._get_layer_selector_data(self.extra_seg_selector_name)
             resolution = tuple(voxel_size[ax] for ax in "zyx")
             kwargs = {"extra_segmentation": extra_seg, "resolution": resolution, "min_membrane_size": 50_000}
-        elif model_type == "cristae":  # Cristae model expects 2 3D volumes
+        elif model_type == "cristae" or model_type == "cristae2":  # Cristae model expects 2 3D volumes
             kwargs = {
                 "extra_segmentation": self._get_layer_selector_data(self.extra_seg_selector_name),
                 "with_channels": True,
