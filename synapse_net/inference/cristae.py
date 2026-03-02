@@ -62,7 +62,9 @@ def segment_cristae(
         The segmentation mask as a numpy array, or a tuple containing the segmentation mask
         and the predictions if return_predictions is True.
     """
-    mitochondria = kwargs.pop("extra_segmentation")
+    mitochondria = kwargs.pop("extra_segmentation", None)
+    if mitochondria is None:
+        raise ValueError("Mitochondria segmentation is required")
     with_channels = kwargs.pop("with_channels", True)
     channels_to_standardize = kwargs.pop("channels_to_standardize", [0])
     if verbose:
