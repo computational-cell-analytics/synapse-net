@@ -64,6 +64,11 @@ def segment_cristae(
     """
     mitochondria = kwargs.pop("extra_segmentation", None)
     if mitochondria is None:
+        # try extract from input volume
+        if input_volume.ndim == 4:
+            mitochondria = input_volume[1]
+            input_volume = input_volume[0]
+    if mitochondria is None:
         raise ValueError("Mitochondria segmentation is required")
     with_channels = kwargs.pop("with_channels", True)
     channels_to_standardize = kwargs.pop("channels_to_standardize", [0])
