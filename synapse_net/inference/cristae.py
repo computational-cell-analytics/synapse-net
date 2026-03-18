@@ -2,6 +2,12 @@ import time
 from typing import Dict, List, Optional, Tuple, Union
 
 import elf.parallel as parallel
+from elf.wrapper.base import (
+    SimpleTransformationWrapper,
+    SimpleTransformationWrapperWithHalo,
+    MultiTransformationWrapper,
+)
+from skimage.morphology import binary_erosion, ball
 import numpy as np
 import torch
 
@@ -12,11 +18,49 @@ def _run_segmentation(
     foreground, verbose, min_size,
     # blocking shapes for parallel computation
     block_shape=(128, 256, 256),
+    mito_seg=None,
+    erode_voxels=3,
 ):
+    if mito_seg is not None:
+        # apply 3D erosion with a halo
+        if erode_voxels > 0:
+            halo_size = (erode_voxels, erode_voxels, erode_voxels)
+            footprint = ball(erode_voxels)
+
+            def erode_block(block):
+                return binary_erosion(block != 0, footprint=footprint)
+
+            mito_seg = SimpleTransformationWrapperWithHalo(
+                mito_seg,
+                transformation=erode_block,
+                halo=halo_size
+            )
+
+        # mask the foreground using MultiTransformationWrapper
+        def mask_foreground(inputs):
+            fg_block, mito_block = inputs
+            return np.where(mito_block != 0, fg_block, 0)
+
+        foreground = MultiTransformationWrapper(
+            mask_foreground,
+            foreground,
+            mito_seg,
+            apply_to_list=True
+        )
+
+    # apply the threshold
+
+    def threshold_block(block):
+        return block > 0.5
+
+    binary_foreground = SimpleTransformationWrapper(
+        foreground,
+        transformation=threshold_block
+    )
 
     # get the segmentation via seeded watershed
     t0 = time.time()
-    seg = parallel.label(foreground > 0.5, block_shape=block_shape, verbose=verbose)
+    seg = parallel.label(binary_foreground, block_shape=block_shape, verbose=verbose)
     if verbose:
         print("Compute connected components in", time.time() - t0, "s")
 
@@ -89,7 +133,7 @@ def segment_cristae(
         tiling=tiling, with_channels=with_channels, channels_to_standardize=channels_to_standardize, verbose=verbose
     )
     foreground, boundaries = pred[:2]
-    seg = _run_segmentation(foreground, verbose=verbose, min_size=min_size)
+    seg = _run_segmentation(foreground, verbose=verbose, min_size=min_size, mito_seg=mito_seg)
     seg = scaler.rescale_output(seg, is_segmentation=True)
 
     if return_predictions:
