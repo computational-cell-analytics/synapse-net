@@ -124,7 +124,6 @@ def segment_cristae(
         The segmentation mask as a numpy array, or a tuple containing the segmentation mask
         and the predictions if return_predictions is True.
     """
-    verbose = True
     mitochondria = kwargs.pop("extra_segmentation", None)
     if mitochondria is None:
         # try extract from input volume
