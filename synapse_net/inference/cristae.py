@@ -8,6 +8,7 @@ from elf.wrapper.base import (
     MultiTransformationWrapper,
 )
 from skimage.morphology import binary_erosion, ball
+from skimage.measure import regionprops
 import numpy as np
 import torch
 
@@ -22,21 +23,41 @@ def _run_segmentation(
     erode_voxels=3,
 ):
     if mito_seg is not None:
-        # apply 3D erosion with a halo
+
+        # 1. Eagerly process instance erosion using global regionprops
         if erode_voxels > 0:
-            halo_size = (erode_voxels, erode_voxels, erode_voxels)
+            if verbose:
+                t_erode = time.time()
+                print("Eroding small mitochondria instances globally...")
+
+            # Load into memory to get accurate global bounding boxes and sizes.
+            # this can cause issue with limited memory (RAM)
+            mito_data = mito_seg[:] if hasattr(mito_seg, '__getitem__') else mito_seg
+            eroded_mito_data = np.zeros_like(mito_data)
+
             footprint = ball(erode_voxels)
+            props = regionprops(mito_data)
 
-            def erode_block(block):
-                return binary_erosion(block != 0, footprint=footprint)
+            for prop in props:
+                sl = prop.slice
+                # Isolate this specific instance within its bounding box
+                instance_mask = (mito_data[sl] == prop.label)
 
-            mito_seg = SimpleTransformationWrapperWithHalo(
-                mito_seg,
-                transformation=erode_block,
-                halo=halo_size
-            )
+                # Apply erosion
+                instance_mask = binary_erosion(instance_mask, footprint=footprint)
 
-        # mask the foreground using MultiTransformationWrapper
+                # Write the (potentially eroded) mask back to the output array
+                eroded_mito_data[sl][instance_mask] = prop.label
+
+            # Replace our working variable with the newly processed array
+            mito_seg = eroded_mito_data
+
+            if verbose:
+                print(f"Instance erosion completed in {time.time() - t_erode:.2f} s")
+
+        # 2. Mask the foreground lazily
+        # Even though mito_seg is now in memory, foreground might not be.
+        # MultiTransformationWrapper safely handles this mix.
         def mask_foreground(inputs):
             fg_block, mito_block = inputs
             return np.where(mito_block != 0, fg_block, 0)
@@ -48,8 +69,7 @@ def _run_segmentation(
             apply_to_list=True
         )
 
-    # apply the threshold
-
+    # 3. Apply the threshold lazily
     def threshold_block(block):
         return block > 0.5
 
@@ -58,20 +78,22 @@ def _run_segmentation(
         transformation=threshold_block
     )
 
-    # get the segmentation via seeded watershed
+    # 4. Get the segmentation via seeded watershed
     t0 = time.time()
     seg = parallel.label(binary_foreground, block_shape=block_shape, verbose=verbose)
     if verbose:
         print("Compute connected components in", time.time() - t0, "s")
 
-    # size filter
+    # 5. Size filter
     t0 = time.time()
     ids, sizes = parallel.unique(seg, return_counts=True, block_shape=block_shape, verbose=verbose)
     filter_ids = ids[sizes < min_size]
     seg[np.isin(seg, filter_ids)] = 0
     if verbose:
         print("Size filter in", time.time() - t0, "s")
+
     seg = np.where(seg > 0, 1, 0)
+
     return seg
 
 
