@@ -24,11 +24,11 @@ def _run_segmentation(
 ):
     if mito_seg is not None:
 
-        # 1. Eagerly process instance erosion using global regionprops
+        # Process instance erosion using global regionprops
         if erode_voxels > 0:
             if verbose:
                 t_erode = time.time()
-                print("Eroding small mitochondria instances globally...")
+                print("Eroding mitochondria instances globally...")
 
             # Load into memory to get accurate global bounding boxes and sizes.
             # this can cause issue with limited memory (RAM)
@@ -55,7 +55,7 @@ def _run_segmentation(
             if verbose:
                 print(f"Instance erosion completed in {time.time() - t_erode:.2f} s")
 
-        # 2. Mask the foreground lazily
+        #  Mask the foreground lazily
         # Even though mito_seg is now in memory, foreground might not be.
         # MultiTransformationWrapper safely handles this mix.
         def mask_foreground(inputs):
@@ -69,7 +69,7 @@ def _run_segmentation(
             apply_to_list=True
         )
 
-    # 3. Apply the threshold lazily
+    # Apply the threshold lazily
     def threshold_block(block):
         return block > 0.5
 
@@ -78,13 +78,13 @@ def _run_segmentation(
         transformation=threshold_block
     )
 
-    # 4. Get the segmentation via seeded watershed
+    # Get the segmentation via seeded watershed
     t0 = time.time()
     seg = parallel.label(binary_foreground, block_shape=block_shape, verbose=verbose)
     if verbose:
         print("Compute connected components in", time.time() - t0, "s")
 
-    # 5. Size filter
+    # Size filter
     t0 = time.time()
     ids, sizes = parallel.unique(seg, return_counts=True, block_shape=block_shape, verbose=verbose)
     filter_ids = ids[sizes < min_size]
