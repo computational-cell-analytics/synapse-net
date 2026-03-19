@@ -4,7 +4,6 @@ from typing import Dict, List, Optional, Tuple, Union
 import elf.parallel as parallel
 from elf.wrapper.base import (
     SimpleTransformationWrapper,
-    SimpleTransformationWrapperWithHalo,
     MultiTransformationWrapper,
 )
 from skimage.morphology import binary_erosion, ball
