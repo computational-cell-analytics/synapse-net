@@ -14,6 +14,36 @@ import torch
 from synapse_net.inference.util import get_prediction, _Scaler
 
 
+def _erode_instances(mito_data, erode_voxels, verbose):
+    """Erodes instances globally and returns a memory-efficient boolean mask."""
+    if verbose:
+        t_erode = time.time()
+        print("Eroding mitochondria instances globally...")
+
+    footprint = ball(erode_voxels)
+    props = regionprops(mito_data)
+
+    # Allocate a boolean array
+    eroded_binary_mask = np.zeros(mito_data.shape, dtype=bool)
+
+    for prop in props:
+        sl = prop.slice
+
+        # Isolate this specific instance within its bounding box
+        instance_mask = (mito_data[sl] == prop.label)
+
+        # Apply erosion
+        eroded_mask = binary_erosion(instance_mask, footprint=footprint)
+
+        # Write True to the newly eroded locations in our boolean array
+        eroded_binary_mask[sl][eroded_mask] = True
+
+    if verbose:
+        print(f"Instance erosion completed in {time.time() - t_erode:.2f} s")
+
+    return eroded_binary_mask
+
+
 def _run_segmentation(
     foreground, verbose, min_size,
     # blocking shapes for parallel computation
@@ -21,52 +51,21 @@ def _run_segmentation(
     mito_seg=None,
     erode_voxels=3,
 ):
-    if mito_seg is not None:
+    mito_seg = _erode_instances(mito_seg, erode_voxels, verbose)
 
-        # Process instance erosion using global regionprops
-        if erode_voxels > 0:
-            if verbose:
-                t_erode = time.time()
-                print("Eroding mitochondria instances globally...")
+    # Mask the foreground lazily
+    # Even though mito_seg is now in memory, foreground might not be.
+    # MultiTransformationWrapper safely handles this mix.
+    def mask_foreground(inputs):
+        fg_block, mito_block = inputs
+        return np.where(mito_block != 0, fg_block, 0)
 
-            # Load into memory to get accurate global bounding boxes and sizes.
-            # this can cause issue with limited memory (RAM)
-            mito_data = mito_seg[:] if hasattr(mito_seg, '__getitem__') else mito_seg
-            eroded_mito_data = np.zeros_like(mito_data)
-
-            footprint = ball(erode_voxels)
-            props = regionprops(mito_data)
-
-            for prop in props:
-                sl = prop.slice
-                # Isolate this specific instance within its bounding box
-                instance_mask = (mito_data[sl] == prop.label)
-
-                # Apply erosion
-                instance_mask = binary_erosion(instance_mask, footprint=footprint)
-
-                # Write the (potentially eroded) mask back to the output array
-                eroded_mito_data[sl][instance_mask] = prop.label
-
-            # Replace our working variable with the newly processed array
-            mito_seg = eroded_mito_data
-
-            if verbose:
-                print(f"Instance erosion completed in {time.time() - t_erode:.2f} s")
-
-        #  Mask the foreground lazily
-        # Even though mito_seg is now in memory, foreground might not be.
-        # MultiTransformationWrapper safely handles this mix.
-        def mask_foreground(inputs):
-            fg_block, mito_block = inputs
-            return np.where(mito_block != 0, fg_block, 0)
-
-        foreground = MultiTransformationWrapper(
-            mask_foreground,
-            foreground,
-            mito_seg,
-            apply_to_list=True
-        )
+    foreground = MultiTransformationWrapper(
+        mask_foreground,
+        foreground,
+        mito_seg,
+        apply_to_list=True
+    )
 
     # Apply the threshold lazily
     def threshold_block(block):
@@ -77,19 +76,17 @@ def _run_segmentation(
         transformation=threshold_block
     )
 
-    # Get the segmentation via seeded watershed
     t0 = time.time()
     seg = parallel.label(binary_foreground, block_shape=block_shape, verbose=verbose)
     if verbose:
         print("Compute connected components in", time.time() - t0, "s")
 
     # Size filter
-    t0 = time.time()
-    ids, sizes = parallel.unique(seg, return_counts=True, block_shape=block_shape, verbose=verbose)
-    filter_ids = ids[sizes < min_size]
-    seg[np.isin(seg, filter_ids)] = 0
-    if verbose:
-        print("Size filter in", time.time() - t0, "s")
+    if min_size > 0:
+        t0 = time.time()
+        parallel.size_filter(seg, out=seg, min_size=min_size, block_shape=block_shape, verbose=verbose)
+        if verbose:
+            print("Size filter in", time.time() - t0, "s")
 
     seg = np.where(seg > 0, 1, 0)
 
@@ -127,6 +124,7 @@ def segment_cristae(
         The segmentation mask as a numpy array, or a tuple containing the segmentation mask
         and the predictions if return_predictions is True.
     """
+    verbose = True
     mitochondria = kwargs.pop("extra_segmentation", None)
     if mitochondria is None:
         # try extract from input volume
