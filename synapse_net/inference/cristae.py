@@ -2,32 +2,94 @@ import time
 from typing import Dict, List, Optional, Tuple, Union
 
 import elf.parallel as parallel
+from elf.wrapper.base import (
+    SimpleTransformationWrapper,
+    MultiTransformationWrapper,
+)
+from skimage.morphology import binary_erosion, ball
+from skimage.measure import regionprops
 import numpy as np
 import torch
 
 from synapse_net.inference.util import get_prediction, _Scaler
 
 
+def _erode_instances(mito_data, erode_voxels, verbose):
+    """Erodes instances globally and returns a memory-efficient boolean mask."""
+    if verbose:
+        t_erode = time.time()
+        print("Eroding mitochondria instances globally...")
+
+    footprint = ball(erode_voxels)
+    props = regionprops(mito_data)
+
+    # Allocate a boolean array
+    eroded_binary_mask = np.zeros(mito_data.shape, dtype=bool)
+
+    for prop in props:
+        sl = prop.slice
+
+        # Isolate this specific instance within its bounding box
+        instance_mask = (mito_data[sl] == prop.label)
+
+        # Apply erosion
+        eroded_mask = binary_erosion(instance_mask, footprint=footprint)
+
+        # Write True to the newly eroded locations in our boolean array
+        eroded_binary_mask[sl][eroded_mask] = True
+
+    if verbose:
+        print(f"Instance erosion completed in {time.time() - t_erode:.2f} s")
+
+    return eroded_binary_mask
+
+
 def _run_segmentation(
     foreground, verbose, min_size,
     # blocking shapes for parallel computation
     block_shape=(128, 256, 256),
+    mito_seg=None,
+    erode_voxels=3,
 ):
+    mito_seg = _erode_instances(mito_seg, erode_voxels, verbose)
 
-    # get the segmentation via seeded watershed
+    # Mask the foreground lazily
+    # Even though mito_seg is now in memory, foreground might not be.
+    # MultiTransformationWrapper safely handles this mix.
+    def mask_foreground(inputs):
+        fg_block, mito_block = inputs
+        return np.where(mito_block != 0, fg_block, 0)
+
+    foreground = MultiTransformationWrapper(
+        mask_foreground,
+        foreground,
+        mito_seg,
+        apply_to_list=True
+    )
+
+    # Apply the threshold lazily
+    def threshold_block(block):
+        return block > 0.5
+
+    binary_foreground = SimpleTransformationWrapper(
+        foreground,
+        transformation=threshold_block
+    )
+
     t0 = time.time()
-    seg = parallel.label(foreground > 0.5, block_shape=block_shape, verbose=verbose)
+    seg = parallel.label(binary_foreground, block_shape=block_shape, verbose=verbose)
     if verbose:
         print("Compute connected components in", time.time() - t0, "s")
 
-    # size filter
-    t0 = time.time()
-    ids, sizes = parallel.unique(seg, return_counts=True, block_shape=block_shape, verbose=verbose)
-    filter_ids = ids[sizes < min_size]
-    seg[np.isin(seg, filter_ids)] = 0
-    if verbose:
-        print("Size filter in", time.time() - t0, "s")
+    # Size filter
+    if min_size > 0:
+        t0 = time.time()
+        parallel.size_filter(seg, out=seg, min_size=min_size, block_shape=block_shape, verbose=verbose)
+        if verbose:
+            print("Size filter in", time.time() - t0, "s")
+
     seg = np.where(seg > 0, 1, 0)
+
     return seg
 
 
@@ -89,7 +151,7 @@ def segment_cristae(
         tiling=tiling, with_channels=with_channels, channels_to_standardize=channels_to_standardize, verbose=verbose
     )
     foreground, boundaries = pred[:2]
-    seg = _run_segmentation(foreground, verbose=verbose, min_size=min_size)
+    seg = _run_segmentation(foreground, verbose=verbose, min_size=min_size, mito_seg=mito_seg)
     seg = scaler.rescale_output(seg, is_segmentation=True)
 
     if return_predictions:
