@@ -1,14 +1,11 @@
 from typing import Optional, Tuple
 
-import numpy as np
-import uuid
-import h5py
 import torch
 import torch_em
 import torch_em.self_training as self_training
 from torchvision import transforms
+from torch_em.data import RawDatasetWithMasks
 
-from synapse_net.file_utils import read_mrc
 from .supervised_training import get_2d_model, get_3d_model, get_supervised_loader, _determine_ndim
 
 
@@ -31,26 +28,6 @@ def weak_augmentations(p: float = 0.75) -> callable:
     ])
     return torch_em.transform.raw.get_raw_transform(normalizer=norm, augmentation1=aug)
 
-def drop_mask_channel(x):
-    x = x[:1]
-    return x
-    
-class ComposedTransform:
-    def __init__(self, *funcs):
-        self.funcs = funcs
-
-    def __call__(self, x):
-        for f in self.funcs:
-            x = f(x)
-        return x
-
-class ChannelSplitterSampler: 
-    def __init__(self, sampler):
-        self.sampler = sampler
-    
-    def __call__(self, x):
-        raw, mask = x[0], x[1]
-        return self.sampler(raw, mask)
 
 def get_unsupervised_loader(
     data_paths: Tuple[str],
@@ -59,8 +36,11 @@ def get_unsupervised_loader(
     batch_size: int,
     n_samples: Optional[int],
     sample_mask_paths: Optional[Tuple[str]] = None,
+    sample_mask_key: Optional[str] = None,
+    bg_mask_paths: Optional[Tuple[str]] = None,
+    bg_mask_key: Optional[str] = None,
     sampler: Optional[callable] = None,
-    exclude_top_and_bottom: bool = False, 
+    exclude_top_and_bottom: bool = False,
 ) -> torch.utils.data.DataLoader:
     """Get a dataloader for unsupervised segmentation training.
 
@@ -73,61 +53,57 @@ def get_unsupervised_loader(
         batch_size: The batch size for training.
         n_samples: The number of samples per epoch. By default this will be estimated
             based on the patch_shape and size of the volumes used for training.
-        exclude_top_and_bottom: Whether to exluce the five top and bottom slices to
+        exclude_top_and_bottom: Whether to exclude the five top and bottom slices to
             avoid artifacts at the border of tomograms.
         sample_mask_paths: The filepaths to the corresponding sample masks for each tomogram.
+        sample_mask_key: The key to the sample mask dataset inside each file.
+        bg_mask_paths: The filepaths to the background masks for each tomogram.
+        bg_mask_key: The key to the background mask dataset inside each file.
         sampler: Accept or reject patches based on a condition.
 
     Returns:
         The PyTorch dataloader.
     """
-    # We exclude the top and bottom slices where the tomogram reconstruction is bad.
-    # TODO this seems unneccesary if we have a boundary mask - remove? 
     if exclude_top_and_bottom:
-        roi = np.s_[5:-5, :, :]
+        roi = (slice(5, -5), slice(None), slice(None))
     else:
         roi = None
-    # stack tomograms and masks and write to temp files to use as input to RawDataset()    
+
     if sample_mask_paths is not None:
         assert len(data_paths) == len(sample_mask_paths), \
-            f"Expected equal number of data_paths and and sample_masks_paths, got {len(data_paths)} data paths and {len(sample_mask_paths)} mask paths."
-        
-        stacked_paths = []
-        for i, (data_path, mask_path) in enumerate(zip(data_paths, sample_mask_paths)):
-            raw = read_mrc(data_path)[0]
-            mask = read_mrc(mask_path)[0]
-            stacked = np.stack([raw, mask], axis=0)
-
-            tmp_path = f"/tmp/stacked{i}_{uuid.uuid4().hex}.h5"
-            with h5py.File(tmp_path, "w") as f:
-                f.create_dataset("raw", data=stacked, compression="gzip")
-            stacked_paths.append(tmp_path)
-
-        # update variables for RawDataset()
-        data_paths = tuple(stacked_paths)    
-        base_transform = torch_em.transform.get_raw_transform()
-        raw_transform = ComposedTransform(base_transform, drop_mask_channel)
-        sampler = ChannelSplitterSampler(sampler)
-        with_channels = True 
-    else:
-        raw_transform = torch_em.transform.get_raw_transform()
-        with_channels = False
-        sampler = None
+            f"Expected equal number of data_paths and sample_mask_paths, got {len(data_paths)} and {len(sample_mask_paths)}."
+    if bg_mask_paths is not None:
+        assert len(data_paths) == len(bg_mask_paths), \
+            f"Expected equal number of data_paths and bg_mask_paths, got {len(data_paths)} and {len(bg_mask_paths)}."
 
     _, ndim = _determine_ndim(patch_shape)
+    raw_transform = torch_em.transform.get_raw_transform()
     transform = torch_em.transform.get_augmentations(ndim=ndim)
+    augmentations = (weak_augmentations(), weak_augmentations())
 
     if n_samples is None:
         n_samples_per_ds = None
     else:
         n_samples_per_ds = int(n_samples / len(data_paths))
 
-    augmentations = (weak_augmentations(), weak_augmentations())
-
     datasets = [
-        torch_em.data.RawDataset(path, raw_key, patch_shape, raw_transform, transform, roi=roi,
-        n_samples=n_samples_per_ds, sampler=sampler, ndim=ndim, with_channels=with_channels, augmentations=augmentations)
-        for path in data_paths
+        RawDatasetWithMasks(
+            raw_path=data_path,
+            raw_key=raw_key,
+            patch_shape=patch_shape,
+            raw_transform=raw_transform,
+            transform=transform,
+            roi=roi,
+            n_samples=n_samples_per_ds,
+            sampler=sampler,
+            ndim=ndim,
+            augmentations=augmentations,
+            sample_mask_path=sample_mask_paths[i] if sample_mask_paths is not None else None,
+            sample_mask_key=sample_mask_key,
+            bg_mask_path=bg_mask_paths[i] if bg_mask_paths is not None else None,
+            bg_mask_key=bg_mask_key,
+        )
+        for i, data_path in enumerate(data_paths)
     ]
     ds = torch.utils.data.ConcatDataset(datasets)
 
