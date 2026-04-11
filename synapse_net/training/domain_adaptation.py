@@ -37,8 +37,12 @@ def mean_teacher_adaptation(
     n_iterations: int = int(1e4),
     n_samples_train: Optional[int] = None,
     n_samples_val: Optional[int] = None,
-    train_mask_paths: Optional[Tuple[str]] = None,
-    val_mask_paths: Optional[Tuple[str]] = None,
+    train_sample_mask_paths: Optional[Tuple[str]] = None,
+    val_sample_mask_paths: Optional[Tuple[str]] = None,
+    sample_mask_key: Optional[str] = None,
+    train_bg_mask_paths: Optional[Tuple[str]] = None,
+    val_bg_mask_paths: Optional[Tuple[str]] = None,
+    bg_mask_key: Optional[str] = None,
     patch_sampler: Optional[callable] = None,
     pseudo_label_sampler: Optional[callable] = None,
     device: int = 0,
@@ -52,8 +56,8 @@ def mean_teacher_adaptation(
      'supervised_val_paths' are not given.
     - semi-supervised domain adaptation: domain adaptation on unlabeled and labeled data,
       when 'supervised_train_paths' and 'supervised_val_paths' are given.
-
-    Args:
+    
+    Args: #TODO update docstrings
         name: The name for the checkpoint to be trained.
         unsupervsied_train_paths: Filepaths to the hdf5 files or similar file formats
             for the training data in the target domain.
@@ -87,8 +91,12 @@ def mean_teacher_adaptation(
             based on the patch_shape and size of the volumes used for training.
         n_samples_val: The number of val samples per epoch. By default this will be estimated
             based on the patch_shape and size of the volumes used for validation.
-        train_mask_paths: Sample masks used by the patch sampler to accept or reject patches for training.
-        val_mask_paths: Sample masks used by the patch sampler to accept or reject patches for validation.
+        train_sample_mask_paths: Sample masks used by the patch sampler to accept or reject patches for training.
+        val_sample_mask_paths: Sample masks used by the patch sampler to accept or reject patches for validation.
+        sample_mask_key: The key to the sample mask dataset inside each file.
+        train_bg_mask_paths: Background masks for training. 
+        val_bg_mask_paths: Background masks for validation.
+        bg_mask_key: The key to the background mask dataset inside each file.
         patch_sampler: Accept or reject patches based on a condition.
         pseudo_label_sampler: Mask out regions of the pseudo labels where the teacher is not confident before updating the gradients.
         device: GPU ID for training.
@@ -129,8 +137,11 @@ def mean_teacher_adaptation(
         patch_shape=patch_shape,
         batch_size=batch_size,
         n_samples=n_samples_train,
-        sample_mask_paths=train_mask_paths,
-        sampler=patch_sampler
+        sample_mask_paths=train_sample_mask_paths,
+        sample_mask_key=sample_mask_key,
+        bg_mask_paths=train_bg_mask_paths,
+        bg_mask_key=bg_mask_key,
+        sampler=patch_sampler,
     )
     unsupervised_val_loader = get_unsupervised_loader(
         data_paths=unsupervised_val_paths,
@@ -138,8 +149,11 @@ def mean_teacher_adaptation(
         patch_shape=patch_shape,
         batch_size=batch_size,
         n_samples=n_samples_val,
-        sample_mask_paths=val_mask_paths,
-        sampler=patch_sampler
+        sample_mask_paths=val_sample_mask_paths,
+        sample_mask_key=sample_mask_key,
+        bg_mask_paths=val_bg_mask_paths,
+        bg_mask_key=bg_mask_key,
+        sampler=patch_sampler,
     )
 
     if supervised_train_paths is not None:
