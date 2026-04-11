@@ -275,11 +275,12 @@ def supervised_training(
         model = get_3d_model(out_channels=out_channels, in_channels=in_channels)
 
     base_loss = loss_fn if loss_fn is not None else torch_em.loss.DiceLoss()
-    metric = None
+    metric = base_loss
 
     # No ignore label -> we can use default loss.
     if ignore_label is None and not mask_channel:
-        pass
+        loss = base_loss
+        
     # If we have an ignore label the loss and metric have to be modified
     # so that the ignore mask is not used in the gradient calculation.
     elif ignore_label is not None:
