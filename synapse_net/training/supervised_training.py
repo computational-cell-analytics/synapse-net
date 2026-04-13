@@ -201,6 +201,7 @@ def supervised_training(
     ignore_label: Optional[int] = None,
     label_transform: Optional[callable] = None,
     loss_fn: Optional[torch.nn.Module] = None,
+    final_activation: Optional[str] = "Sigmoid",
     in_channels: int = 1,
     out_channels: int = 2,
     mask_channel: bool = False,
@@ -245,6 +246,7 @@ def supervised_training(
         label_transform: Label transform that is applied to the segmentation to compute the targets.
             If no label transform is passed (the default) a boundary transform is used.
         loss_fn: Custom loss function. If None, will default to `torch_em.loss.DiceLoss`.
+        final_activation: The activation applied to the last output layer.
         out_channels: The number of output channels of the UNet.
         mask_channel: Whether the last channels in the labels should be used for masking the loss.
             This can be used to implement more complex masking operations and is not compatible with `ignore_label`.
@@ -270,9 +272,9 @@ def supervised_training(
     if checkpoint_path is not None:
         model = torch_em.util.load_model(checkpoint=checkpoint_path)
     elif is_2d:
-        model = get_2d_model(out_channels=out_channels, in_channels=in_channels)
+        model = get_2d_model(out_channels=out_channels, in_channels=in_channels, final_activation=final_activation)
     else:
-        model = get_3d_model(out_channels=out_channels, in_channels=in_channels)
+        model = get_3d_model(out_channels=out_channels, in_channels=in_channels, final_activation=final_activation)
 
     base_loss = loss_fn if loss_fn is not None else torch_em.loss.DiceLoss()
     metric = base_loss
