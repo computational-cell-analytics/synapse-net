@@ -98,7 +98,7 @@ def segment_cristae(
     model_path: Optional[str] = None,
     model: Optional[torch.nn.Module] = None,
     tiling: Optional[Dict[str, Dict[str, int]]] = None,
-    min_size: int = 500,
+    min_size: int = 2000,
     verbose: bool = True,
     distance_based_segmentation: bool = False,
     return_predictions: bool = False,
@@ -147,8 +147,8 @@ def segment_cristae(
     volume = scaler.scale_input(input_volume)
     mito_seg = scaler.scale_input(mitochondria, is_segmentation=True)
     input_volume = np.stack([volume, mito_seg], axis=0)
-
-    erode_voxels = max(1, round(6.0 / erosion_voxel_size))
+    # target 10nm erosion for mitochondria
+    erode_voxels = max(1, round(10.0 / erosion_voxel_size))
 
     # Run prediction and segmentation.
     if mask is not None:
