@@ -95,6 +95,7 @@ def _run_segmentation(
 
 def segment_cristae(
     input_volume: np.ndarray,
+    voxel_size: float,
     model_path: Optional[str] = None,
     model: Optional[torch.nn.Module] = None,
     tiling: Optional[Dict[str, Dict[str, int]]] = None,
@@ -104,13 +105,13 @@ def segment_cristae(
     return_predictions: bool = False,
     scale: Optional[List[float]] = None,
     mask: Optional[np.ndarray] = None,
-    erosion_voxel_size: float = 2.0,
     **kwargs
 ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
     """Segment cristae in an input volume.
 
     Args:
         input_volume: The input volume to segment. Expects 2 3D volumes: raw and mitochondria
+        voxel_size: The voxel size of the model's training data.
         model_path: The path to the model checkpoint if `model` is not provided.
         model: Pre-loaded model. Either `model_path` or `model` is required.
         tiling: The tiling configuration for the prediction.
@@ -120,10 +121,6 @@ def segment_cristae(
         return_predictions: Whether to return the predictions (foreground, boundaries) alongside the segmentation.
         scale: The scale factor to use for rescaling the input volume before prediction.
         mask: An optional mask that is used to restrict the segmentation.
-        erosion_voxel_size: The voxel size to use for erosion when masking the foreground.
-                          This parameter controls how much the mitochondria mask is eroded
-                          before applying it to the foreground prediction.
-                          Default is 2.0 voxels.
 
     Returns:
         The segmentation mask as a numpy array, or a tuple containing the segmentation mask
@@ -147,8 +144,10 @@ def segment_cristae(
     volume = scaler.scale_input(input_volume)
     mito_seg = scaler.scale_input(mitochondria, is_segmentation=True)
     input_volume = np.stack([volume, mito_seg], axis=0)
+
     # target 10nm erosion for mitochondria
-    erode_voxels = max(1, round(10.0 / erosion_voxel_size))
+    # voxel_size is the model's training voxel size, which is the space we erode in
+    erode_voxels = max(1, round(10.0 / voxel_size))
 
     # Run prediction and segmentation.
     if mask is not None:
