@@ -18,7 +18,7 @@ def _erode_instances(mito_data, erode_voxels, verbose):
     """Erodes instances globally and returns a memory-efficient boolean mask."""
     if verbose:
         t_erode = time.time()
-        print("Eroding mitochondria instances globally...")
+        print(f"Eroding mitochondria instances globally by {erode_voxels} voxels ...")
 
     footprint = ball(erode_voxels)
     props = regionprops(mito_data)
@@ -95,10 +95,11 @@ def _run_segmentation(
 
 def segment_cristae(
     input_volume: np.ndarray,
+    voxel_size: float,
     model_path: Optional[str] = None,
     model: Optional[torch.nn.Module] = None,
     tiling: Optional[Dict[str, Dict[str, int]]] = None,
-    min_size: int = 500,
+    min_size: int = 2000,
     verbose: bool = True,
     distance_based_segmentation: bool = False,
     return_predictions: bool = False,
@@ -110,6 +111,7 @@ def segment_cristae(
 
     Args:
         input_volume: The input volume to segment. Expects 2 3D volumes: raw and mitochondria
+        voxel_size: The voxel size of the model's training data.
         model_path: The path to the model checkpoint if `model` is not provided.
         model: Pre-loaded model. Either `model_path` or `model` is required.
         tiling: The tiling configuration for the prediction.
@@ -143,6 +145,10 @@ def segment_cristae(
     mito_seg = scaler.scale_input(mitochondria, is_segmentation=True)
     input_volume = np.stack([volume, mito_seg], axis=0)
 
+    # target 10nm erosion for mitochondria
+    # voxel_size is the model's training voxel size, which is the space we erode in
+    erode_voxels = max(1, round(10.0 / voxel_size))
+
     # Run prediction and segmentation.
     if mask is not None:
         mask = scaler.scale_input(mask, is_segmentation=True)
@@ -151,7 +157,8 @@ def segment_cristae(
         tiling=tiling, with_channels=with_channels, channels_to_standardize=channels_to_standardize, verbose=verbose
     )
     foreground, boundaries = pred[:2]
-    seg = _run_segmentation(foreground, verbose=verbose, min_size=min_size, mito_seg=mito_seg)
+    seg = _run_segmentation(foreground, verbose=verbose, min_size=min_size, mito_seg=mito_seg,
+                            erode_voxels=erode_voxels)
     seg = scaler.rescale_output(seg, is_segmentation=True)
 
     if return_predictions:

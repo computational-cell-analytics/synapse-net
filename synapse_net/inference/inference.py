@@ -261,7 +261,10 @@ def run_segmentation(
     elif model_type == "ribbon":
         segmentation = _segment_ribbon_AZ(image, model=model, tiling=tiling, scale=scale, verbose=verbose, **kwargs)
     elif model_type == "cristae" or model_type == "cristae2" or model_type == "cristae3":
-        segmentation = segment_cristae(image, model=model, tiling=tiling, scale=scale, verbose=verbose, **kwargs)
+        training_resolution = get_model_training_resolution(model_type)
+        voxel_size = np.mean(list(training_resolution.values()))
+        segmentation = segment_cristae(image, model=model, tiling=tiling, scale=scale, verbose=verbose,
+                                       voxel_size=voxel_size, **kwargs)
     else:
         raise ValueError(f"Unknown model type: {model_type}")
     return segmentation
