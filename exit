@@ -1,0 +1,626 @@
+[33m07e5431[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m changes to domain_adaptation.py
+[33m606214c[m implement rescaling for get_unsupervised_loader and mean_teacher_adaptation
+[33mfdc6b46[m added new mito model and removed old mito models 2 and 3 - new model is called mitochondria2 (#156)
+[33m9a7a089[m[33m ([m[1;33mtag: [m[1;33m0.4.1[m[33m)[m Fix export of touching objects to IMOD (#155)
+[33m3459903[m[33m ([m[1;33mtag: [m[1;33m0.4.0[m[33m)[m Support checkpoint initialization for supervised training; fix issues… (#154)
+[33m8cb080c[m Fix supervised-training CLI and add test (#153)
+[33m21f9850[m Add prepocess to pred func (#149)
+[33me362fe0[m added mitov3 model - average voxel_size in nm: 2.87 (#147)
+[33m3c31509[m Change preprint link to publication link
+[33m8df45a1[m Merge pull request #141 from computational-cell-analytics/140-update-voxel-size-for-mitochondria2-model
+[33meffdb93[m Update inference.py
+[33m46b6300[m Update pool visualization
+[33m8d7ee71[m Merge pull request #139 from computational-cell-analytics/model-fixes
+[33mba1e5e7[m Fix mitochondria2 model and add proper model test
+[33m4dc4b21[m Update vesicle pool visualization
+[33mfc7ca4d[m Merge pull request #138 from computational-cell-analytics/convenience
+[33m3b0fad1[m Fix typo
+[33m6e3db6e[m Update size filter plugin to remove disconnected components
+[33m7046235[m Add cli to visualize vesicle pool assignments
+[33m457d558[m Save the pool color in the exported table
+[33md0f284a[m match z alignment to AZ seg
+[33mc028aa9[m Merge pull request #137 from computational-cell-analytics/2d_imod_export
+[33macc3908[m[33m ([m[1;31morigin/2d_imod_export[m[33m)[m z plane
+[33m71ec138[m testing
+[33m664f203[m Implement size filtering widget
+[33m58d54c9[m Merge branch 'main' of https://github.com/computational-cell-analytics/synapse-net into 2d_imod_export
+[33m10cbfd5[m Update segmentation_widget.py
+[33me8359ee[m Merge pull request #136 from computational-cell-analytics/minor-updates
+[33mee8a0ce[m Fix bug in new membrane post-processing
+[33mefb5851[m Update ribbon structure post-processing in segmentation GUI
+[33meb2d3ed[m Support setting multiple devices in segmentation
+[33md344d49[m 2D vesicle export to imod
+[33m9c252ed[m Implement scalable segmentation  (#134)
+[33m43eff47[m boundary mask for unsupervised training (#132)
+[33mbfccbf0[m wrong format extension
+[33me1996bd[m[33m ([m[1;33mtag: [m[1;33m0.3.0[m[33m)[m Merge pull request #133 from computational-cell-analytics/constantinpape-patch-2
+[33m0beffc8[m Update __version__.py
+[33m1e25907[m Merge pull request #131 from computational-cell-analytics/revision3
+[33m0ec2a50[m Update the voxel size for the new AZ model
+[33m75d60f9[m Update inference CLI so that it works with checkpoints
+[33mf76dbf7[m Add attempt at compartment evaluation code
+[33md8d7c1b[m Update AZ model
+[33m928f330[m Merge pull request #130 from computational-cell-analytics/revision2
+[33m1f3ad5f[m Update CLI training info and add community submission info to doc
+[33m480d714[m Update the SynapseNet trainign CLI
+[33mbe0917a[m Fix issues in training CLI and add domain adaptation CLI
+[33m70628f6[m Implement CLI for supervised training
+[33m0a8101e[m Update vesicle inference
+[33m408b807[m Merge pull request #121 from computational-cell-analytics/revision
+[33m7967b4c[m Update environment.yaml
+[33m8ea5b66[m more conservative SV filtering at z borders
+[33mfbe4a55[m minor az postprocessing for data analysis
+[33mf516ae4[m minor adjustment
+[33m34886d7[m fixed a few mistakes
+[33m6e95660[m make code more flexible
+[33m8763e49[m make usage of surface dice more general
+[33m0c30cf0[m updated SV seg h5
+[33m48618d0[m added compartment seg saved in h5
+[33mf17c349[m option to calc surface dice per component
+[33mad03103[m add dataset info
+[33md966ea3[m minor things for analysis; 1st implementation of surface dice for eval
+[33m7b83139[m change presynaptic filtering
+[33mcab9f2b[m Merge branch 'main' of https://github.com/computational-cell-analytics/synapse-net into revision
+[33me8788e5[m Delete analysis_results directory
+[33md6eaa66[m add boundary threshold for compartment seg
+[33m1ae7401[m Merge branch 'main' into revision
+[33mf465dbe[m Merge pull request #128 from computational-cell-analytics/comp_seg
+[33m78825be[m[33m ([m[1;31morigin/comp_seg[m[33m)[m add option to change boundary threshold for compartment seg
+[33mdb3e654[m small change for compartment segmentation
+[33ma9b714f[m minor addition
+[33mac4b9d7[m store segID, use existing seg
+[33m17b9368[m remove background from analysis
+[33mba09eca[m Update to_imod.py (#127)
+[33md7b9a1a[m exclude SV at boundary for automatic analysis
+[33m2fa3925[m Merge branch 'main' of https://github.com/computational-cell-analytics/synapse-net into revision
+[33m61bd683[m Update util.py (#126)
+[33m0785657[m fix import
+[33mb842bca[m new data analysis, not tested
+[33m6525651[m fix a few things
+[33mb1c8feb[m make training more usable
+[33m02da6a2[m Merge branch 'main' of https://github.com/computational-cell-analytics/synapse-net into revision
+[33m59c3534[m prepare for training AZ
+[33md2aa6d8[m empty crop without AZ annotation
+[33mb769a8e[m make az_thin more flexible
+[33mc41628c[m make prediction more flexible
+[33m5f66328[m cropping stem data
+[33mf8d801f[m Clean up AZ scripts and summarize current state
+[33md7f71a0[m Update AZ training data
+[33m39d69d5[m Implement AZ evaluation WIP
+[33m7dd6962[m Work on revision of AZ model WIP
+[33m2f4564e[m Update start_page.md (#123)
+[33mea5bbce[m Minor updates to documentation (#122)
+[33mf08ad89[m Add SBD to CryoVesNet evaluation
+[33md23d544[m Add code for tomogram on-the-fly processing (#117)
+[33m964d6c3[m Update environment.yaml (#120)
+[33m71a0343[m Add mask intersection post-processing (#115)
+[33mba00244[m Add more outputs to debug performance (#108)
+[33me2f4efa[m Update start_page.md
+[33m9e59086[m added cristae model (#113)
+[33m07a6b61[m[33m ([m[1;33mtag: [m[1;33m0.2.0[m[33m)[m Update __version__.py
+[33m5a18127[m Activate windows tests (#88)
+[33m20cc7b1[m Merge pull request #107 from computational-cell-analytics/more-models-and-samples
+[33m38b1a2c[m Additional models
+[33m237cde7[m Add new sample data
+[33m2afed55[m added cristae model and single channel transfrom (#100)
+[33m92be799[m Merge pull request #106 from computational-cell-analytics/adapt-mps-tiling
+[33m169ddd4[m changed tiling for mps
+[33m8cc71f1[m added foreground threshold to hmap (#101)
+[33m09aa4e0[m Optimize scaler (#99)
+[33m4741402[m added MPS default tiling (#104)
+[33mf7cca9a[m Portal things + few things for paper revision (#102)
+[33m38f7907[m Add support for cryo-et-data (#89)
+[33m1f0387a[m Merge pull request #98 from computational-cell-analytics/cooper
+[33maf10206[m use updated mito model
+[33m7dc2490[m Add missing enviroment file for gpu installation on windows
+[33mb62ac1a[m added params to configure in_channels for model creation (#97)
+[33m51e28a4[m Add new mito model (#96)
+[33m4245c5b[m Add boundary threshold to hmap (#95)
+[33m0483f53[m added boundary threshold and area threshold to mitochondrai segmentation (#94)
+[33m07b4e7e[m added seed_distance to parameters of mitochondria segmentation (#93)
+[33m9847f1b[m Fix documentation typo
+[33mb56906c[m Update environment file in build_docs
+[33m3d70179[m Merge pull request #92 from computational-cell-analytics/update-install
+[33mf57105c[m Update installation instructions
+[33m190a62f[m Fix typo in doc
+[33md829715[m Merge branch 'main' of https://github.com/computational-cell-analytics/synaptic-reconstruction into main
+[33mdee0935[m Add video links to README and documentation
+[33m5c080f7[m Save segmentations in analysis pipeline example
+[33m3ab9a8d[m Update documentation
+[33m79c6242[m Add napari plugin images for doc
+[33m9cb8763[m Implement segmentation post-processing widget
+[33mb75b968[m Add link to analysis script to documentation
+[33m9221c9e[m Minor typo fixes in the doc (#87)
+[33m1810805[m[33m ([m[1;33mtag: [m[1;33m0.1.0[m[33m)[m Merge pull request #79 from computational-cell-analytics/first-release
+[33m03d42a8[m Fix issues with inference code
+[33m9ceb256[m Merge branch 'main' into first-release
+[33m458ec90[m 78 improvements to vesicle pool assignment widget (#81)
+[33mc0afedb[m Update the cooper scripts
+[33mc75abd9[m Update the example scripts and add downloads for data from zenodo
+[33mba56b57[m Update tomo sample data and example analysis pipeline
+[33mfb1fcd0[m Fix issues in active zone segmentation
+[33ma7ff94e[m Udpate example analysis pipeline
+[33m22ea714[m Refactor segmentation functionality
+[33m8b5cf12[m Update example analysis pipeline and sample data
+[33m4b3b539[m Bump version; add outline for analysis pipeline
+[33m8a4d26d[m Update vesicle pool widget (#77)
+[33m9b94807[m Fix typo
+[33mb5c9986[m Add short headers for submodules
+[33m17557c9[m Install pdoc in doc workflow
+[33m7793579[m Add version to init
+[33m4415b18[m Try to fix doc build
+[33md0d307a[m Fix doc building
+[33m498eb5a[m Merge pull request #76 from computational-cell-analytics/clean-up
+[33mc4304c3[m Add short rdme to scripts
+[33mc81d2b0[m Rename library in all experiment scripts
+[33m004dca8[m Rename synaptic_reconstruction package to synapse_net
+[33mc4c7aaf[m Add missing scripts and gitignores
+[33mc8cc5ea[m Update documentation
+[33m064ff2d[m Fix issues in ribbon postprocessing
+[33m57b7258[m Merge pull request #75 from computational-cell-analytics/add-ribbon-inference
+[33m71f9b2c[m Add new sample data and test for file utils
+[33m1cc595e[m Add ribbon model and refactor IO functionality
+[33m0fe01c4[m Fix issues in doc
+[33mac90e63[m Update start_page.md
+[33m409bcb6[m Update README.md
+[33mefdee13[m Merge pull request #73 from computational-cell-analytics/68-create-a-widget-for-vesicle-pool-assignments
+[33m223baee[m Refactor plugin functionality, update pool widget
+[33mec1ff3e[m Merge branch 'main' into 68-create-a-widget-for-vesicle-pool-assignments
+[33mafeb8e7[m Merge pull request #74 from computational-cell-analytics/software-updates
+[33m333b24a[m Fix CI
+[33m9b3e7b5[m Add sample data, CI, and auto-scaling for segmenation CLI
+[33m90aa283[m chagned display name of vesicle morphology
+[33m6989b45[m added tooltip for query to see which filters can be applied
+[33m827ad03[m cleaned up code
+[33m414b4cb[m Update doc and envs
+[33mbc39941[m added vesicle pool widget
+[33mc4bbc00[m morphology in dedicated layer
+[33m8e8c25d[m fix right argument for sampling
+[33m77a10a9[m Merge branch 'main' of https://github.com/computational-cell-analytics/synaptic-reconstruction into main
+[33m8ef7559[m Fix type annotation
+[33m5f15a66[m Doc updates (#71)
+[33m1e2533f[m Update documentation and readme
+[33me6971f5[m fiexed morphology widgets
+[33md883a07[m Update all function doc strings
+[33me2565f6[m Merge branch 'main' into doc-updates
+[33ma65affb[m Update function doc strings
+[33mae2a472[m Merge pull request #70 from computational-cell-analytics/more-inner-ear-analysis
+[33m53e6c9b[m Add active zone inference
+[33m686a38a[m Merge branch 'main' into doc-updates
+[33md723d5c[m Merge pull request #52 from computational-cell-analytics/more-inner-ear-analysis
+[33m2cc8f92[m Merge branch 'main' into more-inner-ear-analysis
+[33m69d7a3d[m Remove lockfile
+[33mff11f88[m Add more evaluation scripts
+[33me4c3040[m Update docs WIP
+[33m1f392ef[m Add evaluation scripts for cooper data
+[33m2da1d37[m changed distance and morphology widgets to properly add data to segmetation layer's properties attribute
+[33m8dbe7d3[m Update build_docs.yaml
+[33md8e37f5[m Update build_docs.yaml
+[33m91e1237[m Update build_docs.yaml
+[33m76525c9[m Update build_docs.yaml
+[33m6b6d1b3[m Update build_docs.yaml
+[33me5b734c[m Update build_docs.yaml
+[33mb213c31[m Update build_docs.yaml
+[33me01b452[m Update build_docs.yaml
+[33m06ebbec[m Update build_docs.yaml
+[33m681fc5d[m Update build_docs.yaml
+[33mcf1d722[m Update build_docs.yaml
+[33mba25763[m Update build_docs.yaml
+[33m844b9b9[m Update build_docs.yaml
+[33m0dd3b18[m Update build_docs.yaml
+[33m37535b3[m Update build_docs.yaml
+[33m65d6dd3[m Update build_docs.yaml
+[33mbc53699[m Update build_docs.yaml
+[33mf62b8cf[m Update doc_env.yaml
+[33m3844f77[m Update doc_env.yaml
+[33m29f1768[m Update doc_env.yaml
+[33m65eac11[m Update doc_env.yaml
+[33m558fc4f[m Update doc_env.yaml
+[33mee89f73[m Update doc_env.yaml
+[33m1af04e3[m Update doc_env.yaml
+[33m64c8780[m Update build_docs.yaml
+[33me34d6b8[m Update build_docs.yaml
+[33mea885b2[m Update build_docs.yaml
+[33m3b27480[m Update doc_env.yaml
+[33ma57a742[m Update build_docs.yaml
+[33mb571218[m Update doc_env.yaml
+[33m7e4844d[m Update build_docs.yaml
+[33mc15173d[m Update build_docs.yaml
+[33mf9d7310[m Update build_docs.yaml
+[33md44aced[m Update build_docs.yaml
+[33me212583[m Merge pull request #69 from computational-cell-analytics/59-build-documentation
+[33mefe2219[m[33m ([m[1;31morigin/59-build-documentation[m[33m)[m added github workflow yaml etc
+[33md226a94[m Merge pull request #67 from computational-cell-analytics/58-add-widget-for-morphology-analysis
+[33m0bacc48[m refactored some code in to_imod.py
+[33m19d9217[m added files for doc
+[33m4ec71a9[m table data index and label_id mixup is corrected
+[33mbe5808e[m implemented changes mentioned in PR 67
+[33me0262f9[m Merge pull request #66 from computational-cell-analytics/65-add-mito-train-script
+[33mca9b803[m Merge branch 'main' into 58-add-widget-for-morphology-analysis
+[33ma59ed03[m removed oboslete code
+[33m063b3b6[m added morphology widget to measure morphology of structures in 2d and 3d volumetric data
+[33m70095c4[m Update util.py
+[33m3281438[m added default path for training data and removed obsolete code
+[33mb73b5be[m added train_mitochondria script and util for training
+[33mce94ea8[m Add CLI for IMOD export
+[33m3b4c6c4[m Update analyses
+[33m45ef1c3[m refactored  morphology widge
+[33mfe7dfae[m Update weights_only handling
+[33m9fd4017[m Add some TODOs for CLI update
+[33m4a33f11[m Simplify model type selection logic
+[33m2ec0fd5[m Add examples for network training (#61)
+[33m8df8eba[m some changed got lost
+[33m691f183[m added napari.yaml
+[33m9728951[m Update vesicle diameter analysis
+[33m59a38db[m Update all measurements for the inner ear analysis
+[33me0dfda6[m Merge branch 'main' into more-inner-ear-analysis
+[33me95dd45[m Merge pull request #60 from computational-cell-analytics/56-add-support-for-custom-model-paths-in-segmentation-plugin
+[33m3e11446[m Update weights_only handling
+[33m0db92fc[m Add some TODOs for CLI update
+[33mf3be90a[m Simplify model type selection logic
+[33m008860f[m Merge remote-tracking branch 'origin/main' into 56-add-support-for-custom-model-paths-in-segmentation-plugin
+[33ma974e65[m Add examples for network training (#61)
+[33m93a66c1[m Update data summary
+[33ma0c31a8[m Fix issue in data aggregation
+[33mcb693b1[m Update data summaries
+[33m51165a5[m Fix issues with the segmentation export to IMOD
+[33meb21abd[m added morphology and first approach to measure vesicles in UI
+[33m7941db0[m added custom model path with target selector to choose between desired segmentation functions
+[33m9b8c7a2[m Add more inner ear analysis code
+[33mc396113[m Merge pull request #55 from computational-cell-analytics/53-next-steps-plugin-implementation
+[33m5feff6a[m Update active zone analysis for SNAP/MUNC data
+[33m27c4d9d[m reworked mentioned parts
+[33mcf2898d[m Merge branch 'main' into 53-next-steps-plugin-implementation
+[33m6474587[m voxel size in UI and scale is automatically calculated if there is enough information
+[33m2ccf340[m Add script to extract vesicle diameters for inner ear data
+[33m3a13825[m added description to volume_reader
+[33m3569d4f[m chagned training resolution to dictionaries
+[33mdead9c4[m removed obsolete LOCs
+[33mcd54805[m added scale calculation based on resolution and voxel size
+[33md186ee8[m Add download urls and train resolutions for most models
+[33m19b2701[m Add functionality to extract training data info
+[33m5b778f7[m Fix issues in filter updates and add script for active zone segmentation
+[33m10854de[m Add sato as better default edge filter
+[33m79478c5[m added scale calculation based on resolution and voxel size
+[33me3d3798[m Add download urls and train resolutions for most models
+[33m186df5b[m Merge branch 'more-inner-ear-analysis' of https://github.com/computational-cell-analytics/synaptic-reconstruction into more-inner-ear-analysis
+[33m186c92d[m Update inner ear analysis scripts
+[33m0b7884d[m Merge branch 'main' of https://github.com/computational-cell-analytics/synaptic-reconstruction into more-inner-ear-analysis
+[33mef44f99[m Add functionality to extract training data info
+[33mbcc8863[m added dummy traiing_voxel_size and dynamic calculation of sclae
+[33m16512a7[m added voxel_size reading to reader plugin and stored it in napari.layer.metadata
+[33m903e59e[m Update inner ear analysis
+[33m30d4a08[m added new tiling logic and napari progress bar
+[33ma2758f4[m Fix issues in filter updates and add script for active zone segmentation
+[33m58f3e6b[m Add sato as better default edge filter
+[33m238b577[m Merge branch 'main' of https://github.com/computational-cell-analytics/synaptic-reconstruction
+[33m305a80b[m Updates to inner ear training and eval
+[33m9472a47[m Merge pull request #51 from computational-cell-analytics/more-plugin-updates
+[33m4e19b6e[m Update mito segmentation
+[33mad4741b[m Update inner ear analysis
+[33ma051d85[m Update CLI and model logic
+[33m55074db[m Implement CLI WIP
+[33md991be3[m Update distance measurement widget
+[33mf74e5cd[m Update plugins WIP
+[33m0f40d3c[m Update inner ear analysis
+[33m38d6edf[m Merge pull request #50 from computational-cell-analytics/49-plugin-updates
+[33m9980c2b[m added distance to object to DistanceMeasureWidget feature and saving to csv file. _compute_seg_object_distances needed to be adapted to accept 2D data (prev. only 3D data was accepted)
+[33m514e1f1[m removed obsolete code
+[33m0ebd45c[m refactored layer_selector_widgets to BaseWidget and fixed loading image before plugin problem
+[33mff5be12[m Merge pull request #48 from computational-cell-analytics/plugin-updates
+[33md5faa99[m Updates to napari plugins and distance functionality
+[33m9581b2b[m Merge pull request #47 from computational-cell-analytics/45-user-interface
+[33m9622f88[m pooch loading with state_dict works.. layer_selector_widgets should be refactored to be in BaseWidget
+[33m36d834f[m Implement inner ear analysis WIP
+[33mf56436a[m Update structure segmentation training
+[33m7af1511[m added dynamic switch between segmentation functions absed on the model used
+[33mec1f050[m added segmentation widget
+[33m74c3e69[m Merge pull request #46 from computational-cell-analytics/update-comp-seg
+[33m59e01dd[m[33m ([m[1;31morigin/update-comp-seg[m[33m)[m Update result visualization
+[33m64d56e5[m Update segmentation functionality and add more inference scripts
+[33m993a006[m Merge branch 'update-comp-seg' of https://github.com/computational-cell-analytics/synaptic-reconstruction into update-comp-seg
+[33maad578c[m Update compartment model training
+[33m6daf9de[m Update compartment segmentation
+[33m54204cc[m Add annotation script
+[33mbc981e2[m Finalize CryoVesNet evaluation
+[33m6011472[m Update compartment segmentation code
+[33mc35b04d[m Update cryovesnet evaluation
+[33mc5fceb7[m Add prediction for compartments WIP
+[33m01804ec[m Update compartment segmentation logic
+[33mbbecced[m Merge branch 'main' of https://github.com/computational-cell-analytics/synaptic-reconstruction
+[33m9aba9f3[m Implement cryo-ves-net evaluation for cooper data
+[33m7657af0[m Merge pull request #43 from computational-cell-analytics/inner-ear-eval
+[33mf75091d[m Update inner ear analysis
+[33m4cdd288[m More updates in the ribbon segmentation
+[33m85c5670[m Update postprocessing code
+[33m13f2272[m Update domain adaptation training logic for inner ear structures
+[33mbe05252[m Merge branch 'main' into inner-ear-eval
+[33m696f47d[m Update inner ear structure postprocessing
+[33m9cb25c2[m Merge pull request #42 from computational-cell-analytics/fix-da-training
+[33m309d3c1[m Merge pull request #39 from computational-cell-analytics/38-add-sampler-to-domain-adaptation
+[33m26e37eb[m Fix some issues in DA training
+[33m05d3555[m Update supervised_training.py
+[33m062b956[m Update for inner ear analysis
+[33mc61de04[m Update postprocessing script
+[33m3cd5f0c[m Implement IMOD mask export WIP
+[33meabd2aa[m Merge pull request #41 from computational-cell-analytics/sm-dev
+[33mb58f1d3[m fix mask error
+[33mfeadf6f[m Merge branch 'main' of https://github.com/computational-cell-analytics/synaptic-reconstruction into sm-dev
+[33mbe7ba41[m active zone training
+[33mfc7a3a1[m Update radius extraction for IMOD
+[33m475a9b5[m Merge pull request #40 from computational-cell-analytics/compartment-training
+[33m4363ce4[m Update cryovesnet prediction
+[33m1b777bf[m Update compartment segmentation
+[33mfebad29[m Work on compartment segmentation
+[33md47dc0a[m Implement compartment segmentation WIP
+[33m8a6026b[m Some updates to compartment training and cryo-ves-net
+[33m20a1390[m Merge branch 'main' into compartment-training
+[33me9c8cf9[m Implement training for compartment model
+[33m967304e[m addded sampler to domain adaptation
+[33md1b6bba[m Add readme for cryovesnet
+[33mcdf3315[m Add initial code for cryovesnet
+[33m997d804[m Update ground-truth annotation scripts
+[33mc590869[m Update processing scripts for compartment annotations
+[33m760cd7c[m more about 2D
+[33ma18a992[m Update correction table parsing for inner ear synapses
+[33md59f0ff[m Update sam preprocessing for compartment annotation
+[33mdee589f[m Update gt generation
+[33mc412b47[m Merge branch 'main' of https://github.com/computational-cell-analytics/synaptic-reconstruction into sm-dev
+[33m47428e5[m masked segmentation
+[33mdd2a9ae[m Update README.md
+[33m83a5cfa[m Implement factor to increase the vesicle radius in the IMOD export
+[33me6d189c[m Merge pull request #36 from computational-cell-analytics/vesicle-inference-updates
+[33m4696743[m Merge pull request #37 from computational-cell-analytics/sm-dev
+[33m3edbacf[m segmentation also for other data than h5
+[33m7b460b2[m Unify all segmentation functions
+[33mfbfe91b[m Update scaling and masking functionality in mito and vesicle segmentation
+[33m3baea1c[m Add support for prediction with mask WIP
+[33m05bd064[m Implement script for mask extraction from IMOD and mask interpolation
+[33md09c245[m Update border filtering
+[33m492a427[m extract presynapse
+[33m3a8f223[m DA for inner ear data, excluding testset data
+[33ma5c8965[m DA for endbulb data
+[33mf977967[m DA for cryo data
+[33m8ca79b3[m Merge branch 'main' of https://github.com/computational-cell-analytics/synaptic-reconstruction into sm-dev
+[33m89ae892[m Merge pull request #35 from computational-cell-analytics/update-distance-seg
+[33m11a668b[m Update vesicle segmentation
+[33m1bafacd[m fixing confusing print statement
+[33m63b9450[m Merge branch 'main' of https://github.com/computational-cell-analytics/synaptic-reconstruction into sm-dev
+[33m4c20a77[m Merge pull request #34 from computational-cell-analytics/ribbon-synapses
+[33m776e8e4[m small things
+[33m60d2692[m Update ribbon synapse evaluation
+[33m6802ad7[m Add code for ribbon synapse eval
+[33m8cf1806[m Merge pull request #33 from computational-cell-analytics/sm-dev
+[33ma2f351d[m correction of argparse
+[33m0cae179[m option to split dataset in only train and val
+[33m0d418dc[m Merge pull request #32 from computational-cell-analytics/structure-training
+[33m5ccf1a6[m[33m ([m[1;31morigin/structure-training[m[33m)[m Add domain adaptation script
+[33m149d8a1[m Merge pull request #31 from computational-cell-analytics/more-visualization
+[33md67fe84[m Merge branch 'main' into structure-training
+[33m9d02682[m minor additions
+[33m46cfb54[m Merge branch 'more-visualization' of https://github.com/computational-cell-analytics/synaptic-reconstruction into sm-dev
+[33md204845[m Minor update
+[33mdb812d1[m Finalize vesicle post-processing changes
+[33m9120dee[m Merge pull request #30 from computational-cell-analytics/sm-dev
+[33m7f1b058[m matching object imod export to vesicle export
+[33md324b28[m few more prints
+[33mb7b4a31[m Structure training updates
+[33mb52742b[m More updates WIP
+[33m796ec01[m Update post-processing WIP
+[33m79f0125[m Merge branch 'sm-dev' into more-visualization
+[33m482cddf[m Add new visualization script
+[33m5970812[m push everything once more
+[33m0c830b6[m can pass either model or model path for segmentation, functions have 2 options now, changed order of parameters
+[33m01b4cb1[m exclude files not directory
+[33mf10a2a4[m export vesicles for endbulb, not fully tested#
+[33m4fe8ef1[m fix 2D seg tiling size, implement 2D evaluation
+[33m4bf312a[m 2D vesicle segmentation
+[33mf965616[m evaluation script
+[33m85effc1[m assisting file, finalising h5 segmentation
+[33m208ba17[m fix tiling-halo issue; assisting files
+[33md30537c[m Update segmentation functionality
+[33m8afad01[m Merge pull request #29 from computational-cell-analytics/gt-extraction
+[33m9db47ed[m Finalize GT extraction for moser data
+[33m51166e7[m Add inner ear vesicle extraction script
+[33m9841fdf[m Implement IMOD structure export
+[33m47945f4[m Add script to check exported data
+[33m76654fb[m export AZ, endbulb, cristae, mito for wichmann data
+[33m196f5a2[m add small things for training
+[33m7dec298[m Add ground-truth export and analysis scripts for moser data
+[33m4e46957[m Merge branch 'main' of https://github.com/computational-cell-analytics/synaptic-reconstruction into sm-dev
+[33m87edf43[m finish training
+[33m80be9ba[m Update vesicle extraction for cryo data
+[33mb7f3f8b[m Update README.md
+[33mb50b829[m Merge branch 'main' of https://github.com/computational-cell-analytics/synaptic-reconstruction into sm-dev
+[33m8f7085e[m Fix issues with loss masking code
+[33m82ee06b[m don't redo already postprocessed, small addition
+[33mde5b644[m don't redo already postprocessed
+[33m305f81a[m Start code for cryo vesicle extraction
+[33m414677b[m Update default ignore table
+[33mf78c203[m Merge pull request #24 from computational-cell-analytics/actin
+[33m6332bb5[m Merge branch 'main' of https://github.com/computational-cell-analytics/synaptic-reconstruction into actin
+[33m3d42280[m Merge pull request #26 from computational-cell-analytics/masked-loss
+[33m7ea303a[m Merge branch 'main' into masked-loss
+[33m20f5180[m Merge pull request #22 from computational-cell-analytics/sm-dev
+[33mb582701[m Add actin visualization scripts
+[33m56217b0[m Add domain adaptation script for actin
+[33mf84f281[m improve vesicle postprocessing
+[33m2d8db55[m update right linux code for imod exportation
+[33mab2ca1d[m Implement masked loss
+[33mc796077[m Add more IMOD parsing functionality
+[33mb21a5ad[m Update frog synapse extraction
+[33mc297ed6[m Update analysis for manual annotations in inner ear synapses
+[33m4ee4ca0[m Use new column to parse inner ear synapses
+[33m54fb030[m postprocess shape with new functions
+[33mceda07f[m merging main and sm-dev
+[33m6c2669c[m Merge pull request #25 from computational-cell-analytics/shape-refinement
+[33m92cedcc[m[33m ([m[1;31morigin/shape-refinement[m[33m)[m Update manual vesicle analysis
+[33mc693336[m Minor fix
+[33mfc88c45[m Fix issues in vesicle refinement
+[33ma058aef[m Implement vesicle shape refinement
+[33m488ccb7[m trying out different wadershed functions
+[33m7096869[m passing ndim to RawDataset
+[33m61242bd[m first implementation of postprocessing vesicle shape seg
+[33me162f75[m Implement first version of actin prediction
+[33m653b9c2[m Merge branch 'main' into actin
+[33ma971a52[m Merge pull request #23 from computational-cell-analytics/cooper-vesicle-extraction
+[33ma73c796[m Implement vesicle correction for inner ear synapses
+[33m2def8e0[m 2D semisupervised, unsupervised, not fully tested
+[33mb7670ee[m add chages for 2D
+[33mf0a165a[m Add script for checking extracted vesicle ground-truth
+[33m799defc[m Implement actin segmentation training
+[33m468fa2e[m Finish vesicle extraction
+[33mad62a9a[m Add first version of vesicle extraction for cooper data
+[33mf6021b0[m Merge branch 'main' of https://github.com/computational-cell-analytics/synaptic-reconstruction into sm-dev
+[33m0a5d93d[m check for 2D
+[33m5a283ec[m Work on vesicle extraction WIP
+[33mf89fcd5[m Improvements in inner ear vesicle analysis
+[33mad68bd3[m Update validation table handling
+[33m411850f[m Merge pull request #20 from computational-cell-analytics/training
+[33m3d8cb77[m Implement training functionality
+[33m4832ea3[m Implement training WIP
+[33me101e0d[m Update vesicle GT processing
+[33mdd9ad05[m Implement vesicle postprocessing
+[33m06d3307[m Add scripts for ground-truth generation in cooper data
+[33ma0b8ee1[m Merge pull request #19 from computational-cell-analytics/non-ax-aligned-bb
+[33m8ff548f[m Add ground-truth extraction code
+[33m04663e4[m Enable import without napari-regiontable
+[33mda1a8a7[m Update correction pool logic
+[33mc3362dd[m Update inner ear analysis to take into account pool correction
+[33m08d6852[m Add new layer for vesicle pool correction
+[33m6233db5[m Merge pull request #18 from computational-cell-analytics/tile-and-border
+[33m7d369d6[m Make default tiling a function of VRAM and implement border clearing for vesicles
+[33m77d9ce6[m Fix bug for prediction with nested input folders
+[33m6e83143[m Enable different extensions for vesicle segmentation and update readme
+[33m21eaa65[m Merge pull request #16 from computational-cell-analytics/inference_updates
+[33m8485053[m Add documentation for the new inference code
+[33mc37babb[m Prepare data transfer documentation WIP
+[33m99c9abb[m Unify prediction scripts
+[33m4dd165f[m Update inference code in stucture segmentation script
+[33madba18e[m Update default tiling logic
+[33m409997e[m Update visualization script
+[33m5bcbb1d[m Merge pull request #15 from computational-cell-analytics/14-add-visualization-script-to-check-segmentations
+[33m840cb08[m added script that visualizes segmentation
+[33m5cfb164[m Merge pull request #13 from computational-cell-analytics/imod-export
+[33m2317fff[m Enable passing serialized torch models to prediction scripts
+[33m3162438[m Merge pull request #12 from computational-cell-analytics/inference-refactor
+[33m89da79e[m changed axis argument for standardize from list to tuple
+[33m0102ae8[m added cristae segmentation script and fixed incorrect usage of np.stack in inference/util.py
+[33m2fce111[m Implement imod vesicle export
+[33m95550f4[m Fix issue in inference_helper and add vesicle segmentation
+[33mb87d759[m Implement inference helper function
+[33mb21f24e[m Start refactoring inference functionality
+[33ma0dd0cf[m Merge pull request #10 from computational-cell-analytics/9-add-script-to-run-mitochondria-segmentation
+[33m5ddb555[m[33m ([m[1;31morigin/9-add-script-to-run-mitochondria-segmentation[m[33m)[m added compression to .tif export and slightly increased the min size filter for mitochondria
+[33m868fb99[m removed unnecessary code
+[33mcd58951[m added script to run mitochondria segmentation from directory or single path
+[33m0a17e75[m Merge pull request #8 from computational-cell-analytics/7-add-segmentation-functionality-for-cristae
+[33madd56fb[m removed file and removed file path from .gitignore
+[33m72ac866[m added cristae segmentation and simplified script
+[33m6c5ae24[m added docstring to semgent_cristae
+[33m31d8a1e[m refactored predict_with_torch_em
+[33m63abf2d[m changed from instance segmentation to semantic segmentation
+[33m5097cfd[m added test file to gitignore
+[33m8ecbf67[m added crstae segmentation
+[33m1c8a777[m Merge pull request #6 from computational-cell-analytics/4-add-segmentation-functionality-for-mitochondria-cristae
+[33m1efa6a7[m removed unnecessary imports
+[33mdfa5210[m added util file to reuse torch_em predict function and tidied up code
+[33m3af2613[m Stop tracking test.py
+[33m16856b0[m added mito inference script as well as type annotations for it and for vesicles
+[33mcc401d8[m added some more postprocessing steps
+[33m3e38632[m added mito inference script and generic post processing
+[33mb39d6ba[m Misc updates
+[33mf7de8d4[m Update binning
+[33m4a620a9[m New skip column
+[33m60e4426[m Fix issue in vesicle pool analysis
+[33mdbf9009[m Update vesicle extraction
+[33m2c23a04[m Update morphology computation
+[33m7e0c411[m Fix issue in analysis code
+[33mc210002[m Update morphology computation
+[33m777977b[m Update selected postprocessing
+[33m94c6a62[m Implement selected postprocessing WIP
+[33mb7cdae2[m Update validation table handling
+[33m58e5836[m Update tomogram rescaling and IMOD file processing
+[33m4910da3[m Update tomogram rescaling script
+[33ma6a5ad0[m Add script for tomogram rescaling WIP
+[33m389be29[m Add data extraction scripts for FrogEM
+[33m77af8f8[m Update README.md
+[33m2f4ee2e[m Update README.md
+[33mc7afefb[m Update README.md
+[33m412970d[m Update README.md
+[33m0808f11[m Update vesicle annotation
+[33m355692c[m Merge branch 'main' of https://github.com/computational-cell-analytics/synaptic-reconstruction into main
+[33m014809e[m Update manual segmentation handling for inner synapses
+[33mda6a470[m Add vesicle annotation tool
+[33m4805cd7[m Fix naming errors in manual analysis
+[33m681b48f[m Simplify manual processing
+[33m1ed1823[m Update manual segmentation processing
+[33mf435f67[m Update inner ear scripts
+[33m4f2c4c3[m Update result checking
+[33m75c2128[m Minor fixes in run analysis
+[33m1407896[m Update analysis code
+[33me1134c1[m Add checking for manual analysis
+[33m835836f[m Treat corrected vesicle pools in run analysis
+[33m092a94d[m More robust analysis code
+[33m6fa7b60[m Updates to morphology processing
+[33m5e54294[m Add export for imod point annotations
+[33m7eba5fe[m Implement analysis of manual annotations WIP
+[33me577cc9[m Add script to check the correction table
+[33mce5beb4[m Update binning in inner ear result correction
+[33m6ed64e4[m Fix color assignment without results
+[33mde44c5c[m Update vesicle correction script
+[33m6b13ea5[m Minor updates to analysis scripts
+[33mc3635d5[m Fix typo in inner ear processing script
+[33maac4ef4[m Update data processing scripts for inner ear tomogram
+[33mfd0aa81[m Updates for correction inclusion
+[33m6ee2333[m Handle tomograms with two ribbons in inner ear analysis
+[33m454bfda[m Update distance based post-processing
+[33m675b525[m Update processing scripts
+[33m5be3930[m Update structure post-processing for segmentation v2
+[33m077846d[m Update processing scripts for inner ear synapses
+[33mc4bc452[m Implement new training data export for inner ear synaptic structures
+[33m685a4bb[m Implement hole closing
+[33md0afa16[m Fix distance line creation for empty distances
+[33m2533f4c[m Merge branch 'main' of https://github.com/computational-cell-analytics/synaptic-reconstruction into main
+[33macdb13b[m Add script for segmentation validation
+[33mf862d6b[m Catch issue in mesh volume computation
+[33m1d1bbe7[m Minor updates
+[33mbcaa48f[m Update morphology analysis
+[33m68c7240[m Update result visualization for inner ear
+[33m6b8bb88[m Implement analysis
+[33md523872[m Update structure post-processing
+[33mc9907d0[m Update structure postprocessing
+[33m6aeb3d9[m Update segmentation
+[33md8b87c4[m Implement processing for new microscope
+[33m69627cf[m Fix ribbon post-processing
+[33mf7c1e97[m Merge branch 'main' of https://github.com/computational-cell-analytics/synaptic-reconstruction
+[33m3e232b4[m Update processing code
+[33mcc58a20[m Update visualization scripts
+[33mcd76ab9[m Update post-processing for ribbon and membrane
+[33m81e6a15[m Add post-processing for structure segmentation
+[33medffed3[m Update segmentation functionality
+[33mfe78084[m Add imod extraction functionality and script
+[33me4cb154[m Implement table parsing for inner ear experiments
+[33me32f0f3[m Update scripts for inner ear processing
+[33meb3ba29[m Update gitignore
+[33md48445d[m Update scripts for inner ear processing
+[33m2d780d5[m Fix bug in distance measurements
+[33m0ed51da[m Add simple script to check segmentations
+[33meed7bab[m Add morphology computation for ribbon synapses
+[33md5cf40e[m Fix issues in distance visualization for ribbon synapses
+[33mbf12559[m Fix issue in distance sorting
+[33m599b427[m Enable not filtering duplicates in distance measurement
+[33m725abed[m Fix issue in nearest neighbor filtering logic
+[33mcbc06ad[m[33m ([m[1;31morigin/tools-for-vesicles[m[33m)[m Update liposome measurement script
+[33m80f7d43[m Fix bug in distance computation
+[33m6a4d90d[m Add script for distance measurement in liposomes
+[33m2d45062[m Add vesicle pool assignment for inner ear vesicles
+[33m5c0def7[m Merge branch 'main' of https://github.com/computational-cell-analytics/synaptic-reconstruction into tools-for-vesicles
+[33m6fb683c[m Enable precomputing distances
+[33m64af817[m Add preliminary boundary segmentations
+[33m42f740e[m Add more functionality for ribbon syn segmentation and distance measurements
+[33mbf10d4c[m Merge pull request #1 from computational-cell-analytics/tools-for-vesicles
+[33m937577d[m Update distance measurement tool
+[33m8f864f1[m Implement functionality for filtering ribbons
+[33maa97e08[m Implement napari-based tools for segmentation correction and displaying distances
+[33m09075e5[m Initial commit
