@@ -184,6 +184,12 @@ def segmentation_cli():
         "--scalable", action="store_true", help="Use the scalable segmentation implementation. "
         "Currently this only works for vesicles, mitochondria, or active zones."
     )
+    parser.add_argument(
+        "--extra_input_path", default=None, help="Filepath to extra inputs, needed for cristae segmentation."
+    )
+    parser.add_argument(
+        "--extra_input_ext", default=".tif", help="File extension for the extra inputs, default is tif."
+    )
     args = parser.parse_args()
 
     if args.checkpoint is None:
@@ -234,5 +240,6 @@ def segmentation_cli():
         args.input_path, args.output_path, segmentation_function,
         mask_input_path=args.mask_path, force=args.force, data_ext=args.data_ext,
         output_key=args.segmentation_key, model_resolution=model_resolution, scale=scale,
-        allocate_output=allocate_output
+        allocate_output=allocate_output, extra_input_path=args.extra_input_path,
+        extra_input_ext=args.extra_input_ext
     )

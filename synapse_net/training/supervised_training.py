@@ -200,6 +200,7 @@ def supervised_training(
     check: bool = False,
     ignore_label: Optional[int] = None,
     label_transform: Optional[callable] = None,
+    loss_fn: Optional[torch.nn.Module] = None,
     in_channels: int = 1,
     out_channels: int = 2,
     mask_channel: bool = False,
@@ -243,6 +244,7 @@ def supervised_training(
             ignored in the loss computation. By default this option is not used.
         label_transform: Label transform that is applied to the segmentation to compute the targets.
             If no label transform is passed (the default) a boundary transform is used.
+        loss_fn: Custom loss function. If None, will default to `torch_em.loss.DiceLoss`.
         out_channels: The number of output channels of the UNet.
         mask_channel: Whether the last channels in the labels should be used for masking the loss.
             This can be used to implement more complex masking operations and is not compatible with `ignore_label`.
@@ -272,15 +274,18 @@ def supervised_training(
     else:
         model = get_3d_model(out_channels=out_channels, in_channels=in_channels)
 
-    loss, metric = None, None
+    base_loss = loss_fn if loss_fn is not None else torch_em.loss.DiceLoss()
+    metric = base_loss
+
     # No ignore label -> we can use default loss.
     if ignore_label is None and not mask_channel:
-        pass
+        loss = base_loss
+        
     # If we have an ignore label the loss and metric have to be modified
     # so that the ignore mask is not used in the gradient calculation.
     elif ignore_label is not None:
         loss = torch_em.loss.LossWrapper(
-            loss=torch_em.loss.DiceLoss(),
+            loss=base_loss,
             transform=torch_em.loss.wrapper.MaskIgnoreLabel(
                 ignore_label=ignore_label, masking_method="multiply",
             )
@@ -288,13 +293,16 @@ def supervised_training(
         metric = loss
     elif mask_channel:
         loss = torch_em.loss.LossWrapper(
-            loss=torch_em.loss.DiceLoss(),
+            loss=base_loss,
             transform=torch_em.loss.wrapper.ApplyAndRemoveMask(
                 masking_method="crop" if out_channels == 1 else "multiply")
         )
         metric = loss
     else:
-        raise ValueError
+        #raise ValueError
+        loss = base_loss
+        metric = loss
+        
 
     trainer = torch_em.default_segmentation_trainer(
         name=name,
