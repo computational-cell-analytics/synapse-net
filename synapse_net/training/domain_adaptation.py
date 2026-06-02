@@ -39,9 +39,8 @@ def mean_teacher_adaptation(
     n_samples_val: Optional[int] = None,
     train_mask_paths: Optional[Tuple[str]] = None,
     val_mask_paths: Optional[Tuple[str]] = None,
+    sample_mask_key: Optional[str] = None,
     patch_sampler: Optional[callable] = None,
-    pseudo_label_sampler: Optional[callable] = None,
-    device: int = 0,
     check: bool = False,
 ) -> None:
     """Run domain adaptation to transfer a network trained on a source domain for a supervised
@@ -52,7 +51,7 @@ def mean_teacher_adaptation(
      'supervised_val_paths' are not given.
     - semi-supervised domain adaptation: domain adaptation on unlabeled and labeled data,
       when 'supervised_train_paths' and 'supervised_val_paths' are given.
-
+    
     Args:
         name: The name for the checkpoint to be trained.
         unsupervsied_train_paths: Filepaths to the hdf5 files or similar file formats
@@ -89,9 +88,8 @@ def mean_teacher_adaptation(
             based on the patch_shape and size of the volumes used for validation.
         train_mask_paths: Sample masks used by the patch sampler to accept or reject patches for training.
         val_mask_paths: Sample masks used by the patch sampler to accept or reject patches for validation.
+        sample_mask_key: The key to the sample mask dataset inside each file.
         patch_sampler: Accept or reject patches based on a condition.
-        pseudo_label_sampler: Mask out regions of the pseudo labels where the teacher is not confident before updating the gradients.
-        device: GPU ID for training.
         check: Whether to check the training and validation loaders instead of running training.
     """  # noqa
     assert (supervised_train_paths is None) == (supervised_val_paths is None)
@@ -115,7 +113,7 @@ def mean_teacher_adaptation(
             model = torch.load(source_checkpoint, weights_only=False)
         reinit_teacher = False
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=5)
 
     # self training functionality
@@ -130,7 +128,8 @@ def mean_teacher_adaptation(
         batch_size=batch_size,
         n_samples=n_samples_train,
         sample_mask_paths=train_mask_paths,
-        sampler=patch_sampler
+        sample_mask_key=sample_mask_key,
+        sampler=patch_sampler,
     )
     unsupervised_val_loader = get_unsupervised_loader(
         data_paths=unsupervised_val_paths,
@@ -139,7 +138,8 @@ def mean_teacher_adaptation(
         batch_size=batch_size,
         n_samples=n_samples_val,
         sample_mask_paths=val_mask_paths,
-        sampler=patch_sampler
+        sample_mask_key=sample_mask_key,
+        sampler=patch_sampler,
     )
 
     if supervised_train_paths is not None:
@@ -165,7 +165,7 @@ def mean_teacher_adaptation(
             check_loader(supervised_val_loader, n_samples=4)
         return
 
-    device = torch.device(f"cuda:{device}") if torch.cuda.is_available() else torch.device("cpu")
+    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     trainer = self_training.MeanTeacherTrainer(
         name=name,
         model=model,
@@ -187,7 +187,6 @@ def mean_teacher_adaptation(
         device=device,
         reinit_teacher=reinit_teacher,
         save_root=save_root,
-        sampler=pseudo_label_sampler,
     )
     trainer.fit(n_iterations)
 
