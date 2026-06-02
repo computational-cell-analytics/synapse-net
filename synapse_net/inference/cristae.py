@@ -120,7 +120,7 @@ def segment_cristae(
         distance_based_segmentation: Whether to use distance-based segmentation.
         return_predictions: Whether to return the predictions (foreground, boundaries) alongside the segmentation.
         scale: The scale factor to use for rescaling the input volume before prediction.
-        mask : An optional mask that is used to restrict the segmentation.
+        mask: An optional mask that is used to restrict the segmentation.
 
     Returns:
         The segmentation mask as a numpy array, or a tuple containing the segmentation mask
@@ -152,7 +152,7 @@ def segment_cristae(
     # predict_with_halo skips tiles with no mito voxels entirely.
     # Replace with the optional external mask if one is provided.
     if mask is None:
-        prediction_mask = mito_seg > 0
+        mask = mito_seg > 0
     else:
         mask = scaler.scale_input(mask, is_segmentation=True)
 
