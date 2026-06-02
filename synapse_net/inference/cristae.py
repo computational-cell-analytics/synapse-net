@@ -143,15 +143,21 @@ def segment_cristae(
     # rescale each channel
     volume = scaler.scale_input(input_volume)
     mito_seg = scaler.scale_input(mitochondria, is_segmentation=True)
-    input_volume = np.stack([volume, mito_seg], axis=0)
 
     # target 10nm erosion for mitochondria
     # voxel_size is the model's training voxel size, which is the space we erode in
     erode_voxels = max(1, round(10.0 / voxel_size))
 
-    # Run prediction and segmentation.
-    if mask is not None:
+    # Use the mitochondria segmentation as the prediction mask so that
+    # predict_with_halo skips tiles with no mito voxels entirely.
+    # Replace with the optional external mask if one is provided.
+    if mask is None:
+        mask = mito_seg > 0
+    else:
         mask = scaler.scale_input(mask, is_segmentation=True)
+
+    input_volume = np.stack([volume, mito_seg], axis=0)
+    # Run prediction and segmentation.
     pred = get_prediction(
         input_volume, model_path=model_path, model=model, mask=mask,
         tiling=tiling, with_channels=with_channels, channels_to_standardize=channels_to_standardize, verbose=verbose
