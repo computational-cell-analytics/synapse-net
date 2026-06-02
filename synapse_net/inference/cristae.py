@@ -120,7 +120,7 @@ def segment_cristae(
         distance_based_segmentation: Whether to use distance-based segmentation.
         return_predictions: Whether to return the predictions (foreground, boundaries) alongside the segmentation.
         scale: The scale factor to use for rescaling the input volume before prediction.
-        mask: An optional mask that is used to restrict the segmentation.
+        mask : An optional mask that is used to restrict the segmentation.
 
     Returns:
         The segmentation mask as a numpy array, or a tuple containing the segmentation mask
@@ -143,15 +143,21 @@ def segment_cristae(
     # rescale each channel
     volume = scaler.scale_input(input_volume)
     mito_seg = scaler.scale_input(mitochondria, is_segmentation=True)
-    input_volume = np.stack([volume, mito_seg], axis=0)
 
     # target 10nm erosion for mitochondria
     # voxel_size is the model's training voxel size, which is the space we erode in
     erode_voxels = max(1, round(10.0 / voxel_size))
 
-    # Run prediction and segmentation.
-    if mask is not None:
+    # Use the mitochondria segmentation as the prediction mask so that
+    # predict_with_halo skips tiles with no mito voxels entirely.
+    # Replace with the optional external mask if one is provided.
+    if mask is None:
+        prediction_mask = mito_seg > 0
+    else:
         mask = scaler.scale_input(mask, is_segmentation=True)
+
+    input_volume = np.stack([volume, mito_seg], axis=0)
+    # Run prediction and segmentation.
     pred = get_prediction(
         input_volume, model_path=model_path, model=model, mask=mask,
         tiling=tiling, with_channels=with_channels, channels_to_standardize=channels_to_standardize, verbose=verbose
