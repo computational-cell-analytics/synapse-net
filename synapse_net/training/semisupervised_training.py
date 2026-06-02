@@ -53,13 +53,13 @@ def get_unsupervised_loader(
         batch_size: The batch size for training.
         n_samples: The number of samples per epoch. By default this will be estimated
             based on the patch_shape and size of the volumes used for training.
-        exclude_top_and_bottom: Whether to exclude the five top and bottom slices to
-            avoid artifacts at the border of tomograms.
         sample_mask_paths: The filepaths to the corresponding sample masks for each tomogram.
         sample_mask_key: The key to the sample mask dataset inside each file.
         bg_mask_paths: The filepaths to the background masks for each tomogram.
         bg_mask_key: The key to the background mask dataset inside each file.
         sampler: Accept or reject patches based on a condition.
+        exclude_top_and_bottom: Whether to exclude the five top and bottom slices to
+            avoid artifacts at the border of tomograms.
 
     Returns:
         The PyTorch dataloader.
