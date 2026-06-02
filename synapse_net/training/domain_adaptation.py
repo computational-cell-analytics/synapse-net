@@ -18,6 +18,14 @@ from .supervised_training import (
 from ..inference.inference import get_model_path, compute_scale_from_voxel_size, get_available_models
 from ..inference.util import _Scaler
 
+# configure weak augmentations
+from torch_em.transform.invertible_augmentations import DEFAULT_WEAK_AUGMENTATIONS
+
+# TODO - test settings - fixed kernel size for `RandomGaussianBlur`, fixed std for `RandomGaussianBlur`
+DEFAULT_WEAK_AUGMENTATIONS["intensity"] = {
+    "RandomGaussianBlur": {"kernel_size": (19, 19), "sigma": (0.1, 3.0)},
+    "RandomGaussianNoise": {"mean": (0.0), "std": (0.1)},
+}    
 
 def mean_teacher_adaptation(
     name: str,
@@ -118,8 +126,11 @@ def mean_teacher_adaptation(
 
     # self training functionality
     pseudo_labeler = self_training.DefaultPseudoLabeler(confidence_threshold=confidence_threshold)
-    loss = self_training.DefaultSelfTrainingLoss()
-    loss_and_metric = self_training.DefaultSelfTrainingLossAndMetric()
+    loss = self_training.SelfTrainingLossWithInvertibleAugmentations()
+    loss_and_metric = self_training.SelfTrainingLossAndMetricWithInvertibleAugmentations()
+
+    ndim = 2 if is_2d else 3
+    augmenters = torch_em.transform.invertible_augmentations.MeanTeacherAugmenters(ndim=ndim)
 
     unsupervised_train_loader = get_unsupervised_loader(
         data_paths=unsupervised_train_paths,
@@ -166,7 +177,7 @@ def mean_teacher_adaptation(
         return
 
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-    trainer = self_training.MeanTeacherTrainer(
+    trainer = self_training.MeanTeacherTrainerWithInvertibleAugmentations(
         name=name,
         model=model,
         optimizer=optimizer,
@@ -187,6 +198,7 @@ def mean_teacher_adaptation(
         device=device,
         reinit_teacher=reinit_teacher,
         save_root=save_root,
+        augmenter=augmenters,
     )
     trainer.fit(n_iterations)
 

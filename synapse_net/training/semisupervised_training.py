@@ -78,8 +78,8 @@ def get_unsupervised_loader(
 
     _, ndim = _determine_ndim(patch_shape)
     raw_transform = torch_em.transform.get_raw_transform()
-    transform = torch_em.transform.get_augmentations(ndim=ndim)
-    augmentations = (weak_augmentations(), weak_augmentations())
+    #transform = torch_em.transform.get_augmentations(ndim=ndim)
+    #augmentations = (weak_augmentations(), weak_augmentations())
 
     if n_samples is None:
         n_samples_per_ds = None
@@ -92,12 +92,12 @@ def get_unsupervised_loader(
             raw_key=raw_key,
             patch_shape=patch_shape,
             raw_transform=raw_transform,
-            transform=transform,
+            transform=None,
             roi=roi,
             n_samples=n_samples_per_ds,
             sampler=sampler,
             ndim=ndim,
-            augmentations=augmentations,
+            augmentations=None,
             sample_mask_path=sample_mask_paths[i] if sample_mask_paths is not None else None,
             sample_mask_key=sample_mask_key,
             bg_mask_path=bg_mask_paths[i] if bg_mask_paths is not None else None,
