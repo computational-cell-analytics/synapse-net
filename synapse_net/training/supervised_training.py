@@ -6,6 +6,7 @@ import torch
 import torch_em
 from sklearn.model_selection import train_test_split
 from torch_em.model import AnisotropicUNet, UNet2d
+from torch_em.transform.raw import get_raw_transform, normalize_percentile
 
 from synapse_net.inference.inference import get_model_path, get_available_models
 
@@ -101,6 +102,7 @@ def get_supervised_loader(
     ignore_label: Optional[int] = None,
     label_transform: Optional[callable] = None,
     label_paths: Optional[Tuple[str]] = None,
+    percentile_norm: bool = False,
     **loader_kwargs,
 ) -> torch.utils.data.DataLoader:
     """Get a dataloader for supervised segmentation training.
@@ -168,11 +170,13 @@ def get_supervised_loader(
     elif len(label_paths) != len(data_paths):
         raise ValueError(f"Data paths and label paths don't match: {len(data_paths)} != {len(label_paths)}")
 
+    raw_transform = get_raw_transform(normalizer=normalize_percentile) if percentile_norm else None
     loader = torch_em.default_segmentation_loader(
         data_paths, raw_key,
         label_paths, label_key, sampler=sampler,
         batch_size=batch_size, patch_shape=patch_shape, ndim=ndim,
         is_seg_dataset=True, label_transform=label_transform, transform=transform,
+        raw_transform=raw_transform,
         num_workers=num_workers, shuffle=shuffle, n_samples=n_samples,
         label_dtype=label_dtype, rois=rois, **loader_kwargs,
     )
@@ -205,6 +209,8 @@ def supervised_training(
     out_channels: int = 2,
     mask_channel: bool = False,
     checkpoint_path: Optional[str] = None,
+    save_every_kth_epoch: Optional[int] = None,
+    percentile_norm: bool = False,
     **loader_kwargs,
 ):
     """Run supervised segmentation training.
@@ -249,16 +255,20 @@ def supervised_training(
         mask_channel: Whether the last channels in the labels should be used for masking the loss.
             This can be used to implement more complex masking operations and is not compatible with `ignore_label`.
         checkpoint_path: Path to the directory where 'best.pt' resides; continue training this model.
+        save_every_kth_epoch: Save checkpoints after every kth epoch in a separate file.
+            The corresponding checkpoints will be saved with the naming scheme 'epoch-{epoch}.pt'.
         loader_kwargs: Additional keyword arguments for the dataloader.
     """
     train_loader = get_supervised_loader(train_paths, raw_key, label_key, patch_shape, batch_size,
                                          n_samples=n_samples_train, rois=train_rois, sampler=sampler,
                                          ignore_label=ignore_label, label_transform=label_transform,
-                                         label_paths=train_label_paths, **loader_kwargs)
+                                         label_paths=train_label_paths, percentile_norm=percentile_norm,
+                                         **loader_kwargs)
     val_loader = get_supervised_loader(val_paths, raw_key, label_key, patch_shape, batch_size,
                                        n_samples=n_samples_val, rois=val_rois, sampler=sampler,
                                        ignore_label=ignore_label, label_transform=label_transform,
-                                       label_paths=val_label_paths, **loader_kwargs)
+                                       label_paths=val_label_paths, percentile_norm=percentile_norm,
+                                       **loader_kwargs)
 
     if check:
         from torch_em.util.debug import check_loader
@@ -317,7 +327,7 @@ def supervised_training(
         loss=loss,
         metric=metric,
     )
-    trainer.fit(n_iterations)
+    trainer.fit(n_iterations, save_every_kth_epoch=save_every_kth_epoch)
 
 
 def _derive_key_from_files(files, key):
