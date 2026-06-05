@@ -4,13 +4,13 @@ from typing import List, Optional
 import h5py
 import pandas as pd
 import numpy as np
-import vigra
 
 from elf.evaluation.matching import _compute_scores, _compute_tps
 from elf.evaluation import dice_score
 from elf.segmentation.workflows import simple_multicut_workflow
 from scipy.ndimage import binary_dilation, binary_closing, distance_transform_edt, binary_opening
 from skimage.measure import label, regionprops, regionprops_table
+from skimage.morphology import local_maxima
 from skimage.segmentation import relabel_sequential, watershed
 from tqdm import tqdm
 
@@ -143,8 +143,7 @@ def _get_presynaptic_mask(boundary_map, vesicles):
 
     def _compute_mask_2d(z):
         distances = distance_transform_edt(boundary_map[z] < 0.25).astype("float32")
-        seeds = vigra.analysis.localMaxima(distances, marker=np.nan, allowAtBorder=True, allowPlateaus=True)
-        seeds = label(np.isnan(seeds))
+        seeds = label(local_maxima(distances, allow_borders=True))
         overseg = watershed(boundary_map[z], markers=seeds)
         seg = simple_multicut_workflow(
             boundary_map[z], use_2dws=False, watershed=overseg, n_threads=1, beta=0.6

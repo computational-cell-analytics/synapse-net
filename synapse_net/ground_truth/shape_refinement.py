@@ -5,6 +5,7 @@ from typing import List, Dict, Optional
 
 import numpy as np
 
+import bioimage_cpp as bic
 from scipy.ndimage import binary_erosion, binary_dilation
 from skimage import img_as_ubyte
 from skimage.filters import gaussian, rank, sato, sobel
@@ -12,11 +13,6 @@ from skimage.measure import regionprops
 from skimage.morphology import disk
 from skimage.segmentation import watershed
 from tqdm import tqdm
-
-try:
-    import vigra
-except ImportError:
-    vigra = None
 
 FILTERS = ("sobel", "laplace", "ggm", "structure-tensor", "sato")
 
@@ -58,8 +54,6 @@ def edge_filter(
     """
     if method not in FILTERS:
         raise ValueError(f"Invalid edge filter method: {method}. Expect one of {FILTERS}.")
-    if method in FILTERS[1:] and vigra is None:
-        raise ValueError(f"Filter {method} requires vigra.")
 
     if per_slice and data.ndim == 3:
         n_threads = mp.cpu_count() if n_threads is None else n_threads
@@ -73,13 +67,13 @@ def edge_filter(
         edge_map = gaussian(data, sigma=sigma)
         edge_map = sobel(edge_map)
     elif method == "laplace":
-        edge_map = vigra.filters.laplacianOfGaussian(data.astype("float32"), sigma)
+        edge_map = bic.filters.laplacian_of_gaussian(data.astype("float32"), sigma)
     elif method == "ggm":
-        edge_map = vigra.filters.gaussianGradientMagnitude(data.astype("float32"), sigma)
+        edge_map = bic.filters.gaussian_gradient_magnitude(data.astype("float32"), sigma)
     elif method == "structure-tensor":
         inner_scale, outer_scale = sigma, sigma * 0.5
-        edge_map = vigra.filters.structureTensorEigenvalues(
-            data.astype("float32"), innerScale=inner_scale, outerScale=outer_scale
+        edge_map = bic.filters.structure_tensor_eigenvalues(
+            data.astype("float32"), inner_scale, outer_scale
         )[..., 1]
     elif method == "sato":
         edge_map = _sato_filter(data, sigma)

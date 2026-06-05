@@ -14,13 +14,13 @@ from ..imod import export_point_annotations, export_segmentation, get_label_name
 
 def _check_volume(raw, vesicles, labels, title=None, **extra_segmentations):
     import napari
-    from nifty.tools import takeDict
+    from bioimage_cpp.utils import take_dict
 
     if labels is None:
         label_vol = None
     else:
         labels[0] = 0
-        label_vol = takeDict(labels, vesicles)
+        label_vol = take_dict(labels, vesicles)
 
     v = napari.Viewer()
     if raw is not None:

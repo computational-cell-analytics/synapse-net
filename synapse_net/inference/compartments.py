@@ -2,16 +2,15 @@ import time
 from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
-import vigra
 import torch
 
+import bioimage_cpp as bic
 import elf.segmentation as eseg
-import nifty
 from elf.tracking.tracking_utils import compute_edges_from_overlap
 from scipy.ndimage import distance_transform_edt, binary_closing
 from skimage.measure import label, regionprops
 from skimage.segmentation import watershed
-from skimage.morphology import remove_small_holes
+from skimage.morphology import remove_small_holes, local_maxima
 
 from synapse_net.inference.util import get_prediction, _Scaler, _postprocess_seg_3d
 
@@ -41,8 +40,7 @@ def _segment_compartments_2d(
     seeds[np.isin(seeds, remove_ids)] = 0
 
     # Compute the small seeds = local maxima of the in-plane distance map
-    small_seeds = vigra.analysis.localMaxima(distances_z, marker=np.nan, allowAtBorder=True, allowPlateaus=True)
-    small_seeds = label(np.isnan(small_seeds))
+    small_seeds = label(local_maxima(distances_z, allow_borders=True))
 
     # We only keep small seeds that don't intersect with a large seed.
     props = regionprops(small_seeds, seeds)
@@ -87,8 +85,8 @@ def _merge_segmentation_3d(seg_2d, beta=0.5, min_z_extent=10):
     overlaps = np.array([edge["score"] for edge in edges])
 
     n_nodes = int(seg_2d.max() + 1)
-    graph = nifty.graph.undirectedGraph(n_nodes)
-    graph.insertEdges(uv_ids)
+    graph = bic.graph.UndirectedGraph(n_nodes)
+    graph.insert_edges(uv_ids)
 
     costs = eseg.multicut.compute_edge_costs(1.0 - overlaps)
     # set background weights to be maximally repulsive
@@ -96,7 +94,7 @@ def _merge_segmentation_3d(seg_2d, beta=0.5, min_z_extent=10):
     costs[bg_edges] = -8.0
 
     node_labels = eseg.multicut.multicut_decomposition(graph, costs, beta=beta)
-    segmentation = nifty.tools.take(node_labels, seg_2d)
+    segmentation = node_labels[seg_2d]
 
     if min_z_extent is not None and min_z_extent > 0:
         props = regionprops(segmentation)

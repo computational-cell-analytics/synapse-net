@@ -6,7 +6,7 @@ from glob import glob
 import imageio.v3 as imageio
 import mrcfile
 import numpy as np
-import nifty.tools as nt
+from bioimage_cpp.utils import take_dict
 from elf.io import open_file
 from skimage.transform import rescale
 from tqdm import tqdm
@@ -60,7 +60,7 @@ def export_vesicles(input_path, data_path, export_path):
     labels, label_names = process_labels(labels, label_names)
     imageio.imwrite(export_path, segmentation, compression="zlib")
 
-    segmentation = nt.takeDict(labels, segmentation)
+    segmentation = take_dict(labels, segmentation)
     export_pool_path = os.path.join(os.path.split(export_path)[0], "manual_pools.tif")
     imageio.imwrite(export_pool_path, segmentation, compression="zlib")
 
