@@ -35,37 +35,24 @@ def _struct_elem(radius: int, ndim: int) -> np.ndarray:
 def approximate_membrane(
     mito_segmentation: np.ndarray,
     voxel_size: Union[float, Dict[str, float]],
-    outer_membrane_thickness_nm: float = 8.0,
-    inner_membrane_thickness_nm: float = 8.0,
-    ims_thickness_nm: float = 7.0,
-) -> Tuple[np.ndarray, np.ndarray]:
-    """Approximate OM and IMM from mito instance labels.
+    membrane_thickness_nm: float = 8.0,
+) -> np.ndarray:
+    """Approximate the mitochondrial membrane as an inner shell of the segmentation.
+
+    The mask is entirely within the mito segmentation — no dilation outside.
 
     Args:
         mito_segmentation: Instance label array (background = 0).
         voxel_size: Voxel size in nm — scalar or dict with "z"/"y"/"x" keys.
-        outer_membrane_thickness_nm: OM surface dilation thickness in nm.
-        inner_membrane_thickness_nm: IMM surface dilation thickness in nm.
-        ims_thickness_nm: Intermembrane space thickness in nm used to erode the
-            mito binary before detecting the IMM boundary.
+        membrane_thickness_nm: Thickness of the membrane shell in nm.
 
     Returns:
-        om_mask: Binary mask of the outer mitochondrial membrane.
-        imm_mask: Binary mask of the inner mitochondrial membrane (clipped to mito interior).
+        membrane_mask: Binary mask of the mitochondrial membrane (outermost shell).
     """
     ndim = mito_segmentation.ndim
     mito_binary = mito_segmentation > 0
-
-    om_radius = _voxel_radius(outer_membrane_thickness_nm, voxel_size, ndim)
-    om_mask = binary_dilation(find_boundaries(mito_binary, mode="thick"), structure=_struct_elem(om_radius, ndim))
-
-    ims_radius = _voxel_radius(ims_thickness_nm, voxel_size, ndim)
-    eroded = binary_erosion(mito_binary, structure=_struct_elem(ims_radius, ndim))
-    imm_radius = _voxel_radius(inner_membrane_thickness_nm, voxel_size, ndim)
-    imm_mask = binary_dilation(find_boundaries(eroded, mode="thick"), structure=_struct_elem(imm_radius, ndim))
-    imm_mask &= mito_binary
-
-    return om_mask.astype(bool), imm_mask.astype(bool)
+    radius = _voxel_radius(membrane_thickness_nm, voxel_size, ndim)
+    return (mito_binary & ~binary_erosion(mito_binary, structure=_struct_elem(radius, ndim))).astype(bool)
 
 
 # ---------------------------------------------------------------------------
@@ -179,16 +166,16 @@ def compute_crista_density(
 
 def detect_contact_sites(
     crista_mask: np.ndarray,
-    imm_mask: np.ndarray,
+    membrane_mask: np.ndarray,
     voxel_size: Union[float, Dict[str, float]],
 ) -> Tuple[np.ndarray, Dict[str, float]]:
-    """Detect crista-IMM contact sites by voxel adjacency (26-connectivity in 3D).
+    """Detect crista-membrane contact sites by voxel adjacency (26-connectivity in 3D).
 
-    Contact = crista voxels that are face-, edge-, or corner-adjacent to any IMM voxel.
+    Contact = crista voxels that are face-, edge-, or corner-adjacent to any membrane voxel.
 
     Args:
         crista_mask: Binary crista segmentation.
-        imm_mask: Binary inner mitochondrial membrane mask.
+        membrane_mask: Binary mitochondrial membrane mask.
         voxel_size: Voxel size in nm — scalar or dict with "z"/"y"/"x" keys.
 
     Returns:
@@ -199,7 +186,7 @@ def detect_contact_sites(
     sampling = _to_sampling(voxel_size, ndim)
     voxel_vol = float(np.prod(sampling))
 
-    dilated_imm = binary_dilation(imm_mask.astype(bool), structure=_struct_elem(1, ndim))
+    dilated_imm = binary_dilation(membrane_mask.astype(bool), structure=_struct_elem(1, ndim))
     contact_mask = crista_mask.astype(bool) & dilated_imm
 
     _, n_regions = ndimage_label(contact_mask)
@@ -261,11 +248,8 @@ def compute_mito_crista_statistics(
     crista_mask: np.ndarray,
     mito_segmentation: np.ndarray,
     voxel_size: Union[float, Dict[str, float]],
-    om_mask: Optional[np.ndarray] = None,
-    imm_mask: Optional[np.ndarray] = None,
-    ims_thickness_nm: float = 7.0,
-    outer_membrane_thickness_nm: float = 8.0,
-    inner_membrane_thickness_nm: float = 8.0,
+    membrane_mask: Optional[np.ndarray] = None,
+    membrane_thickness_nm: float = 8.0,
 ) -> pd.DataFrame:
     """Compute all crista metrics organised by mitochondrial instance.
 
@@ -273,25 +257,17 @@ def compute_mito_crista_statistics(
         crista_mask: Binary crista segmentation (global volume).
         mito_segmentation: Instance label array (background = 0).
         voxel_size: Voxel size in nm — scalar or dict with "z"/"y"/"x" keys.
-        om_mask: Precomputed OM mask; recomputed if None.
-        imm_mask: Precomputed IMM mask; recomputed if None.
-        ims_thickness_nm: Intermembrane space thickness for IMM approximation.
-        outer_membrane_thickness_nm: OM dilation thickness.
-        inner_membrane_thickness_nm: IMM dilation thickness.
+        membrane_mask: Precomputed membrane mask; recomputed if None.
+        membrane_thickness_nm: Membrane shell thickness used if membrane_mask is None.
 
     Returns:
         DataFrame with one row per mito instance:
         label | mito_volume_nm3 | crista_volume_nm3 | crista_fraction |
         contact_voxel_count | contact_region_count | contact_volume_nm3 |
-        avg_crista_to_imm_nm | anisotropy_mean | total_surface_area_nm2 | avg_thickness_nm
+        avg_crista_to_membrane_nm | anisotropy_mean | total_surface_area_nm2 | avg_thickness_nm
     """
-    if om_mask is None or imm_mask is None:
-        om_mask, imm_mask = approximate_membrane(
-            mito_segmentation, voxel_size,
-            outer_membrane_thickness_nm=outer_membrane_thickness_nm,
-            inner_membrane_thickness_nm=inner_membrane_thickness_nm,
-            ims_thickness_nm=ims_thickness_nm,
-        )
+    if membrane_mask is None:
+        membrane_mask = approximate_membrane(mito_segmentation, voxel_size, membrane_thickness_nm)
 
     ndim = mito_segmentation.ndim
     sampling = _to_sampling(voxel_size, ndim)
@@ -306,17 +282,17 @@ def compute_mito_crista_statistics(
 
         mito_local = mito_segmentation[slices] == mito_id
         crista_local = crista_binary[slices] & mito_local
-        imm_local = imm_mask[slices] & mito_local
+        membrane_local = membrane_mask[slices] & mito_local
 
         mito_vol = float(mito_local.sum()) * voxel_vol
         crista_vol = float(crista_local.sum()) * voxel_vol
 
         has_crista = crista_local.any()
-        has_imm = imm_local.any()
+        has_membrane = membrane_local.any()
 
-        if has_crista and has_imm:
-            _, contact_summary = detect_contact_sites(crista_local, imm_local, voxel_size)
-            _, proximity = compute_crista_proximity(crista_local, imm_local, voxel_size)
+        if has_crista and has_membrane:
+            _, contact_summary = detect_contact_sites(crista_local, membrane_local, voxel_size)
+            _, proximity = compute_crista_proximity(crista_local, membrane_local, voxel_size)
         else:
             contact_summary = {"contact_voxel_count": 0, "contact_region_count": 0, "contact_volume_nm3": 0.0}
             proximity = {"median_nm": np.nan}
@@ -337,7 +313,7 @@ def compute_mito_crista_statistics(
             "contact_voxel_count": contact_summary["contact_voxel_count"],
             "contact_region_count": contact_summary["contact_region_count"],
             "contact_volume_nm3": contact_summary["contact_volume_nm3"],
-            "avg_crista_to_imm_nm": proximity["median_nm"],
+            "avg_crista_to_membrane_nm": proximity["median_nm"],
             "anisotropy_mean": anisotropy_mean,
             "total_surface_area_nm2": morph.get("total_surface_area_nm2", np.nan),
             "avg_thickness_nm": morph.get("avg_thickness_nm", np.nan),

@@ -38,26 +38,32 @@ class CristaeAnalysisWidget(BaseWidget):
         setting_values = QWidget()
         setting_values.setLayout(QVBoxLayout())
 
-        self.save_path, layout = self._add_path_param(name="save_path", select_type="file", value="")
+        self.save_path, layout = self._add_path_param(
+            name="save_path", select_type="file", value="",
+            tooltip="Path to save the analysis results CSV file. An empty path will skip saving.",
+        )
         setting_values.layout().addLayout(layout)
 
         self.voxel_size_param, layout = self._add_float_param(
             "voxel_size", 0.0, min_val=0.0, max_val=100.0,
             title="Voxel Size (nm, 0 = auto)", step=0.1,
-        )
-        setting_values.layout().addLayout(layout)
-
-        self.ims_thickness_param, layout = self._add_float_param(
-            "ims_thickness", 7.0, min_val=1.0, max_val=50.0,
-            title="IMS Thickness (nm)", decimals=1, step=0.5,
+            tooltip="Voxel size of the input volume in nanometers. Set to 0 (default) to auto-detect from layer metadata.",
         )
         setting_values.layout().addLayout(layout)
 
         self.mm_thickness_param, layout = self._add_float_param(
             "mm_thickness", 8.0, min_val=1.0, max_val=30.0,
             title="Membrane Thickness (nm)", decimals=1, step=0.5,
+            tooltip="Thickness of the mitochondrial membrane shell in nanometers.",
         )
         setting_values.layout().addLayout(layout)
+
+        self.show_membranes_param = self._add_boolean_param(
+            "show_membranes", False,
+            title="Show Membrane Mask",
+            tooltip="Add the approximated mitochondrial membrane mask as a layer after running.",
+        )
+        setting_values.layout().addWidget(self.show_membranes_param)
 
         return self._make_collapsible(widget=setting_values, title="Advanced Settings")
 
@@ -76,31 +82,28 @@ class CristaeAnalysisWidget(BaseWidget):
             show_info("Please provide a voxel size (or ensure layer metadata contains voxel_size).")
             return
 
-        ims_thickness = self.ims_thickness_param.value()
         mm_thickness = self.mm_thickness_param.value()
 
-        show_info("INFO: Approximating mitochondrial membranes...")
-        om_mask, imm_mask = approximate_membrane(
-            mito_seg, voxel_size,
-            outer_membrane_thickness_nm=mm_thickness,
-            inner_membrane_thickness_nm=mm_thickness,
-            ims_thickness_nm=ims_thickness,
-        )
+        show_info("INFO: Approximating mitochondrial membrane...")
+        membrane_mask = approximate_membrane(mito_seg, voxel_size, membrane_thickness_nm=mm_thickness)
 
         show_info("INFO: Running cristae analysis per mitochondrion...")
         stats_df = compute_mito_crista_statistics(
             crista_mask, mito_seg, voxel_size,
-            om_mask=om_mask, imm_mask=imm_mask,
+            membrane_mask=membrane_mask,
         )
+
+        if self.show_membranes_param.isChecked():
+            self.viewer.add_labels(membrane_mask.astype(np.uint8), name="Membrane Mask", opacity=0.4)
 
         # Add contact sites as a Points layer.
         contact_coords, contact_summary = detect_contact_sites(
-            crista_mask.astype(bool), imm_mask, voxel_size
+            crista_mask.astype(bool), membrane_mask, voxel_size
         )
         if contact_coords.shape[0] > 0:
             self.viewer.add_points(
                 contact_coords,
-                name="Crista-IMM Contacts",
+                name="Crista-Membrane Contacts",
                 size=3,
                 face_color="orange",
                 blending="additive",
