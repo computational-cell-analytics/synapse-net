@@ -28,6 +28,9 @@ contributions:
     - id: synapse_net.size_filter
       python_name: synapse_net.tools.size_filter_widget:SizeFilterWidget
       title: Size Filter
+    - id: synapse_net.cristae_analysis
+      python_name: synapse_net.tools.cristae_analysis_widget:CristaeAnalysisWidget
+      title: Cristae Analysis
 
     # Commands for sample data.
     - id: synapse_net.sample_data_tem_2d
@@ -64,6 +67,8 @@ contributions:
       display_name: Segmentation Postprocessing
     - command: synapse_net.size_filter
       display_name: Size Filter
+    - command: synapse_net.cristae_analysis
+      display_name: Cristae Analysis
 
   sample_data:
     - command: synapse_net.sample_data_tem_2d
