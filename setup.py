@@ -30,7 +30,7 @@ setup(
     extras_require={
         # Dependencies for the napari plugin GUI. Install with `pip install synapse_net[napari]`.
         "napari": [
-            "napari>=0.5.0,<0.6.0",
+            "napari>=0.5.0,<0.7.0",
             "magicgui",
             "qtpy",
             "superqt",
