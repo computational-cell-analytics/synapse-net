@@ -44,7 +44,7 @@ def edge_filter(
             - "sobel": Edges are found by smoothing the data and then applying a sobel filter.
             - "laplace": Edges are found with a laplacian of gaussian filter.
             - "ggm": Edges are found with a gaussian gradient magnitude filter.
-            - "structure-tensor": Edges are found based on the 2nd eigenvalue of the structure tensor.
+            - "structure-tensor": Edges are found based on the 1st eigenvalue of the structure tensor.
             - "sato": Edges are found with a sato-filter, followed by smoothing and leveling.
         per_slice: Compute the filter per slice instead of for the whole volume.
         n_threads: Number of threads for parallel computation over the slices.
@@ -74,7 +74,7 @@ def edge_filter(
         inner_scale, outer_scale = sigma, sigma * 0.5
         edge_map = bic.filters.structure_tensor_eigenvalues(
             data.astype("float32"), inner_scale, outer_scale
-        )[..., 1]
+        )[..., 0]
     elif method == "sato":
         edge_map = _sato_filter(data, sigma)
 
