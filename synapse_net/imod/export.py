@@ -168,14 +168,14 @@ def draw_spheres(
         radius = int(radius)
         mask = ball(radius)
         full_mask = np.zeros(shape, dtype="bool")
-        full_slice = tuple(
-            slice(max(co - radius, 0), min(co + radius, sh)) for co, sh in zip(coord, shape)
-        )
-        radius_clipped_left = [co - max(co - radius, 0) for co in coord]
-        radius_clipped_right = [min(co + radius, sh) - co for co, sh in zip(coord, shape)]
-        mask_slice = tuple(
-            slice(radius + 1 - rl, radius + 1 + rr) for rl, rr in zip(radius_clipped_left, radius_clipped_right)
-        )
+        full_starts = [max(co - radius, 0) for co in coord]
+        full_ends = [min(co + radius + 1, sh) for co, sh in zip(coord, shape)]
+        if any(s >= e for s, e in zip(full_starts, full_ends)):
+            continue
+        full_slice = tuple(slice(s, e) for s, e in zip(full_starts, full_ends))
+        ball_starts = [radius - (co - fs) for co, fs in zip(coord, full_starts)]
+        ball_ends = [bs + (fe - fs) for bs, fe, fs in zip(ball_starts, full_ends, full_starts)]
+        mask_slice = tuple(slice(s, e) for s, e in zip(ball_starts, ball_ends))
         full_mask[full_slice] = mask[mask_slice]
         labels[full_mask] = label_id
     return labels
