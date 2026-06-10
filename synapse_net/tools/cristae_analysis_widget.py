@@ -58,6 +58,14 @@ class CristaeAnalysisWidget(BaseWidget):
         )
         setting_values.layout().addLayout(layout)
 
+        self.border_gap_param, layout = self._add_float_param(
+            "border_gap", 0.0, min_val=0.0, max_val=100.0,
+            title="Border Gap (nm, 0 = same as membrane)", decimals=1, step=0.5,
+            tooltip="Distance from each volume face within which membrane voxels are suppressed. "
+                    "Set to 0 to use the same value as Membrane Thickness.",
+        )
+        setting_values.layout().addLayout(layout)
+
         self.show_membranes_param = self._add_boolean_param(
             "show_membranes", False,
             title="Show Membrane Mask",
@@ -83,14 +91,22 @@ class CristaeAnalysisWidget(BaseWidget):
             return
 
         mm_thickness = self.mm_thickness_param.value()
+        border_gap_val = self.border_gap_param.value()
+        border_gap = border_gap_val if border_gap_val > 0.0 else None
 
         show_info("INFO: Approximating mitochondrial membrane...")
-        membrane_mask = approximate_membrane(mito_seg, voxel_size, membrane_thickness_nm=mm_thickness)
+        membrane_mask = approximate_membrane(
+            mito_seg, voxel_size,
+            membrane_thickness_nm=mm_thickness,
+            border_gap_nm=border_gap,
+        )
 
         show_info("INFO: Running cristae analysis per mitochondrion...")
         stats_df = compute_mito_crista_statistics(
             crista_mask, mito_seg, voxel_size,
             membrane_mask=membrane_mask,
+            membrane_thickness_nm=mm_thickness,
+            border_gap_nm=border_gap,
         )
 
         if self.show_membranes_param.isChecked():

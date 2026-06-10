@@ -28,6 +28,19 @@ def _struct_elem(radius: int, ndim: int) -> np.ndarray:
     return ball(radius) if ndim == 3 else disk(radius)
 
 
+def _border_zone(shape: tuple, radius: int) -> np.ndarray:
+    """Boolean mask that is True within `radius` voxels of any face of the volume."""
+    mask = np.zeros(shape, dtype=bool)
+    for ax in range(len(shape)):
+        idx_lo = [slice(None)] * len(shape)
+        idx_hi = [slice(None)] * len(shape)
+        idx_lo[ax] = slice(0, radius)
+        idx_hi[ax] = slice(shape[ax] - radius, None)
+        mask[tuple(idx_lo)] = True
+        mask[tuple(idx_hi)] = True
+    return mask
+
+
 # ---------------------------------------------------------------------------
 # Membrane approximation
 # ---------------------------------------------------------------------------
@@ -36,23 +49,33 @@ def approximate_membrane(
     mito_segmentation: np.ndarray,
     voxel_size: Union[float, Dict[str, float]],
     membrane_thickness_nm: float = 8.0,
+    border_gap_nm: Optional[float] = None,
 ) -> np.ndarray:
     """Approximate the mitochondrial membrane as an inner shell of the segmentation.
 
     The mask is entirely within the mito segmentation — no dilation outside.
+    Membrane voxels within border_gap_nm of any volume face are suppressed to avoid
+    treating clipped mito edges as membrane.
 
     Args:
         mito_segmentation: Instance label array (background = 0).
         voxel_size: Voxel size in nm — scalar or dict with "z"/"y"/"x" keys.
         membrane_thickness_nm: Thickness of the membrane shell in nm.
+        border_gap_nm: Distance from each volume face within which membrane voxels are
+            suppressed. Defaults to membrane_thickness_nm when None.
 
     Returns:
-        membrane_mask: Binary mask of the mitochondrial membrane (outermost shell).
+        membrane_mask: Binary mask of the mitochondrial membrane (outermost shell),
+            with border-adjacent voxels zeroed out.
     """
     ndim = mito_segmentation.ndim
     mito_binary = mito_segmentation > 0
-    radius = _voxel_radius(membrane_thickness_nm, voxel_size, ndim)
-    return (mito_binary & ~binary_erosion(mito_binary, structure=_struct_elem(radius, ndim))).astype(bool)
+    membrane_radius = _voxel_radius(membrane_thickness_nm, voxel_size, ndim)
+    membrane_mask = mito_binary & ~binary_erosion(mito_binary, structure=_struct_elem(membrane_radius, ndim), border_value=1)
+    gap_nm = border_gap_nm if border_gap_nm is not None else membrane_thickness_nm
+    gap_radius = _voxel_radius(gap_nm, voxel_size, ndim)
+    membrane_mask &= ~_border_zone(mito_segmentation.shape, gap_radius)
+    return membrane_mask.astype(bool)
 
 
 # ---------------------------------------------------------------------------
@@ -250,6 +273,7 @@ def compute_mito_crista_statistics(
     voxel_size: Union[float, Dict[str, float]],
     membrane_mask: Optional[np.ndarray] = None,
     membrane_thickness_nm: float = 8.0,
+    border_gap_nm: Optional[float] = None,
 ) -> pd.DataFrame:
     """Compute all crista metrics organised by mitochondrial instance.
 
@@ -259,6 +283,8 @@ def compute_mito_crista_statistics(
         voxel_size: Voxel size in nm — scalar or dict with "z"/"y"/"x" keys.
         membrane_mask: Precomputed membrane mask; recomputed if None.
         membrane_thickness_nm: Membrane shell thickness used if membrane_mask is None.
+        border_gap_nm: Border suppression distance passed to approximate_membrane;
+            defaults to membrane_thickness_nm when None.
 
     Returns:
         DataFrame with one row per mito instance:
@@ -267,18 +293,27 @@ def compute_mito_crista_statistics(
         avg_crista_to_membrane_nm | anisotropy_mean | total_surface_area_nm2 | avg_thickness_nm
     """
     if membrane_mask is None:
-        membrane_mask = approximate_membrane(mito_segmentation, voxel_size, membrane_thickness_nm)
+        membrane_mask = approximate_membrane(
+            mito_segmentation, voxel_size, membrane_thickness_nm, border_gap_nm
+        )
 
     ndim = mito_segmentation.ndim
     sampling = _to_sampling(voxel_size, ndim)
     voxel_vol = float(np.prod(sampling))
     crista_binary = crista_mask.astype(bool)
+    vol_shape = mito_segmentation.shape
+    effective_gap_nm = border_gap_nm if border_gap_nm is not None else membrane_thickness_nm
+    border_radius = _voxel_radius(effective_gap_nm, voxel_size, ndim)
 
     rows = []
     for prop in regionprops(mito_segmentation):
         mito_id = prop.label
         bbox = prop.bbox
         slices = tuple(slice(bbox[i], bbox[i + ndim]) for i in range(ndim))
+        touches_border = any(
+            bbox[i] < border_radius or bbox[i + ndim] > vol_shape[i] - border_radius
+            for i in range(ndim)
+        )
 
         mito_local = mito_segmentation[slices] == mito_id
         crista_local = crista_binary[slices] & mito_local
@@ -306,7 +341,8 @@ def compute_mito_crista_statistics(
             morph = {"total_surface_area_nm2": np.nan, "avg_thickness_nm": np.nan}
 
         rows.append({
-            "label": int(mito_id),
+            "mito_label_id": int(mito_id),
+            "mito_touches_border": touches_border,
             "mito_volume_nm3": mito_vol,
             "crista_volume_nm3": crista_vol,
             "crista_fraction": crista_vol / mito_vol if mito_vol > 0 else np.nan,
