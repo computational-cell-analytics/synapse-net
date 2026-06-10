@@ -57,7 +57,7 @@ def get_unsupervised_loader(
         sample_mask_key: The key to the sample mask dataset inside each file.
         bg_mask_paths: The filepaths to the background masks for each tomogram.
         bg_mask_key: The key to the background mask dataset inside each file.
-        sampler: Accept or reject patches based on a condition.
+        sampler: Optional sampler to accept or reject patches for training. 
         exclude_top_and_bottom: Whether to exclude the five top and bottom slices to
             avoid artifacts at the border of tomograms.
 

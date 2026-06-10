@@ -48,7 +48,8 @@ def mean_teacher_adaptation(
     train_mask_paths: Optional[Tuple[str]] = None,
     val_mask_paths: Optional[Tuple[str]] = None,
     sample_mask_key: Optional[str] = None,
-    patch_sampler: Optional[callable] = None,
+    unsupervised_sampler: Optional[callable] = None,
+    supervised_sampler: Optional[callable] = None,
     check: bool = False,
 ) -> None:
     """Run domain adaptation to transfer a network trained on a source domain for a supervised
@@ -94,10 +95,12 @@ def mean_teacher_adaptation(
             based on the patch_shape and size of the volumes used for training.
         n_samples_val: The number of val samples per epoch. By default this will be estimated
             based on the patch_shape and size of the volumes used for validation.
-        train_mask_paths: Sample masks used by the patch sampler to accept or reject patches for training.
-        val_mask_paths: Sample masks used by the patch sampler to accept or reject patches for validation.
+        train_mask_paths: Sample masks used by the unsupervised sampler to accept or reject patches for training.
+        val_mask_paths: Sample masks used by the unsupervised sampler to accept or reject patches for validation.
         sample_mask_key: The key to the sample mask dataset inside each file.
-        patch_sampler: Accept or reject patches based on a condition.
+        unsupervised_sampler: Sampler to accept or reject patches for the unsupervised data stream.
+        supervised_sampler: Sampler to accept or reject patches for the supervised data stream.
+            Pass `False` to disable.
         check: Whether to check the training and validation loaders instead of running training.
     """  # noqa
     assert (supervised_train_paths is None) == (supervised_val_paths is None)
@@ -140,7 +143,7 @@ def mean_teacher_adaptation(
         n_samples=n_samples_train,
         sample_mask_paths=train_mask_paths,
         sample_mask_key=sample_mask_key,
-        sampler=patch_sampler,
+        sampler=unsupervised_sampler,
     )
     unsupervised_val_loader = get_unsupervised_loader(
         data_paths=unsupervised_val_paths,
@@ -150,7 +153,7 @@ def mean_teacher_adaptation(
         n_samples=n_samples_val,
         sample_mask_paths=val_mask_paths,
         sample_mask_key=sample_mask_key,
-        sampler=patch_sampler,
+        sampler=unsupervised_sampler,
     )
 
     if supervised_train_paths is not None:
@@ -158,10 +161,12 @@ def mean_teacher_adaptation(
         supervised_train_loader = get_supervised_loader(
             supervised_train_paths, raw_key_supervised, label_key,
             patch_shape, batch_size, n_samples=n_samples_train,
+            sampler=supervised_sampler,
         )
         supervised_val_loader = get_supervised_loader(
             supervised_val_paths, raw_key_supervised, label_key,
             patch_shape, batch_size, n_samples=n_samples_val,
+            sampler=supervised_sampler,
         )
     else:
         supervised_train_loader = None

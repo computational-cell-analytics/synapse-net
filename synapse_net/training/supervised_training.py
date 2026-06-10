@@ -118,8 +118,8 @@ def get_supervised_loader(
         add_boundary_transform: Whether to add a boundary channel to the training data.
         label_dtype: The datatype of the labels returned by the dataloader.
         rois: Optional region of interests for training.
-        sampler: Optional sampler for selecting blocks for training.
-            By default a minimum instance sampler will be used.
+        sampler: Optional sampler to accept or reject patches for training. 
+            By default a minimum instance sampler will be used, pass `False` to disable.
         ignore_label: Ignore label in the ground-truth. The areas marked by this label will be
             ignored in the loss computation. By default this option is not used.
         label_transform: Label transform that is applied to the segmentation to compute the targets.
@@ -162,6 +162,8 @@ def get_supervised_loader(
 
     if sampler is None:
         sampler = torch_em.data.sampler.MinInstanceSampler(min_num_instances=4)
+    elif sampler is False:
+        sampler = None
 
     if label_paths is None:
         label_paths = data_paths
@@ -205,6 +207,7 @@ def supervised_training(
     out_channels: int = 2,
     mask_channel: bool = False,
     checkpoint_path: Optional[str] = None,
+    save_every_kth_epoch: Optional[int] = None,
     **loader_kwargs,
 ):
     """Run supervised segmentation training.
@@ -233,7 +236,7 @@ def supervised_training(
             If not given, the labels are expected to be part of `val_paths`.
         train_rois: Optional region of interests for training.
         val_rois: Optional region of interests for validation.
-        sampler: Optional sampler for selecting blocks for training.
+        sampler: Optional sampler for selecting patches for training.
             By default a minimum instance sampler will be used.
         n_samples_train: The number of train samples per epoch. By default this will be estimated
             based on the patch_shape and size of the volumes used for training.
@@ -249,6 +252,8 @@ def supervised_training(
         mask_channel: Whether the last channels in the labels should be used for masking the loss.
             This can be used to implement more complex masking operations and is not compatible with `ignore_label`.
         checkpoint_path: Path to the directory where 'best.pt' resides; continue training this model.
+        save_every_kth_epoch: Save checkpoints after every kth epoch in a separate file.
+            The corresponding checkpoints will be saved with the naming scheme 'epoch-{epoch}.pt'.
         loader_kwargs: Additional keyword arguments for the dataloader.
     """
     train_loader = get_supervised_loader(train_paths, raw_key, label_key, patch_shape, batch_size,
@@ -317,7 +322,7 @@ def supervised_training(
         loss=loss,
         metric=metric,
     )
-    trainer.fit(n_iterations)
+    trainer.fit(n_iterations, save_every_kth_epoch=save_every_kth_epoch)
 
 
 def _derive_key_from_files(files, key):
