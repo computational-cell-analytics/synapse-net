@@ -144,18 +144,19 @@ class SegmentationWidget(BaseWidget):
         # Get the model and postprocessing settings.
         model_type = self.model_selector.currentText()
         custom_model_path = self.checkpoint_param.text()
-        if model_type == "- choose -" and custom_model_path is None:
+        if model_type == "- choose -":
             show_info("INFO: Please choose a model.")
             return
 
         device = get_device(self.device_dropdown.currentText())
 
-        # Load the model. Override if user chose custom model
+        # Load the model. Override if user chose custom model.
+        rescale_input = True
         if custom_model_path:
             model = _load_custom_model(custom_model_path, device)
+            rescale_input = False
             if model:
                 show_info(f"INFO: Using custom model from path: {custom_model_path}")
-                model_type = "custom"
             else:
                 show_info(f"ERROR: Failed to load custom model from path: {custom_model_path}")
                 return
@@ -177,14 +178,11 @@ class SegmentationWidget(BaseWidget):
 
         # Determine the scaling based on the voxel size.
         scale = None
-        if voxel_size:
-            if model_type == "custom":
-                show_info("INFO: The image is not rescaled for a custom model.")
-            else:
-                # calculate scale so voxel_size is the same as in training
-                scale = compute_scale_from_voxel_size(voxel_size, model_type)
-                scale_info = list(map(lambda x: np.round(x, 2), scale))
-                show_info(f"INFO: Rescaled the image by {scale_info} to optimize for the selected model.")
+        if voxel_size and rescale_input:
+            # Calculate scale so voxel_size is the same as in training.
+            scale = compute_scale_from_voxel_size(voxel_size, model_type)
+            scale_info = list(map(lambda x: np.round(x, 2), scale))
+            show_info(f"INFO: Rescaled the image by {scale_info} to optimize for the selected model.")
 
         # Some models require an additional segmentation for inference or postprocessing.
         # For these models we read out the 'Extra Segmentation' widget.
@@ -192,7 +190,7 @@ class SegmentationWidget(BaseWidget):
             extra_seg = self._get_layer_selector_data(self.extra_seg_selector_name)
             resolution = tuple(voxel_size[ax] for ax in "zyx")
             kwargs = {"extra_segmentation": extra_seg, "resolution": resolution, "min_membrane_size": 50_000}
-        elif model_type == "cristae" or model_type == "cristae2" or model_type == "cristae3":  # Cristae model expects 2 3D volumes
+        elif model_type.startswith("cristae"):  # Cristae model expects 2 3D volumes
             kwargs = {
                 "extra_segmentation": self._get_layer_selector_data(self.extra_seg_selector_name),
                 "with_channels": True,
