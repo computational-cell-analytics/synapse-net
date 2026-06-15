@@ -57,7 +57,7 @@ def get_unsupervised_loader(
         sample_mask_key: The key to the sample mask dataset inside each file.
         bg_mask_paths: The filepaths to the background masks for each tomogram.
         bg_mask_key: The key to the background mask dataset inside each file.
-        sampler: Accept or reject patches based on a condition.
+        sampler: Optional sampler to accept or reject patches for training. 
         exclude_top_and_bottom: Whether to exclude the five top and bottom slices to
             avoid artifacts at the border of tomograms.
 
@@ -79,7 +79,7 @@ def get_unsupervised_loader(
     _, ndim = _determine_ndim(patch_shape)
     raw_transform = torch_em.transform.get_raw_transform()
     transform = torch_em.transform.get_augmentations(ndim=ndim)
-    augmentations = (weak_augmentations(), weak_augmentations())
+    # augmentations = (weak_augmentations(), weak_augmentations())
 
     if n_samples is None:
         n_samples_per_ds = None
@@ -97,7 +97,7 @@ def get_unsupervised_loader(
             n_samples=n_samples_per_ds,
             sampler=sampler,
             ndim=ndim,
-            augmentations=augmentations,
+            augmentations=None,
             sample_mask_path=sample_mask_paths[i] if sample_mask_paths is not None else None,
             sample_mask_key=sample_mask_key,
             bg_mask_path=bg_mask_paths[i] if bg_mask_paths is not None else None,

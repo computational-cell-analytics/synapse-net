@@ -18,6 +18,14 @@ from .supervised_training import (
 from ..inference.inference import get_model_path, compute_scale_from_voxel_size, get_available_models
 from ..inference.util import _Scaler
 
+# configure weak augmentations
+from torch_em.transform.invertible_augmentations import DEFAULT_WEAK_AUGMENTATIONS
+
+# TODO - test settings - fixed kernel size for `RandomGaussianBlur`, fixed std for `RandomGaussianBlur`
+DEFAULT_WEAK_AUGMENTATIONS["intensity"] = {
+    "RandomGaussianBlur": {"kernel_size": (19, 19), "sigma": (0.1, 3.0)},
+    "RandomGaussianNoise": {"mean": (0.0), "std": (0.1)},
+}    
 
 def mean_teacher_adaptation(
     name: str,
@@ -40,7 +48,8 @@ def mean_teacher_adaptation(
     train_mask_paths: Optional[Tuple[str]] = None,
     val_mask_paths: Optional[Tuple[str]] = None,
     sample_mask_key: Optional[str] = None,
-    patch_sampler: Optional[callable] = None,
+    unsupervised_sampler: Optional[callable] = None,
+    supervised_sampler: Optional[callable] = None,
     check: bool = False,
 ) -> None:
     """Run domain adaptation to transfer a network trained on a source domain for a supervised
@@ -86,10 +95,12 @@ def mean_teacher_adaptation(
             based on the patch_shape and size of the volumes used for training.
         n_samples_val: The number of val samples per epoch. By default this will be estimated
             based on the patch_shape and size of the volumes used for validation.
-        train_mask_paths: Sample masks used by the patch sampler to accept or reject patches for training.
-        val_mask_paths: Sample masks used by the patch sampler to accept or reject patches for validation.
+        train_mask_paths: Sample masks used by the unsupervised sampler to accept or reject patches for training.
+        val_mask_paths: Sample masks used by the unsupervised sampler to accept or reject patches for validation.
         sample_mask_key: The key to the sample mask dataset inside each file.
-        patch_sampler: Accept or reject patches based on a condition.
+        unsupervised_sampler: Sampler to accept or reject patches for the unsupervised data stream.
+        supervised_sampler: Sampler to accept or reject patches for the supervised data stream.
+            Pass `False` to disable.
         check: Whether to check the training and validation loaders instead of running training.
     """  # noqa
     assert (supervised_train_paths is None) == (supervised_val_paths is None)
@@ -118,8 +129,11 @@ def mean_teacher_adaptation(
 
     # self training functionality
     pseudo_labeler = self_training.DefaultPseudoLabeler(confidence_threshold=confidence_threshold)
-    loss = self_training.DefaultSelfTrainingLoss()
-    loss_and_metric = self_training.DefaultSelfTrainingLossAndMetric()
+    loss = self_training.SelfTrainingLossWithInvertibleAugmentations()
+    loss_and_metric = self_training.SelfTrainingLossAndMetricWithInvertibleAugmentations()
+
+    ndim = 2 if is_2d else 3
+    augmenters = torch_em.transform.invertible_augmentations.MeanTeacherAugmenters(ndim=ndim)
 
     unsupervised_train_loader = get_unsupervised_loader(
         data_paths=unsupervised_train_paths,
@@ -129,7 +143,7 @@ def mean_teacher_adaptation(
         n_samples=n_samples_train,
         sample_mask_paths=train_mask_paths,
         sample_mask_key=sample_mask_key,
-        sampler=patch_sampler,
+        sampler=unsupervised_sampler,
     )
     unsupervised_val_loader = get_unsupervised_loader(
         data_paths=unsupervised_val_paths,
@@ -139,7 +153,7 @@ def mean_teacher_adaptation(
         n_samples=n_samples_val,
         sample_mask_paths=val_mask_paths,
         sample_mask_key=sample_mask_key,
-        sampler=patch_sampler,
+        sampler=unsupervised_sampler,
     )
 
     if supervised_train_paths is not None:
@@ -147,10 +161,12 @@ def mean_teacher_adaptation(
         supervised_train_loader = get_supervised_loader(
             supervised_train_paths, raw_key_supervised, label_key,
             patch_shape, batch_size, n_samples=n_samples_train,
+            sampler=supervised_sampler,
         )
         supervised_val_loader = get_supervised_loader(
             supervised_val_paths, raw_key_supervised, label_key,
             patch_shape, batch_size, n_samples=n_samples_val,
+            sampler=supervised_sampler,
         )
     else:
         supervised_train_loader = None
@@ -166,7 +182,7 @@ def mean_teacher_adaptation(
         return
 
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-    trainer = self_training.MeanTeacherTrainer(
+    trainer = self_training.MeanTeacherTrainerWithInvertibleAugmentations(
         name=name,
         model=model,
         optimizer=optimizer,
@@ -187,6 +203,7 @@ def mean_teacher_adaptation(
         device=device,
         reinit_teacher=reinit_teacher,
         save_root=save_root,
+        augmenter=augmenters,
     )
     trainer.fit(n_iterations)
 
