@@ -1,6 +1,6 @@
 import os
 from glob import glob
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
 
 import torch
 import torch_em
@@ -97,7 +97,7 @@ def get_supervised_loader(
     add_boundary_transform: bool = True,
     label_dtype=torch.float32,
     rois: Optional[Tuple[Tuple[slice]]] = None,
-    sampler: Optional[callable] = None,
+    sampler: Optional[Union[callable, bool]] = None,
     ignore_label: Optional[int] = None,
     label_transform: Optional[callable] = None,
     label_paths: Optional[Tuple[str]] = None,
@@ -196,7 +196,7 @@ def supervised_training(
     val_label_paths: Optional[Tuple[str]] = None,
     train_rois: Optional[Tuple[Tuple[slice]]] = None,
     val_rois: Optional[Tuple[Tuple[slice]]] = None,
-    sampler: Optional[callable] = None,
+    sampler: Optional[Union[callable, bool]] = None,
     n_samples_train: Optional[int] = None,
     n_samples_val: Optional[int] = None,
     check: bool = False,
