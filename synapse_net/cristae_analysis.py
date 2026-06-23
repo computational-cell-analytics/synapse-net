@@ -24,6 +24,15 @@ def _voxel_radius(thickness_nm: float, voxel_size: Union[float, Dict[str, float]
     return max(1, int(round(thickness_nm / float(np.mean(_to_sampling(voxel_size, ndim))))))
 
 
+def _voxel_radius_xy(thickness_nm: float, voxel_size: Union[float, Dict[str, float]]) -> int:
+    """Membrane radius in XY pixels — uses only the Y and X voxel sizes."""
+    if isinstance(voxel_size, dict):
+        xy_nm = (voxel_size["y"] + voxel_size["x"]) / 2.0
+    else:
+        xy_nm = float(voxel_size)
+    return max(1, int(round(thickness_nm / xy_nm)))
+
+
 def _struct_elem(radius: int, ndim: int) -> np.ndarray:
     return ball(radius) if ndim == 3 else disk(radius)
 
@@ -53,7 +62,11 @@ def approximate_membrane(
 ) -> np.ndarray:
     """Approximate the mitochondrial membrane as an inner shell of the segmentation.
 
-    The mask is entirely within the mito segmentation — no dilation outside.
+    For 3D inputs the erosion is applied independently per Z-slice using a 2D disk,
+    so a mitochondrion that changes shape rapidly along Z does not cause the membrane
+    shell to bleed into neighbouring slices in XY. For 2D inputs a single erosion is
+    applied to the whole array.
+
     Membrane voxels within border_gap_nm of any volume face are suppressed to avoid
     treating clipped mito edges as membrane.
 
@@ -70,8 +83,18 @@ def approximate_membrane(
     """
     ndim = mito_segmentation.ndim
     mito_binary = mito_segmentation > 0
-    membrane_radius = _voxel_radius(membrane_thickness_nm, voxel_size, ndim)
-    membrane_mask = mito_binary & ~binary_erosion(mito_binary, structure=_struct_elem(membrane_radius, ndim), border_value=1)
+
+    if ndim == 3:
+        membrane_radius = _voxel_radius_xy(membrane_thickness_nm, voxel_size)
+        struct = disk(membrane_radius)
+        membrane_mask = np.zeros_like(mito_binary)
+        for z in range(mito_binary.shape[0]):
+            sl = mito_binary[z]
+            membrane_mask[z] = sl & ~binary_erosion(sl, structure=struct, border_value=1)
+    else:
+        membrane_radius = _voxel_radius(membrane_thickness_nm, voxel_size, ndim)
+        membrane_mask = mito_binary & ~binary_erosion(mito_binary, structure=disk(membrane_radius), border_value=1)
+
     gap_nm = border_gap_nm if border_gap_nm is not None else membrane_thickness_nm
     gap_radius = _voxel_radius(gap_nm, voxel_size, ndim)
     membrane_mask &= ~_border_zone(mito_segmentation.shape, gap_radius)
@@ -97,7 +120,9 @@ def compute_crista_orientation(
     Returns:
         eigenvalues: (..., ndim) sorted ascending.
         eigenvectors: (..., ndim, ndim) — columns are principal directions.
-        anisotropy: (...) — λ_max / (λ_min + ε), measures degree of alignment.
+        anisotropy: (...) — λ_max / (λ_min + ε) per voxel. High values indicate a strongly
+            directional crista (e.g. parallel lamellae); low values indicate isotropic or
+            tubular/disordered morphology.
     """
     ndim = crista_mask.ndim
     sampling = _to_sampling(voxel_size, ndim)
@@ -203,7 +228,7 @@ def detect_contact_sites(
 
     Returns:
         contact_coords: (N, ndim) integer array of contact voxel coordinates.
-        summary: contact_voxel_count, contact_region_count, contact_volume_nm3.
+        summary: contact_voxel_count, crista_junction_count, contact_volume_nm3.
     """
     ndim = crista_mask.ndim
     sampling = _to_sampling(voxel_size, ndim)
@@ -212,12 +237,13 @@ def detect_contact_sites(
     dilated_imm = binary_dilation(membrane_mask.astype(bool), structure=_struct_elem(1, ndim))
     contact_mask = crista_mask.astype(bool) & dilated_imm
 
-    _, n_regions = ndimage_label(contact_mask)
+    connectivity_struct = np.ones(ndim * (3,), dtype=bool)
+    _, n_regions = ndimage_label(contact_mask, structure=connectivity_struct)
     contact_coords = np.argwhere(contact_mask)
 
     return contact_coords, {
         "contact_voxel_count": int(contact_coords.shape[0]),
-        "contact_region_count": int(n_regions),
+        "crista_junction_count": int(n_regions),
         "contact_volume_nm3": float(contact_coords.shape[0]) * voxel_vol,
     }
 
@@ -289,8 +315,8 @@ def compute_mito_crista_statistics(
     Returns:
         DataFrame with one row per mito instance:
         label | mito_volume_nm3 | crista_volume_nm3 | crista_fraction |
-        contact_voxel_count | contact_region_count | contact_volume_nm3 |
-        avg_crista_to_membrane_nm | anisotropy_mean | total_surface_area_nm2 | avg_thickness_nm
+        contact_voxel_count | crista_junction_count | contact_volume_nm3 |
+        avg_crista_to_membrane_nm | crista_orientation_anisotropy | total_surface_area_nm2 | avg_thickness_nm
     """
     if membrane_mask is None:
         membrane_mask = approximate_membrane(
@@ -329,15 +355,15 @@ def compute_mito_crista_statistics(
             _, contact_summary = detect_contact_sites(crista_local, membrane_local, voxel_size)
             _, proximity = compute_crista_proximity(crista_local, membrane_local, voxel_size)
         else:
-            contact_summary = {"contact_voxel_count": 0, "contact_region_count": 0, "contact_volume_nm3": 0.0}
+            contact_summary = {"contact_voxel_count": 0, "crista_junction_count": 0, "contact_volume_nm3": 0.0}
             proximity = {"median_nm": np.nan}
 
         if has_crista:
             _, _, anisotropy = compute_crista_orientation(crista_local, voxel_size)
-            anisotropy_mean = float(np.mean(anisotropy[crista_local]))
+            crista_orientation_anisotropy = float(np.mean(anisotropy[crista_local]))
             morph = compute_crista_morphology(crista_local, voxel_size)
         else:
-            anisotropy_mean = np.nan
+            crista_orientation_anisotropy = np.nan
             morph = {"total_surface_area_nm2": np.nan, "avg_thickness_nm": np.nan}
 
         rows.append({
@@ -347,10 +373,10 @@ def compute_mito_crista_statistics(
             "crista_volume_nm3": crista_vol,
             "crista_fraction": crista_vol / mito_vol if mito_vol > 0 else np.nan,
             "contact_voxel_count": contact_summary["contact_voxel_count"],
-            "contact_region_count": contact_summary["contact_region_count"],
+            "crista_junction_count": contact_summary["crista_junction_count"],
             "contact_volume_nm3": contact_summary["contact_volume_nm3"],
             "avg_crista_to_membrane_nm": proximity["median_nm"],
-            "anisotropy_mean": anisotropy_mean,
+            "crista_orientation_anisotropy": crista_orientation_anisotropy,
             "total_surface_area_nm2": morph.get("total_surface_area_nm2", np.nan),
             "avg_thickness_nm": morph.get("avg_thickness_nm", np.nan),
         })

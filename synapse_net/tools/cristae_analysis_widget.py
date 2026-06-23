@@ -130,8 +130,8 @@ class CristaeAnalysisWidget(BaseWidget):
         self._add_properties_and_table(mito_layer, stats_df, save_path=self.save_path.text())
 
         n_mito = len(stats_df)
-        n_contacts = contact_summary["contact_region_count"]
+        n_contacts = contact_summary["crista_junction_count"]
         show_info(
             f"INFO: Cristae analysis complete — {n_mito} mitochondria, "
-            f"{n_contacts} contact regions detected."
+            f"{n_contacts} crista junction sites detected."
         )
