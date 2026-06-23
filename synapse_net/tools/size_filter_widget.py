@@ -3,7 +3,7 @@ import napari.layers
 import napari.viewer
 
 import numpy as np
-import nifty.tools as nt
+from bioimage_cpp.utils import take_dict
 
 from qtpy.QtWidgets import QHBoxLayout, QVBoxLayout, QPushButton, QSpinBox, QLabel
 from skimage.measure import regionprops, label
@@ -70,7 +70,7 @@ class SizeFilterWidget(BaseWidget):
         if apply_label:
             mapping = {prop.label: int(prop.max_intensity) for prop in props if prop.label not in filter_ids}
             mapping[0] = 0
-            segmentation = nt.takeDict(mapping, segmentation)
+            segmentation = take_dict(mapping, segmentation)
         return segmentation.astype(dtype)
 
     def on_size_filter(self):

@@ -11,6 +11,32 @@ setup(
     author="Constantin Pape; Sarah Muth; Luca Freckmann",
     url="https://github.com/computational-cell-analytics/synapse-net",
     license="MIT",
+    install_requires=[
+        "bioimage-cpp",
+        "python-elf>=0.9.0",
+        "torch_em>=0.9.0",
+        "numpy",
+        "scipy",
+        "scikit-image",
+        "scikit-learn",
+        "h5py",
+        "imageio",
+        "mrcfile",
+        "pandas",
+        "pooch",
+        "tqdm",
+        "trimesh",
+    ],
+    extras_require={
+        # Dependencies for the napari plugin GUI. Install with `pip install synapse_net[napari]`.
+        "napari": [
+            "napari>=0.5.0,<0.7.0",
+            "magicgui",
+            "qtpy",
+            "superqt",
+            "napari-skimage-regionprops",
+        ],
+    },
     entry_points={
         "console_scripts": [
             "synapse_net.run_segmentation = synapse_net.tools.cli:segmentation_cli",

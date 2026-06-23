@@ -4,16 +4,16 @@ name:
     synapse-net
 dependencies:
     - bioimageio.core
+    - bioimage-cpp
     - kornia
     - magicgui
-    - napari >=0.5.0,<0.6.0
-    - nifty >=1.2.3
+    - napari >=0.5.0,<0.7.0
     - pip
     - pyqt
-    - python-elf
+    - python-elf >=0.9.0
     - pytorch
     - tensorboard
-    - torch_em >=0.8.1
+    - torch_em >=0.9.0
     - torchvision
     - trimesh
     - zarr <3

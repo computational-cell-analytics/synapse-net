@@ -20,10 +20,25 @@ Please cite our [bioRxiv preprint](https://www.biorxiv.org/content/10.1101/2024.
 
 SynapseNet was tested on all operating systems (Linux, Mac, Windows).
 SynapseNet requires a GPU or a Macbook with M chipset for the segmentation of 3D volumes.
+It can be installed via [conda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html)
+(or [mamba](https://mamba.readthedocs.io/en/latest/installation/mamba-installation.html)) and `pip`.
 
-You need a [conda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html) or [mamba](https://mamba.readthedocs.io/en/latest/installation/mamba-installation.html) installation. Follow the instruction at the respective links if you have installed neither. We assume you have `conda` for the rest of the instructions. After installing it, you can use the `conda` command.
+To install in an existing Python environment follow these steps:
+- First, download the SynapseNet repository via
+```bash
+git clone https://github.com/computational-cell-analytics/synapse-net
+```
+- Then, enter the `synapse-net` folder:
+```bash
+cd synapse-net
+```
+- Then, install the `synapse-net` via pip:
+```bash
+pip install -e .
+```
 
-To install it you should follow these steps:
+
+To install it in a new conda environment follow these steps:
 - First, download the SynapseNet repository via
 ```bash
 git clone https://github.com/computational-cell-analytics/synapse-net

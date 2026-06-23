@@ -2,11 +2,11 @@ import os
 import warnings
 from pathlib import Path
 
+import bioimage_cpp as bic
 import imageio.v3 as imageio
 import mrcfile
 import numpy as np
 import pandas
-import vigra
 
 from synapse_net.file_utils import get_data_path
 from synapse_net.distance_measurements import (
@@ -302,8 +302,8 @@ def analyze_distances(
 def _relabel_vesicles(path):
     print("Relabel vesicles at", path)
     seg = _load_segmentation(path, None)
-    seg = vigra.analysis.labelVolumeWithBackground(seg.astype("uint32"))
-    seg, _, _ = vigra.analysis.relabelConsecutive(seg, start_label=1, keep_zeros=True)
+    seg = bic.segmentation.label(seg.astype("uint32"), connectivity=1)
+    seg, _, _ = bic.segmentation.relabel_sequential(seg, offset=1)
     imageio.imwrite(path, seg, compression="zlib")
 
 
