@@ -16,6 +16,7 @@ def segment_ribbon_synapse_structures(
     threshold: Optional[Union[float, Dict[str, float]]] = None,
     scale: Optional[Sequence[float]] = None,
     mask: Optional[np.ndarray] = None,
+    batch_size: int = 1,
 ) -> np.ndarray:
     """Segment ribbon synapse structures.
 
@@ -30,6 +31,8 @@ def segment_ribbon_synapse_structures(
         threshold: The threshold for binarizing predictions.
         scale: The scale factor to use for rescaling the input volume before prediction.
         mask: An optional mask that is used to restrict the segmentation.
+        batch_size: The number of blocks to stack into a single forward pass during prediction.
+            Larger values can increase GPU throughput at the cost of higher memory usage.
 
     Returns:
         The segmentation mask as a numpy array, or a tuple containing the segmentation mask
@@ -44,7 +47,8 @@ def segment_ribbon_synapse_structures(
     if mask is not None:
         mask = scaler.scale_input(mask, is_segmentation=True)
     predictions = get_prediction(
-        input_volume, model_path=model_path, model=model, tiling=tiling, mask=mask, verbose=verbose
+        input_volume, model_path=model_path, model=model, tiling=tiling, mask=mask, verbose=verbose,
+        batch_size=batch_size,
     )
     assert len(structure_names) == predictions.shape[0]
 

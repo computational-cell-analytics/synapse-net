@@ -25,7 +25,7 @@ from skimage.morphology import remove_small_holes
 from skimage.transform import rescale, resize
 from torch_em.model.unet import Decoder
 from torch_em.model.unetr import UNETRBase
-from torch_em.util.prediction import predict_with_halo
+from torch_em.util.prediction import predict_with_halo_pipelined
 from tqdm import tqdm
 
 
@@ -138,6 +138,7 @@ def get_prediction(
     devices: Optional[List[str]] = None,
     preprocess: Optional[callable] = None,
     dtype: torch.dtype = torch.float32,
+    batch_size: int = 1,
 ) -> ArrayLike:
     """Run prediction on a given volume.
 
@@ -164,6 +165,8 @@ def get_prediction(
             standardization is used.
         dtype: The dtype for running the model. Pass `torch.bfloat16` to predict with bf16 autocast,
             which is much faster on GPUs with bf16 support. By default, the model runs in float32.
+        batch_size: The number of blocks to stack into a single forward pass.
+            Larger values can increase GPU throughput at the cost of higher memory usage.
 
     Returns:
         The predicted volume.
@@ -218,6 +221,7 @@ def get_prediction(
         prediction = get_prediction_torch_em(
             input_volume, updated_tiling, model_path, model, verbose, with_channels,
             mask=mask, prediction=prediction, devices=devices, preprocess=preprocess, dtype=dtype,
+            batch_size=batch_size,
         )
 
     return prediction
@@ -259,6 +263,7 @@ def get_prediction_torch_em(
     devices: Optional[List[str]] = None,
     preprocess: Optional[callable] = None,
     dtype: torch.dtype = torch.float32,
+    batch_size: int = 1,
 ) -> np.ndarray:
     """Run prediction using torch-em on a given volume.
 
@@ -280,6 +285,8 @@ def get_prediction_torch_em(
             Applied to the whole volume if the input is np.ndarray, otherwise applied per block.
         dtype: The dtype for running the model. Pass `torch.bfloat16` to predict with bf16 autocast,
             which is much faster on GPUs with bf16 support. By default, the model runs in float32.
+        batch_size: The number of blocks to stack into a single forward pass.
+            Larger values can increase GPU throughput at the cost of higher memory usage.
 
     Returns:
         The predicted volume.
@@ -326,11 +333,12 @@ def get_prediction_torch_em(
 
         prediction_function = None if dtype == torch.float32 else predict_with_autocast
 
-        prediction = predict_with_halo(
+        prediction = predict_with_halo_pipelined(
             input_volume, model, gpu_ids=devices,
             block_shape=block_shape, halo=halo,
             preprocess=preprocess, with_channels=with_channels, mask=mask,
             output=prediction, prediction_function=prediction_function,
+            batch_size=batch_size,
         )
     if verbose:
         print("Prediction time in", time.time() - t0, "s")
