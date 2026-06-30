@@ -76,6 +76,7 @@ def segment_active_zone(
     scale: Optional[List[float]] = None,
     mask: Optional[np.ndarray] = None,
     compartment: Optional[np.ndarray] = None,
+    batch_size: int = 1,
 ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
     """Segment active zones in an input volume.
 
@@ -89,6 +90,8 @@ def segment_active_zone(
         mask: An optional mask that is used to restrict the segmentation.
         compartment: Pass a compartment segmentation, to intersect the boundaries of the
             compartments with the active zone prediction.
+        batch_size: The number of blocks to stack into a single forward pass during prediction.
+            Larger values can increase GPU throughput at the cost of higher memory usage.
 
     Returns:
         The foreground mask as a numpy array.
@@ -102,7 +105,10 @@ def segment_active_zone(
     # Rescale the mask if it was given and run prediction.
     if mask is not None:
         mask = scaler.scale_input(mask, is_segmentation=True)
-    pred = get_prediction(input_volume, model_path=model_path, model=model, tiling=tiling, mask=mask, verbose=verbose)
+    pred = get_prediction(
+        input_volume, model_path=model_path, model=model, tiling=tiling, mask=mask, verbose=verbose,
+        batch_size=batch_size,
+    )
 
     # Run segmentation and rescale the result if necessary.
     foreground = pred[0]
