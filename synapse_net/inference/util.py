@@ -23,7 +23,7 @@ from scipy.ndimage import binary_closing
 from skimage.measure import regionprops
 from skimage.morphology import remove_small_holes
 from skimage.transform import rescale, resize
-from torch_em.util.prediction import predict_with_halo
+from torch_em.util.prediction import predict_with_halo_pipelined
 from tqdm import tqdm
 
 
@@ -127,6 +127,7 @@ def get_prediction(
     prediction: Optional[ArrayLike] = None,
     devices: Optional[List[str]] = None,
     preprocess: Optional[callable] = None,
+    batch_size: int = 1,
 ) -> ArrayLike:
     """Run prediction on a given volume.
 
@@ -147,6 +148,8 @@ def get_prediction(
             If not given, the prediction will be computed in moemory.
         devices: The devices for running prediction. If not given will use the GPU
             if available, otherwise the CPU.
+        batch_size: The number of blocks to stack into a single forward pass.
+            Larger values can increase GPU throughput at the cost of higher memory usage.
 
     Returns:
         The predicted volume.
@@ -194,6 +197,7 @@ def get_prediction(
         prediction = get_prediction_torch_em(
             input_volume, updated_tiling, model_path, model, verbose, with_channels,
             mask=mask, prediction=prediction, devices=devices, preprocess=preprocess,
+            batch_size=batch_size,
         )
 
     return prediction
@@ -210,6 +214,7 @@ def get_prediction_torch_em(
     prediction: Optional[ArrayLike] = None,
     devices: Optional[List[str]] = None,
     preprocess: Optional[callable] = None,
+    batch_size: int = 1,
 ) -> np.ndarray:
     """Run prediction using torch-em on a given volume.
 
@@ -226,6 +231,8 @@ def get_prediction_torch_em(
             If not given, the prediction will be computed in moemory.
         devices: The devices for running prediction. If not given will use the GPU
             if available, otherwise the CPU.
+        batch_size: The number of blocks to stack into a single forward pass.
+            Larger values can increase GPU throughput at the cost of higher memory usage.
 
     Returns:
         The predicted volume.
@@ -264,11 +271,11 @@ def get_prediction_torch_em(
             preprocess = None if isinstance(input_volume, np.ndarray) else torch_em.transform.raw.standardize
         else:
             preprocess = preprocess
-        prediction = predict_with_halo(
+        prediction = predict_with_halo_pipelined(
             input_volume, model, gpu_ids=devices,
             block_shape=block_shape, halo=halo,
             preprocess=preprocess, with_channels=with_channels, mask=mask,
-            output=prediction,
+            output=prediction, batch_size=batch_size,
         )
     if verbose:
         print("Prediction time in", time.time() - t0, "s")

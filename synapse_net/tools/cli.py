@@ -161,6 +161,11 @@ def segmentation_cli():
         help="The halo for prediction, in ZYX order. Increase the halo to minimize boundary artifacts."
     )
     parser.add_argument(
+        "--batch_size", type=int, default=1,
+        help="The number of blocks to stack into a single forward pass during prediction. "
+        "Larger values can increase GPU throughput at the cost of higher memory usage."
+    )
+    parser.add_argument(
         "--data_ext", default=".mrc", help="The extension of the tomogram data. By default .mrc."
     )
     parser.add_argument(
@@ -226,13 +231,14 @@ def segmentation_cli():
                 f"vesicles, mitochondria, or active zones, not for {args.model}."
             )
         segmentation_function = partial(
-            scalable_segmentation, model=model, tiling=tiling, verbose=args.verbose
+            scalable_segmentation, model=model, tiling=tiling, verbose=args.verbose, batch_size=args.batch_size
         )
         allocate_output = True
 
     else:
         segmentation_function = partial(
             run_segmentation, model=model, model_type=args.model, verbose=args.verbose, tiling=tiling,
+            batch_size=args.batch_size,
         )
         allocate_output = False
 

@@ -197,7 +197,7 @@ def _ribbon_AZ_postprocessing(predictions, vesicles, n_slices_exclude, n_ribbons
     return segmentations
 
 
-def _segment_ribbon_AZ(image, model, tiling, scale, verbose, return_predictions=False, **kwargs):
+def _segment_ribbon_AZ(image, model, tiling, scale, verbose, batch_size=1, return_predictions=False, **kwargs):
     # Parse additional keyword arguments from the kwargs.
     vesicles = kwargs.pop("extra_segmentation")
     threshold = kwargs.pop("threshold", 0.5)
@@ -207,7 +207,8 @@ def _segment_ribbon_AZ(image, model, tiling, scale, verbose, return_predictions=
     min_membrane_size = kwargs.pop("min_membrane_size", 0)
 
     predictions = segment_ribbon_synapse_structures(
-        image, model=model, tiling=tiling, scale=scale, verbose=verbose, threshold=threshold, **kwargs
+        image, model=model, tiling=tiling, scale=scale, verbose=verbose, threshold=threshold,
+        batch_size=batch_size, **kwargs
     )
 
     # Otherwise, just return the predictions.
@@ -236,6 +237,7 @@ def run_segmentation(
     tiling: Optional[Dict[str, Dict[str, int]]] = None,
     scale: Optional[List[float]] = None,
     verbose: bool = False,
+    batch_size: int = 1,
     **kwargs,
 ) -> np.ndarray | Dict[str, np.ndarray]:
     """Run synaptic structure segmentation.
@@ -248,26 +250,33 @@ def run_segmentation(
         scale: A scale factor for resizing the input before applying the model.
             The output will be scaled back to the initial size.
         verbose: Whether to print detailed information about the prediction and segmentation.
+        batch_size: The number of blocks to stack into a single forward pass during prediction.
+            Larger values can increase GPU throughput at the cost of higher memory usage.
         kwargs: Optional parameters for the segmentation function.
 
     Returns:
         The segmentation. For models that return multiple segmentations, this function returns a dictionary.
     """
     if model_type.startswith("vesicles"):
-        segmentation = segment_vesicles(image, model=model, tiling=tiling, scale=scale, verbose=verbose, **kwargs)
+        segmentation = segment_vesicles(image, model=model, tiling=tiling, scale=scale, verbose=verbose,
+                                        batch_size=batch_size, **kwargs)
     elif model_type == "mitochondria" or model_type == "mitochondria2":
-        segmentation = segment_mitochondria(image, model=model, tiling=tiling, scale=scale, verbose=verbose, **kwargs)
+        segmentation = segment_mitochondria(image, model=model, tiling=tiling, scale=scale, verbose=verbose,
+                                             batch_size=batch_size, **kwargs)
     elif model_type == "active_zone":
-        segmentation = segment_active_zone(image, model=model, tiling=tiling, scale=scale, verbose=verbose, **kwargs)
+        segmentation = segment_active_zone(image, model=model, tiling=tiling, scale=scale, verbose=verbose,
+                                           batch_size=batch_size, **kwargs)
     elif model_type == "compartments":
-        segmentation = segment_compartments(image, model=model, tiling=tiling, scale=scale, verbose=verbose, **kwargs)
+        segmentation = segment_compartments(image, model=model, tiling=tiling, scale=scale, verbose=verbose,
+                                             batch_size=batch_size, **kwargs)
     elif model_type == "ribbon":
-        segmentation = _segment_ribbon_AZ(image, model=model, tiling=tiling, scale=scale, verbose=verbose, **kwargs)
+        segmentation = _segment_ribbon_AZ(image, model=model, tiling=tiling, scale=scale, verbose=verbose,
+                                          batch_size=batch_size, **kwargs)
     elif "cristae" in model_type:
         training_resolution = get_model_training_resolution(model_type)
         voxel_size = np.mean(list(training_resolution.values()))
         segmentation = segment_cristae(image, model=model, tiling=tiling, scale=scale, verbose=verbose,
-                                       voxel_size=voxel_size, **kwargs)
+                                       voxel_size=voxel_size, batch_size=batch_size, **kwargs)
     else:
         raise ValueError(f"Unknown model type: {model_type}")
     return segmentation

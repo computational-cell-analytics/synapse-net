@@ -136,6 +136,7 @@ def segment_vesicles(
     exclude_boundary: bool = False,
     exclude_boundary_vesicles: bool = False,
     mask: Optional[np.ndarray] = None,
+    batch_size: int = 1,
 ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
     """Segment vesicles in an input volume or image.
 
@@ -155,6 +156,8 @@ def segment_vesicles(
             out less vesicles at the boundary and is better suited for volumes with small context in z.
             If `exclude_boundary` is also set to True, then this option will have no effect.
         mask: An optional mask that is used to restrict the segmentation.
+        batch_size: The number of blocks to stack into a single forward pass during prediction.
+            Larger values can increase GPU throughput at the cost of higher memory usage.
 
     Returns:
         The segmentation mask as a numpy array, or a tuple containing the segmentation mask
@@ -169,7 +172,10 @@ def segment_vesicles(
     # Rescale the mask if it was given and run prediction.
     if mask is not None:
         mask = scaler.scale_input(mask, is_segmentation=True)
-    pred = get_prediction(input_volume, tiling=tiling, model_path=model_path, model=model, verbose=verbose, mask=mask)
+    pred = get_prediction(
+        input_volume, tiling=tiling, model_path=model_path, model=model, verbose=verbose, mask=mask,
+        batch_size=batch_size,
+    )
     foreground, boundaries = pred[:2]
 
     # Deal with 2D segmentation case.

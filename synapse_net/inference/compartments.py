@@ -154,6 +154,7 @@ def segment_compartments(
     mask: Optional[np.ndarray] = None,
     n_slices_exclude: int = 0,
     boundary_threshold: float=0.4,
+    batch_size: int = 1,
     **kwargs,
 ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
     """Segment synaptic compartments in an input volume.
@@ -168,6 +169,8 @@ def segment_compartments(
         scale: The scale factor to use for rescaling the input volume before prediction.
         n_slices_exclude:
         boundary_threshold: Threshold that determines when the prediction of the network is foreground for the segmentation. Need higher threshold than default for TEM.
+        batch_size: The number of blocks to stack into a single forward pass during prediction.
+            Larger values can increase GPU throughput at the cost of higher memory usage.
 
     Returns:
         The segmentation mask as a numpy array, or a tuple containing the segmentation mask
@@ -182,7 +185,9 @@ def segment_compartments(
 
     # Run prediction. Support models with a single or multiple channels,
     # assuming that the first channel is the boundary prediction.
-    pred = get_prediction(input_volume, tiling=tiling, model_path=model_path, model=model, verbose=verbose)
+    pred = get_prediction(
+        input_volume, tiling=tiling, model_path=model_path, model=model, verbose=verbose, batch_size=batch_size,
+    )
 
     # Remove channel axis if necessary.
     if pred.ndim != input_volume.ndim:

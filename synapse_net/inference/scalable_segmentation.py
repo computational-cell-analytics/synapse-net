@@ -80,6 +80,7 @@ def scalable_segmentation(
     verbose: bool = True,
     mask: Optional[ArrayLike] = None,
     devices: Optional[List[str]] = None,
+    batch_size: int = 1,
 ) -> None:
     """Run segmentation based on a prediction with foreground and boundary channel.
 
@@ -103,6 +104,8 @@ def scalable_segmentation(
         verbose: Whether to print timing information.
         devices: The devices for running prediction. If not given will use the GPU
             if available, otherwise the CPU.
+        batch_size: The number of blocks to stack into a single forward pass during prediction.
+            Larger values can increase GPU throughput at the cost of higher memory usage.
     """
     if mask is not None:
         raise NotImplementedError
@@ -136,5 +139,8 @@ def scalable_segmentation(
         seeds = f.create_dataset("seeds", shape=input_.shape, dtype="uint64", chunks=chunks)
 
         # Run prediction and segmentation.
-        get_prediction(input_, prediction=prediction, tiling=tiling, model=model, verbose=verbose, devices=devices)
+        get_prediction(
+            input_, prediction=prediction, tiling=tiling, model=model, verbose=verbose, devices=devices,
+            batch_size=batch_size,
+        )
         _run_segmentation(prediction, output, seeds, chunks, seed_threshold, min_size, verbose, original_shape)
