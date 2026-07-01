@@ -50,6 +50,28 @@ def _border_zone(shape: tuple, radius: int) -> np.ndarray:
     return mask
 
 
+def _surface_area(mask: np.ndarray, sampling: np.ndarray) -> float:
+    """Closed-surface area (nm^2) of a binary mask via marching cubes.
+
+    The mask is padded by one background voxel so objects touching the array edge
+    (e.g. an instance cropped to its bounding box) yield a closed surface rather than an
+    open mesh with the edge-touching faces missing.
+
+    Args:
+        mask: Binary segmentation.
+        sampling: Voxel size per axis (nm), in array (z, y, x) order.
+
+    Returns:
+        Surface area in nm^2, or NaN if the mask is empty.
+    """
+    binary = mask.astype(bool)
+    if not binary.any():
+        return np.nan
+    padded = np.pad(binary.astype(np.float32), 1)
+    verts, faces, _, _ = marching_cubes(padded, level=0.5, spacing=tuple(float(s) for s in sampling))
+    return float(mesh_surface_area(verts, faces))
+
+
 # ---------------------------------------------------------------------------
 # Membrane approximation
 # ---------------------------------------------------------------------------
@@ -276,8 +298,7 @@ def compute_crista_morphology(
     result: Dict[str, float] = {}
 
     if method in ("area", "both"):
-        verts, faces, _, _ = marching_cubes(crista_mask.astype(np.float32), level=0.5, spacing=spacing)
-        result["total_surface_area_nm2"] = float(mesh_surface_area(verts, faces))
+        result["total_surface_area_nm2"] = _surface_area(crista_mask, sampling)
 
     if method in ("medial_axis", "both"):
         dist = distance_transform_edt(crista_mask.astype(bool), sampling=spacing)
@@ -316,7 +337,10 @@ def compute_mito_crista_statistics(
         DataFrame with one row per mito instance:
         label | mito_volume_nm3 | crista_volume_nm3 | crista_fraction |
         contact_voxel_count | crista_junction_count | contact_volume_nm3 |
-        avg_crista_to_membrane_nm | crista_orientation_anisotropy | total_surface_area_nm2 | avg_thickness_nm
+        avg_crista_to_membrane_nm | crista_orientation_anisotropy | total_surface_area_nm2 |
+        mito_surface_area_nm2 | crista_to_mito_surface_ratio | avg_thickness_nm.
+        total_surface_area_nm2 is the crista surface area; crista_to_mito_surface_ratio is
+        crista surface / mitochondrial outer-membrane surface (can exceed 1 for folded cristae).
     """
     if membrane_mask is None:
         membrane_mask = approximate_membrane(
@@ -366,6 +390,13 @@ def compute_mito_crista_statistics(
             crista_orientation_anisotropy = np.nan
             morph = {"total_surface_area_nm2": np.nan, "avg_thickness_nm": np.nan}
 
+        crista_surface = morph.get("total_surface_area_nm2", np.nan)
+        mito_surface = _surface_area(mito_local, sampling)
+        if mito_surface and mito_surface > 0 and np.isfinite(crista_surface):
+            crista_to_mito_surface_ratio = crista_surface / mito_surface
+        else:
+            crista_to_mito_surface_ratio = np.nan
+
         rows.append({
             "mito_label_id": int(mito_id),
             "mito_touches_border": touches_border,
@@ -377,7 +408,9 @@ def compute_mito_crista_statistics(
             "contact_volume_nm3": contact_summary["contact_volume_nm3"],
             "avg_crista_to_membrane_nm": proximity["median_nm"],
             "crista_orientation_anisotropy": crista_orientation_anisotropy,
-            "total_surface_area_nm2": morph.get("total_surface_area_nm2", np.nan),
+            "total_surface_area_nm2": crista_surface,
+            "mito_surface_area_nm2": mito_surface,
+            "crista_to_mito_surface_ratio": crista_to_mito_surface_ratio,
             "avg_thickness_nm": morph.get("avg_thickness_nm", np.nan),
         })
 
