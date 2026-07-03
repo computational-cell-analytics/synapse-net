@@ -467,6 +467,20 @@ class TestJunctionDistances(unittest.TestCase):
         )
         self.assertLess(clustered["junction_clustering_index"], dispersed["junction_clustering_index"])
 
+    def test_seed_parallel_matches_serial(self):
+        # Parallelizing the per-seed MCP loop (n_jobs>1, process pool) must give the identical
+        # distance matrix and summary as the serial computation.
+        from synapse_net.cristae_analysis import compute_junction_distances
+        labels, membrane = self._flat_membrane_with_junctions(
+            [(10, 10), (10, 30), (30, 10), (30, 30), (20, 20)]  # 5 junctions -> exercises parallel path
+        )
+        d1, s1 = compute_junction_distances(labels, membrane, 1.0, surface_area_nm2=1600.0, n_jobs=1)
+        d2, s2 = compute_junction_distances(labels, membrane, 1.0, surface_area_nm2=1600.0, n_jobs=2)
+        np.testing.assert_allclose(d1, d2, equal_nan=True)
+        self.assertEqual(s1["junction_count"], s2["junction_count"])
+        np.testing.assert_allclose(s1["mean_nn_junction_distance_nm"], s2["mean_nn_junction_distance_nm"])
+        np.testing.assert_allclose(s1["junction_clustering_index"], s2["junction_clustering_index"])
+
 
 class TestOptimizationEquivalence(unittest.TestCase):
     """The computational optimizations (eigvalsh, reused distance transform, parallelism)

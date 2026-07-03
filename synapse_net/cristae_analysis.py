@@ -1,4 +1,4 @@
-from contextlib import nullcontext
+import os
 from typing import Callable, Dict, Optional, Tuple, Union
 
 import numpy as np
@@ -160,6 +160,7 @@ def compute_crista_orientation(
     voxel_size: Union[float, Dict[str, float]],
     neighborhood_size_nm: float = 30.0,
     need_eigenvectors: bool = True,
+    n_jobs: int = 1,
 ) -> Tuple[np.ndarray, Optional[np.ndarray], np.ndarray]:
     """Compute dominant crista orientation via structure tensor.
 
@@ -173,6 +174,9 @@ def compute_crista_orientation(
             In that case the returned eigenvalues and eigenvectors are both None — only the
             anisotropy is produced. Use this when only the anisotropy scalar is needed, e.g.
             in :func:`compute_mito_crista_statistics`.
+        n_jobs: Number of threads for the structure-tensor Gaussian smoothing (low-memory path
+            only). The unique tensor components are independent and ``gaussian_filter`` releases
+            the GIL, so threads give a real speedup. 1 = serial; -1 = all cores.
 
     Returns:
         eigenvalues: (..., ndim) sorted ascending, or None when ``need_eigenvectors`` is False.
@@ -202,10 +206,22 @@ def compute_crista_orientation(
     # Low-memory path: keep only the ndim*(ndim+1)/2 unique smoothed components instead of
     # the full (..., ndim, ndim) tensor, and evaluate eigenvalues chunk-wise along axis 0 so
     # only a small block is stacked at any time. Numerics match the full eigvalsh exactly.
-    components = {}
-    for i in range(ndim):
-        for j in range(i, ndim):
-            components[(i, j)] = gaussian_filter(grads[i] * grads[j], sigma=sigma)
+    # The unique components are independent Gaussian smoothings (GIL-releasing) → thread them.
+    pairs = [(i, j) for i in range(ndim) for j in range(i, ndim)]
+
+    def _component(i, j):
+        return (i, j), gaussian_filter(grads[i] * grads[j], sigma=sigma)
+
+    workers = os.cpu_count() if n_jobs == -1 else max(1, n_jobs)
+    if workers == 1 or len(pairs) == 1:
+        components = dict(_component(i, j) for i, j in pairs)
+    else:
+        from joblib import Parallel, delayed
+        components = dict(
+            Parallel(n_jobs=min(workers, len(pairs)), prefer="threads")(
+                delayed(_component)(i, j) for i, j in pairs
+            )
+        )
     del grads
 
     shape = crista_mask.shape
@@ -350,12 +366,27 @@ _JUNCTION_DISTANCE_NAN = {
 }
 
 
+def _geodesic_rows(costs: np.ndarray, sampling_t: tuple, seeds: list, seed_idxs: list) -> list:
+    """Geodesic distance rows for a chunk of source seeds (one MCP build per chunk).
+
+    Module-level so it is picklable for a loky process pool. Returns (row_index, distances)
+    for each source seed in ``seed_idxs``, where distances are to every seed.
+    """
+    mcp = MCP_Geometric(costs, sampling=sampling_t)
+    out = []
+    for i in seed_idxs:
+        cum, _ = mcp.find_costs([seeds[i]])
+        out.append((i, [float(cum[s]) for s in seeds]))
+    return out
+
+
 def compute_junction_distances(
     contact_labels: np.ndarray,
     membrane_mask: np.ndarray,
     voxel_size: Union[float, Dict[str, float]],
     surface_area_nm2: Optional[float] = None,
     membrane_indices: Optional[np.ndarray] = None,
+    n_jobs: int = 1,
 ) -> Tuple[np.ndarray, Dict[str, float]]:
     """Geodesic distances between crista-membrane junctions measured along the membrane.
 
@@ -412,13 +443,25 @@ def compute_junction_distances(
         seeds.append(seed)
 
     # Pairwise geodesic distances over the membrane (cost 1 on membrane, impassable elsewhere).
+    # Each source seed is an independent MCP run; parallelize them across processes (MCP holds
+    # the GIL, so a process pool is needed for real speedup). Order-independent → identical result.
     costs = np.where(membrane, 1.0, np.inf)
-    mcp = MCP_Geometric(costs, sampling=tuple(float(s) for s in sampling))
+    sampling_t = tuple(float(s) for s in sampling)
     distance_matrix = np.full((n, n), np.nan, dtype=float)
-    for i, seed in enumerate(seeds):
-        cum, _ = mcp.find_costs([seed])
-        for j, other in enumerate(seeds):
-            distance_matrix[i, j] = cum[other]
+
+    workers = os.cpu_count() if n_jobs == -1 else max(1, n_jobs)
+    if workers == 1 or n <= 2:
+        rows = _geodesic_rows(costs, sampling_t, seeds, list(range(n)))
+    else:
+        from joblib import Parallel, delayed
+        # Round-robin chunks so each worker builds MCP once and processes several sources.
+        chunks = [list(range(k, n, workers)) for k in range(min(workers, n))]
+        results = Parallel(n_jobs=workers, prefer="processes")(
+            delayed(_geodesic_rows)(costs, sampling_t, seeds, ch) for ch in chunks
+        )
+        rows = [item for chunk in results for item in chunk]
+    for i, row in rows:
+        distance_matrix[i] = row
     distance_matrix[~np.isfinite(distance_matrix)] = np.nan
     np.fill_diagonal(distance_matrix, 0.0)
 
@@ -495,31 +538,33 @@ def compute_crista_morphology(
 def _single_mito_row(
     label: int,
     bbox: tuple,
-    mito_segmentation: np.ndarray,
-    crista_binary: np.ndarray,
-    membrane_mask: np.ndarray,
+    mito_crop: np.ndarray,
+    crista_crop: np.ndarray,
+    membrane_crop: np.ndarray,
     voxel_size: Union[float, Dict[str, float]],
     sampling: np.ndarray,
     voxel_vol: float,
     vol_shape: tuple,
     border_radius: int,
+    inner_n_jobs: int = 1,
 ) -> Dict[str, float]:
     """Compute the statistics row for a single mitochondrion instance.
 
     Factored out of :func:`compute_mito_crista_statistics` so the per-mito work (which is
-    independent between instances) can be parallelised. Only reads slices of the shared
-    arrays, so it is safe to run concurrently.
+    independent between instances) can be parallelised. Takes the bbox-cropped label arrays
+    (``mito_crop`` = label array cropped to ``bbox``; ``crista_crop``/``membrane_crop`` the
+    matching binary crops), so it can be dispatched to a process worker without pickling the
+    whole volume. ``inner_n_jobs`` is forwarded to the (parallelisable) junction-distance stage.
     """
-    ndim = mito_segmentation.ndim
-    slices = tuple(slice(bbox[i], bbox[i + ndim]) for i in range(ndim))
+    ndim = mito_crop.ndim
     touches_border = any(
         bbox[i] < border_radius or bbox[i + ndim] > vol_shape[i] - border_radius
         for i in range(ndim)
     )
 
-    mito_local = mito_segmentation[slices] == label
-    crista_local = crista_binary[slices] & mito_local
-    membrane_local = membrane_mask[slices] & mito_local
+    mito_local = mito_crop == label
+    crista_local = crista_crop & mito_local
+    membrane_local = membrane_crop & mito_local
 
     mito_vol = float(mito_local.sum()) * voxel_vol
     crista_vol = float(crista_local.sum()) * voxel_vol
@@ -540,7 +585,7 @@ def _single_mito_row(
         )
         _, junction_dist = compute_junction_distances(
             contact_labels_local, membrane_local, voxel_size,
-            surface_area_nm2=mito_surface, membrane_indices=membrane_indices,
+            surface_area_nm2=mito_surface, membrane_indices=membrane_indices, n_jobs=inner_n_jobs,
         )
         # Free the (potentially large) distance-transform arrays before the orientation
         # computation so they don't co-reside with its structure-tensor components.
@@ -551,7 +596,9 @@ def _single_mito_row(
         junction_dist = dict(_JUNCTION_DISTANCE_NAN)
 
     if has_crista:
-        _, _, anisotropy = compute_crista_orientation(crista_local, voxel_size, need_eigenvectors=False)
+        _, _, anisotropy = compute_crista_orientation(
+            crista_local, voxel_size, need_eigenvectors=False, n_jobs=inner_n_jobs
+        )
         crista_orientation_anisotropy = float(np.mean(anisotropy[crista_local]))
         morph = compute_crista_morphology(crista_local, voxel_size)
     else:
@@ -641,42 +688,55 @@ def compute_mito_crista_statistics(
     effective_gap_nm = border_gap_nm if border_gap_nm is not None else membrane_thickness_nm
     border_radius = _voxel_radius(effective_gap_nm, voxel_size, ndim)
 
-    tasks = [(int(prop.label), prop.bbox) for prop in regionprops(mito_segmentation)]
+    # Pre-crop each mito to its bounding box (basic slicing → views, so this is memory-free;
+    # for the process path only the bbox region gets pickled, not the whole volume).
+    tasks = []
+    for prop in regionprops(mito_segmentation):
+        bbox = prop.bbox
+        slices = tuple(slice(bbox[i], bbox[i + ndim]) for i in range(ndim))
+        tasks.append((
+            int(prop.label), bbox,
+            mito_segmentation[slices], crista_binary[slices], membrane_mask[slices],
+        ))
     total = len(tasks)
 
-    def _run(label, bbox):
+    def _run(task, inner_n_jobs):
+        label, bbox, mito_crop, crista_crop, membrane_crop = task
         return _single_mito_row(
-            label, bbox, mito_segmentation, crista_binary, membrane_mask,
-            voxel_size, sampling, voxel_vol, vol_shape, border_radius,
+            label, bbox, mito_crop, crista_crop, membrane_crop,
+            voxel_size, sampling, voxel_vol, vol_shape, border_radius, inner_n_jobs=inner_n_jobs,
         )
 
-    # Consume results as a generator so a single progress mechanism covers both the serial
-    # and parallel branches, ticking once per completed mitochondrion. When running the
-    # mitochondria in parallel threads, cap BLAS to one thread per worker so numpy's
-    # eigvalsh/einsum don't oversubscribe against the joblib threads. On the serial path BLAS
-    # is left unrestricted so a single large mitochondrion can still use multiple cores.
-    parallel = n_jobs != 1 and total > 1
-    if parallel:
-        from joblib import Parallel, delayed
-        from threadpoolctl import threadpool_limits
-        limiter = threadpool_limits(limits=1)
-    else:
-        limiter = nullcontext()
+    n_workers = os.cpu_count() if n_jobs == -1 else max(1, n_jobs)
+    # Adaptive: many mitochondria → parallelize ACROSS them (processes, so the GIL-bound stages
+    # actually scale), BLAS capped per worker, inner stages serial. Few mitochondria (e.g. one
+    # dominant mito) → run them serially but give each mito's junction-distance stage all the
+    # cores and let BLAS multithread the orientation. Exactly one level of parallelism is ever
+    # active, so there is no process/thread oversubscription.
+    across = n_workers > 1 and total >= n_workers
 
     rows = []
-    with limiter:
-        if parallel:
-            results = Parallel(n_jobs=n_jobs, prefer="threads", return_as="generator_unordered")(
-                delayed(_run)(label, bbox) for label, bbox in tasks
-            )
-        else:
-            results = (_run(label, bbox) for label, bbox in tasks)
+
+    def _consume(results):
         for i, row in enumerate(
             tqdm(results, total=total, desc="Cristae analysis", disable=not verbose), start=1
         ):
             rows.append(row)
             if progress_callback is not None:
                 progress_callback(i, total)
+
+    if across:
+        from joblib import Parallel, delayed, parallel_config
+        # loky processes bypass the GIL; inner_max_num_threads=1 stops each worker's BLAS from
+        # oversubscribing against the pool.
+        with parallel_config(backend="loky", inner_max_num_threads=1):
+            _consume(
+                Parallel(n_jobs=n_workers, return_as="generator_unordered")(
+                    delayed(_run)(task, 1) for task in tasks
+                )
+            )
+    else:
+        _consume(_run(task, n_workers) for task in tasks)
 
     # Stable, n_jobs-independent ordering.
     rows.sort(key=lambda row: row["mito_label_id"])
