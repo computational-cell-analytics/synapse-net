@@ -1,7 +1,7 @@
 import napari
-import napari.layers
 import numpy as np
 
+from napari.utils import progress
 from napari.utils.notifications import show_info
 from qtpy.QtWidgets import QWidget, QVBoxLayout, QPushButton
 
@@ -90,6 +90,12 @@ class CristaeAnalysisWidget(BaseWidget):
             show_info("Please provide a voxel size (or ensure layer metadata contains voxel_size).")
             return
 
+        # Inherit the display scale/translate of the source layer so the result layers overlay
+        # the input correctly (e.g. when the raw data was loaded with a physical voxel scale).
+        ref_layer = self._get_layer_selector_layer(self.crista_selector_name)
+        layer_scale = None if ref_layer is None else ref_layer.scale
+        layer_translate = None if ref_layer is None else ref_layer.translate
+
         mm_thickness = self.mm_thickness_param.value()
         border_gap_val = self.border_gap_param.value()
         border_gap = border_gap_val if border_gap_val > 0.0 else None
@@ -99,30 +105,48 @@ class CristaeAnalysisWidget(BaseWidget):
             mito_seg, voxel_size,
             membrane_thickness_nm=mm_thickness,
             border_gap_nm=border_gap,
+            n_jobs=-1,  # parallelize the per-slice erosion across cores.
         )
 
         show_info("INFO: Running cristae analysis per mitochondrion...")
-        stats_df = compute_mito_crista_statistics(
-            crista_mask, mito_seg, voxel_size,
-            membrane_mask=membrane_mask,
-            membrane_thickness_nm=mm_thickness,
-            border_gap_nm=border_gap,
-        )
+        pbar = {"bar": None}
+
+        def _on_progress(done, total):
+            # Runs on the GUI thread (the joblib results generator is consumed by the caller),
+            # so updating the napari progress bar here needs no cross-thread marshaling.
+            if pbar["bar"] is None:
+                pbar["bar"] = progress(total=total, desc="Cristae analysis")
+            pbar["bar"].update(1)
+
+        try:
+            stats_df = compute_mito_crista_statistics(
+                crista_mask, mito_seg, voxel_size,
+                membrane_mask=membrane_mask,
+                membrane_thickness_nm=mm_thickness,
+                border_gap_nm=border_gap,
+                n_jobs=-1,  # mitochondria are independent — use all cores.
+                verbose=True,  # terminal tqdm bar.
+                progress_callback=_on_progress,  # napari activity-dock bar.
+            )
+        finally:
+            if pbar["bar"] is not None:
+                pbar["bar"].close()
 
         if self.show_membranes_param.isChecked():
-            self.viewer.add_labels(membrane_mask.astype(np.uint8), name="Membrane Mask", opacity=0.4)
+            self.viewer.add_labels(
+                membrane_mask.astype(np.uint8), name="Membrane Mask", opacity=0.4,
+                scale=layer_scale, translate=layer_translate,
+            )
 
-        # Add contact sites as a Points layer.
-        contact_coords, contact_summary = detect_contact_sites(
+        # Add crista-membrane junctions as a Labels layer (each junction has its own ID).
+        contact_labels, contact_summary = detect_contact_sites(
             crista_mask.astype(bool), membrane_mask, voxel_size
         )
-        if contact_coords.shape[0] > 0:
-            self.viewer.add_points(
-                contact_coords,
-                name="Crista-Membrane Contacts",
-                size=3,
-                face_color="orange",
-                blending="additive",
+        if contact_labels.max() > 0:
+            self.viewer.add_labels(
+                contact_labels.astype(np.uint32),
+                name="Crista-Membrane Junctions",
+                scale=layer_scale, translate=layer_translate,
             )
 
         # Attach per-mito stats table to the mito segmentation layer.

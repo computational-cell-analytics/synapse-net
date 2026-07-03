@@ -21,6 +21,7 @@ setup(
         "scikit-learn",
         "h5py",
         "imageio",
+        "joblib",
         "mrcfile",
         "pandas",
         "pooch",
