@@ -148,6 +148,8 @@ class CristaeAnalysisWidget(BaseWidget):
                 name="Crista-Membrane Junctions",
                 scale=layer_scale, translate=layer_translate,
             )
+        else:
+            show_info("INFO: No crista–membrane junctions detected — junction layer not added.")
 
         # Attach per-mito stats table to the mito segmentation layer.
         mito_layer = self._get_layer_selector_layer(self.mito_selector_name)

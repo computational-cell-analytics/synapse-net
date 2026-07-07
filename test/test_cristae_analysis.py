@@ -467,6 +467,18 @@ class TestJunctionDistances(unittest.TestCase):
         )
         self.assertLess(clustered["junction_clustering_index"], dispersed["junction_clustering_index"])
 
+    def test_membrane_graph_is_membrane_sized(self):
+        # The geodesic graph must have one node per membrane voxel (memory ∝ membrane, not the
+        # bounding box) — this is what keeps large mitochondria from OOMing.
+        from synapse_net.cristae_analysis import _membrane_graph
+        membrane = np.zeros((5, 30, 30), dtype=bool)
+        membrane[2, 5:25, 5] = True
+        membrane[2, 5, 5:25] = True
+        graph, node_id = _membrane_graph(membrane, np.array([2.0, 1.0, 1.5]))
+        self.assertEqual(graph.shape[0], int(membrane.sum()))
+        self.assertEqual(int((node_id >= 0).sum()), int(membrane.sum()))
+        self.assertTrue(np.all(node_id[~membrane] == -1))
+
     def test_seed_parallel_matches_serial(self):
         # Parallelizing the per-seed MCP loop (n_jobs>1, process pool) must give the identical
         # distance matrix and summary as the serial computation.

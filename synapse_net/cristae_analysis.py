@@ -5,10 +5,8 @@ import numpy as np
 import pandas as pd
 from scipy.ndimage import binary_erosion, distance_transform_edt, gaussian_filter
 from scipy.ndimage import label as ndimage_label
-from skimage.graph import MCP_Geometric
 from skimage.measure import marching_cubes, mesh_surface_area, regionprops
 from skimage.morphology import disk, local_maxima
-from skimage.segmentation import find_boundaries
 from tqdm import tqdm
 
 
@@ -69,6 +67,31 @@ def _surface_area(mask: np.ndarray, sampling: np.ndarray) -> float:
     padded = np.pad(binary.astype(np.float32), 1)
     verts, faces, _, _ = marching_cubes(padded, level=0.5, spacing=tuple(float(s) for s in sampling))
     return float(mesh_surface_area(verts, faces))
+
+
+def _available_memory_bytes() -> int:
+    """Best-effort available RAM in bytes (used to keep parallel working sets from OOMing)."""
+    try:
+        import psutil
+        return int(psutil.virtual_memory().available)
+    except Exception:
+        try:
+            return int(os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE"))
+        except Exception:
+            return 4 * 1024 ** 3  # conservative fallback
+
+
+def _bounded_workers(n_jobs: int, per_worker_bytes: int, fraction: float = 0.5) -> int:
+    """Resolve n_jobs to a worker count whose combined working set fits in memory.
+
+    n_jobs: 1 = serial, -1 = all cores, else that many. The result is additionally capped so
+    ``workers * per_worker_bytes <= fraction * available_RAM`` (at least 1).
+    """
+    workers = os.cpu_count() if n_jobs == -1 else max(1, int(n_jobs))
+    if per_worker_bytes > 0:
+        budget = int(_available_memory_bytes() * fraction)
+        workers = min(workers, max(1, budget // int(per_worker_bytes)))
+    return int(max(1, workers))
 
 
 # ---------------------------------------------------------------------------
@@ -212,7 +235,9 @@ def compute_crista_orientation(
     def _component(i, j):
         return (i, j), gaussian_filter(grads[i] * grads[j], sigma=sigma)
 
-    workers = os.cpu_count() if n_jobs == -1 else max(1, n_jobs)
+    # Each concurrent component holds a product + its smoothed output (~2 float32 arrays); cap the
+    # thread count by available memory so the smoothing peak can't OOM on a large mitochondrion.
+    workers = _bounded_workers(n_jobs, per_worker_bytes=crista_mask.size * 4 * 2)
     if workers == 1 or len(pairs) == 1:
         components = dict(_component(i, j) for i, j in pairs)
     else:
@@ -358,26 +383,71 @@ def detect_contact_sites(
     }
 
 
+def _membrane_graph(membrane: np.ndarray, sampling: np.ndarray):
+    """Sparse 26-connectivity graph over the membrane voxels only (memory ∝ membrane).
+
+    Edge weight = Euclidean nm distance between adjacent voxels, so shortest paths equal the
+    cost-1 ``MCP_Geometric`` geodesic. Builds the CSR directly (unlike ``skimage.pixel_graph``,
+    which allocates full-image intermediates and OOMs on large bounding boxes).
+
+    Returns:
+        graph: (N, N) scipy.sparse CSR of the N membrane voxels (undirected → use directed=False).
+        node_id: int32 array over the input shape mapping each membrane voxel to its node index
+            (-1 elsewhere); use it to look a voxel up: ``node_id[z, y, x]``.
+    """
+    import itertools
+    from scipy.sparse import csr_matrix
+
+    shape = membrane.shape
+    ndim = membrane.ndim
+    sampling = np.asarray(sampling, dtype=float)
+    coords = np.argwhere(membrane)
+    n = coords.shape[0]
+    node_id = np.full(shape, -1, dtype=np.int32)
+    node_id[tuple(coords.T)] = np.arange(n, dtype=np.int32)
+
+    # One direction of each 26-connectivity offset pair (edges are made undirected by dijkstra).
+    seen, offsets = set(), []
+    for off in itertools.product((-1, 0, 1), repeat=ndim):
+        if not any(off) or tuple(-o for o in off) in seen:
+            continue
+        seen.add(off)
+        offsets.append(off)
+
+    src_parts, dst_parts, w_parts = [], [], []
+    upper = np.array(shape)
+    for off in offsets:
+        off_arr = np.array(off)
+        weight = float(np.sqrt(((off_arr * sampling) ** 2).sum()))
+        nb = coords + off_arr
+        in_bounds = np.all((nb >= 0) & (nb < upper), axis=1)
+        src_c = coords[in_bounds]
+        nb = nb[in_bounds]
+        nb_id = node_id[tuple(nb.T)]
+        valid = nb_id >= 0
+        if not valid.any():
+            continue
+        src_parts.append(node_id[tuple(src_c[valid].T)])
+        dst_parts.append(nb_id[valid])
+        w_parts.append(np.full(int(valid.sum()), weight, dtype=np.float32))
+
+    if src_parts:
+        src = np.concatenate(src_parts)
+        dst = np.concatenate(dst_parts)
+        weights = np.concatenate(w_parts)
+    else:
+        src = dst = np.empty(0, dtype=np.int32)
+        weights = np.empty(0, dtype=np.float32)
+    graph = csr_matrix((weights, (src, dst)), shape=(n, n))
+    return graph, node_id
+
+
 _JUNCTION_DISTANCE_NAN = {
     "junction_count": 0,
     "mean_nn_junction_distance_nm": np.nan,
     "median_nn_junction_distance_nm": np.nan,
     "junction_clustering_index": np.nan,
 }
-
-
-def _geodesic_rows(costs: np.ndarray, sampling_t: tuple, seeds: list, seed_idxs: list) -> list:
-    """Geodesic distance rows for a chunk of source seeds (one MCP build per chunk).
-
-    Module-level so it is picklable for a loky process pool. Returns (row_index, distances)
-    for each source seed in ``seed_idxs``, where distances are to every seed.
-    """
-    mcp = MCP_Geometric(costs, sampling=sampling_t)
-    out = []
-    for i in seed_idxs:
-        cum, _ = mcp.find_costs([seeds[i]])
-        out.append((i, [float(cum[s]) for s in seeds]))
-    return out
 
 
 def compute_junction_distances(
@@ -391,10 +461,11 @@ def compute_junction_distances(
     """Geodesic distances between crista-membrane junctions measured along the membrane.
 
     Each junction (a connected component in ``contact_labels``) is reduced to its centroid,
-    snapped to the nearest membrane voxel, and pairwise geodesic distances are computed over
-    the membrane shell with ``skimage.graph.MCP_Geometric`` (so paths follow the surface
-    instead of cutting through the lumen). A Clark-Evans nearest-neighbour index summarises
-    whether the junctions are clustered.
+    snapped to the nearest membrane voxel, and pairwise geodesic distances are computed over a
+    sparse graph of the membrane voxels (26-connectivity, Euclidean nm edge weights) with
+    ``scipy.sparse.csgraph.dijkstra`` — so paths follow the membrane surface instead of cutting
+    through the lumen, using memory proportional to the membrane rather than the bounding box.
+    A Clark-Evans nearest-neighbour index summarises whether the junctions are clustered.
 
     Args:
         contact_labels: Integer junction label array (0 = background, 1..n = junctions),
@@ -442,22 +513,35 @@ def compute_junction_distances(
         seed = tuple(int(nearest_idx[d][tuple(centroid)]) for d in range(ndim))
         seeds.append(seed)
 
-    # Pairwise geodesic distances over the membrane (cost 1 on membrane, impassable elsewhere).
-    # Each source seed is an independent MCP run; parallelize them across processes (MCP holds
-    # the GIL, so a process pool is needed for real speedup). Order-independent → identical result.
-    costs = np.where(membrane, 1.0, np.inf)
-    sampling_t = tuple(float(s) for s in sampling)
+    # Pairwise geodesic distances over the membrane. Build a sparse graph whose nodes are ONLY
+    # the membrane voxels (26-connectivity, edge weight = Euclidean nm distance) and run Dijkstra
+    # per source. This uses memory proportional to the (thin) membrane rather than the whole
+    # bounding box — MCP_Geometric allocates full-grid arrays (~100 bytes/voxel) which OOMs on
+    # large mitochondria. Distances are identical to the cost-1 MCP geodesic. Dijkstra releases
+    # the GIL, so sources are threaded (sharing the one graph → no per-worker copies).
+    from scipy.sparse.csgraph import dijkstra
+
+    graph, node_id = _membrane_graph(membrane, sampling)
+    seed_nodes = [int(node_id[s]) for s in seeds]
+
     distance_matrix = np.full((n, n), np.nan, dtype=float)
 
-    workers = os.cpu_count() if n_jobs == -1 else max(1, n_jobs)
+    def _rows(seed_idxs):
+        out = []
+        for i in seed_idxs:
+            dist = dijkstra(graph, directed=False, indices=seed_nodes[i])
+            out.append((i, [float(dist[seed_nodes[j]]) for j in range(n)]))
+        return out
+
+    # Each Dijkstra allocates one length-n_nodes distance array; cap threads by available memory.
+    workers = _bounded_workers(n_jobs, per_worker_bytes=graph.shape[0] * 8)
     if workers == 1 or n <= 2:
-        rows = _geodesic_rows(costs, sampling_t, seeds, list(range(n)))
+        rows = _rows(list(range(n)))
     else:
         from joblib import Parallel, delayed
-        # Round-robin chunks so each worker builds MCP once and processes several sources.
         chunks = [list(range(k, n, workers)) for k in range(min(workers, n))]
-        results = Parallel(n_jobs=workers, prefer="processes")(
-            delayed(_geodesic_rows)(costs, sampling_t, seeds, ch) for ch in chunks
+        results = Parallel(n_jobs=workers, prefer="threads")(
+            delayed(_rows)(ch) for ch in chunks
         )
         rows = [item for chunk in results for item in chunk]
     for i, row in rows:
@@ -727,11 +811,15 @@ def compute_mito_crista_statistics(
 
     if across:
         from joblib import Parallel, delayed, parallel_config
+        # Cap concurrent workers so their combined per-mito working set (graph + tensor
+        # components + label crops, ~40 bytes/voxel of the largest mito) fits in RAM.
+        max_voxels = max(int(task[2].size) for task in tasks)
+        across_workers = _bounded_workers(n_jobs, per_worker_bytes=max_voxels * 40)
         # loky processes bypass the GIL; inner_max_num_threads=1 stops each worker's BLAS from
         # oversubscribing against the pool.
         with parallel_config(backend="loky", inner_max_num_threads=1):
             _consume(
-                Parallel(n_jobs=n_workers, return_as="generator_unordered")(
+                Parallel(n_jobs=across_workers, return_as="generator_unordered")(
                     delayed(_run)(task, 1) for task in tasks
                 )
             )
