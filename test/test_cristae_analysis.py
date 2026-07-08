@@ -644,7 +644,7 @@ class TestCristaOrientation(unittest.TestCase):
         self.assertLess(tube, lam)
 
     def test_pipeline_reports_orientation(self):
-        # Exercise the exact widget code path (compute_mito_crista_statistics, default 30 nm
+        # Orientation anisotropy is only computed in exact mode (structure tensor, default 30 nm
         # smoothing): the reported column must be finite and larger for lamellae than a blob.
         from synapse_net.cristae_analysis import compute_mito_crista_statistics
         shape = (48, 48, 48)
@@ -652,11 +652,11 @@ class TestCristaOrientation(unittest.TestCase):
         mito[6:42, 6:42, 6:42] = 1
 
         lam = _make_lamellae(shape, normal=(1, 0, 0))
-        df_lam = compute_mito_crista_statistics(lam, mito, voxel_size=1.0)
+        df_lam = compute_mito_crista_statistics(lam, mito, voxel_size=1.0, method="exact")
         val_lam = df_lam["crista_orientation_anisotropy"].iloc[0]
 
         blob = _make_blob(shape, margin=12)
-        df_blob = compute_mito_crista_statistics(blob, mito, voxel_size=1.0)
+        df_blob = compute_mito_crista_statistics(blob, mito, voxel_size=1.0, method="exact")
         val_blob = df_blob["crista_orientation_anisotropy"].iloc[0]
 
         self.assertTrue(np.isfinite(val_lam))
@@ -701,6 +701,113 @@ class TestCristaOrientation(unittest.TestCase):
             viewer.add_vectors(vec, name=f"{name} dir", edge_color="red", edge_width=1.5)
 
         napari.run()
+
+
+class TestFastMethod(unittest.TestCase):
+    """Fast mode differs from exact only in the crista orientation anisotropy (computed on a
+    downsampled crop). Every other metric — surface areas, junction distances, thickness — must be
+    identical to exact, and the fast orientation must be finite and preserve the lamellae > blob
+    ordering (its magnitude is not comparable to exact)."""
+
+    NON_ORIENTATION_COLUMNS = [
+        "mito_label_id", "mito_touches_border", "mito_volume_nm3",
+        "crista_volume_nm3", "crista_fraction", "contact_voxel_count",
+        "crista_junction_count", "contact_volume_nm3",
+        "avg_crista_to_membrane_nm", "mean_nn_junction_distance_nm",
+        "median_nn_junction_distance_nm", "junction_clustering_index",
+        "cristae_surface_area_nm2", "mito_surface_area_nm2",
+        "crista_to_mito_surface_ratio", "avg_thickness_nm",
+    ]
+
+    def test_fast_matches_exact_except_orientation(self):
+        # The regression this guards: fast used to diverge on surface areas / junction distances.
+        # Now those must equal exact; only crista_orientation_anisotropy may differ.
+        import pandas as pd
+        from synapse_net.cristae_analysis import compute_mito_crista_statistics
+        shape = (40, 40, 40)
+        mito_seg = np.zeros(shape, dtype="uint32")
+        mito_seg[4:36, 4:36, 4:36] = 1
+        crista = np.zeros(shape, dtype=bool)
+        for x in (8, 16, 24, 30):
+            crista[6:34, 18:22, x - 1:x + 1] = True
+        df_fast = compute_mito_crista_statistics(crista, mito_seg, voxel_size=1.0, method="fast")
+        df_exact = compute_mito_crista_statistics(crista, mito_seg, voxel_size=1.0, method="exact")
+        for col in self.NON_ORIENTATION_COLUMNS:
+            pd.testing.assert_series_equal(
+                df_fast[col], df_exact[col], check_names=False,
+                obj=f"column {col} (fast vs exact)",
+            )
+
+    def test_fast_orientation_is_finite_with_crista(self):
+        # Fast orientation is now computed (downsampled), so it is finite when a crista is present.
+        from synapse_net.cristae_analysis import compute_mito_crista_statistics
+        mito_seg = _make_mito()
+        crista = _make_crista()
+        df = compute_mito_crista_statistics(crista, mito_seg, voxel_size=1.0)  # default = fast
+        self.assertEqual(len(df), 1)
+        self.assertTrue(np.isfinite(df["crista_orientation_anisotropy"].iloc[0]))
+
+    def test_fast_orientation_no_crista_is_nan(self):
+        from synapse_net.cristae_analysis import compute_mito_crista_statistics
+        mito_seg = _make_mito()
+        crista = np.zeros(mito_seg.shape, dtype=bool)
+        df = compute_mito_crista_statistics(crista, mito_seg, voxel_size=1.0, method="fast")
+        self.assertTrue(np.isnan(df["crista_orientation_anisotropy"].iloc[0]))
+
+    def test_fast_orientation_preserves_lamellae_vs_blob_ordering(self):
+        # Downsampled anisotropy is a relative indicator: lamellae must still read as more
+        # directional than a blob, even though the magnitude is not comparable to exact.
+        from synapse_net.cristae_analysis import compute_mito_crista_statistics
+        shape = (48, 48, 48)
+        mito = np.zeros(shape, dtype="uint32")
+        mito[6:42, 6:42, 6:42] = 1
+        lam = compute_mito_crista_statistics(
+            _make_lamellae(shape, normal=(1, 0, 0)), mito, voxel_size=1.0, method="fast"
+        )["crista_orientation_anisotropy"].iloc[0]
+        blob = compute_mito_crista_statistics(
+            _make_blob(shape, margin=12), mito, voxel_size=1.0, method="fast"
+        )["crista_orientation_anisotropy"].iloc[0]
+        self.assertTrue(np.isfinite(lam) and np.isfinite(blob))
+        self.assertGreater(lam, blob)
+
+    def test_downsampled_orientation_cheaper_and_lower_magnitude(self):
+        # The downsampled anisotropy is a relative indicator: same-or-lower magnitude than full-res.
+        from synapse_net.cristae_analysis import (
+            compute_crista_orientation, _downsampled_orientation_anisotropy,
+        )
+        crista = _make_lamellae(shape=(48, 48, 48), normal=(1, 0, 0))
+        _, _, aniso_full = compute_crista_orientation(crista, 1.0, need_eigenvectors=False)
+        full = float(np.mean(aniso_full[crista]))
+        ds = _downsampled_orientation_anisotropy(crista, 1.0, factor=2)
+        self.assertTrue(np.isfinite(ds))
+        self.assertGreater(ds, 1.0)  # still reads as anisotropic
+        self.assertLessEqual(ds, full * 1.05)  # not larger than full-res (relative-only)
+
+    def test_skip_orientation_is_nan_and_matches_exact_otherwise(self):
+        # method="skip" leaves orientation NaN but matches exact on every other column.
+        import pandas as pd
+        from synapse_net.cristae_analysis import compute_mito_crista_statistics
+        shape = (40, 40, 40)
+        mito_seg = np.zeros(shape, dtype="uint32")
+        mito_seg[4:36, 4:36, 4:36] = 1
+        crista = np.zeros(shape, dtype=bool)
+        for x in (8, 16, 24, 30):
+            crista[6:34, 18:22, x - 1:x + 1] = True
+        df_skip = compute_mito_crista_statistics(crista, mito_seg, voxel_size=1.0, method="skip")
+        df_exact = compute_mito_crista_statistics(crista, mito_seg, voxel_size=1.0, method="exact")
+        self.assertTrue(np.isnan(df_skip["crista_orientation_anisotropy"].iloc[0]))
+        for col in self.NON_ORIENTATION_COLUMNS:
+            pd.testing.assert_series_equal(
+                df_skip[col], df_exact[col], check_names=False,
+                obj=f"column {col} (skip vs exact)",
+            )
+
+    def test_invalid_method_raises(self):
+        from synapse_net.cristae_analysis import compute_mito_crista_statistics
+        mito_seg = _make_mito()
+        crista = _make_crista()
+        with self.assertRaises(ValueError):
+            compute_mito_crista_statistics(crista, mito_seg, voxel_size=1.0, method="bogus")
 
 
 if __name__ == "__main__":

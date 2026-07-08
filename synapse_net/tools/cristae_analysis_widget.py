@@ -10,6 +10,14 @@ from ..cristae_analysis import approximate_membrane, compute_mito_crista_statist
 
 
 class CristaeAnalysisWidget(BaseWidget):
+    # Crista-orientation dropdown labels -> the `method` argument of compute_mito_crista_statistics.
+    _ORIENTATION_FAST = "Fast (downsampled, approximate)"
+    _ORIENTATION_TO_METHOD = {
+        _ORIENTATION_FAST: "fast",
+        "Exact (full resolution)": "exact",
+        "Skip (no orientation)": "skip",
+    }
+
     def __init__(self):
         super().__init__()
 
@@ -73,6 +81,19 @@ class CristaeAnalysisWidget(BaseWidget):
         )
         setting_values.layout().addWidget(self.show_membranes_param)
 
+        self.orientation_param, layout = self._add_choice_param(
+            "orientation", self._ORIENTATION_FAST, list(self._ORIENTATION_TO_METHOD.keys()),
+            title="Crista orientation",
+            tooltip="How to compute the crista orientation anisotropy — the most expensive stage "
+                    "(structure tensor). All other metrics (surface areas, junction distances, "
+                    "thickness) are identical regardless of this choice.\n"
+                    "- Fast (downsampled, approximate): ~8x faster; a relative indicator only, not "
+                    "comparable in magnitude to the exact value.\n"
+                    "- Exact (full resolution): the true anisotropy (slowest).\n"
+                    "- Skip (no orientation): fastest; leaves the orientation column empty.",
+        )
+        setting_values.layout().addLayout(layout)
+
         return self._make_collapsible(widget=setting_values, title="Advanced Settings")
 
     def on_run(self):
@@ -108,7 +129,9 @@ class CristaeAnalysisWidget(BaseWidget):
             n_jobs=-1,  # parallelize the per-slice erosion across cores.
         )
 
-        show_info("INFO: Running cristae analysis per mitochondrion...")
+        method = self._ORIENTATION_TO_METHOD[self.orientation_param.currentText()]
+
+        show_info(f"INFO: Running cristae analysis per mitochondrion (orientation: {method})...")
         pbar = {"bar": None}
 
         def _on_progress(done, total):
@@ -124,6 +147,7 @@ class CristaeAnalysisWidget(BaseWidget):
                 membrane_mask=membrane_mask,
                 membrane_thickness_nm=mm_thickness,
                 border_gap_nm=border_gap,
+                method=method,
                 n_jobs=-1,  # mitochondria are independent — use all cores.
                 verbose=True,  # terminal tqdm bar.
                 progress_callback=_on_progress,  # napari activity-dock bar.
