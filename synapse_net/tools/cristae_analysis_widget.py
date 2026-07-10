@@ -18,14 +18,6 @@ class CristaeAnalysisWidget(BaseWidget):
         "Skip (no orientation)": "skip",
     }
 
-    # Geodesic-backend dropdown labels -> the `geodesic_backend` argument.
-    _GEODESIC_DIJKSTRA = "Exact (Dijkstra)"
-    _GEODESIC_MESH = "Mesh (bioimage-cpp)"
-    _GEODESIC_TO_BACKEND = {
-        _GEODESIC_MESH: "mesh",
-        _GEODESIC_DIJKSTRA: "dijkstra",
-    }
-
     # Membrane-mode dropdown labels -> the `membrane_mode` argument of approximate_membrane.
     _MEMBRANE_SLICE_2D = "2D per-slice (z-parallel)"
     _MEMBRANE_TO_MODE = {
@@ -52,7 +44,7 @@ class CristaeAnalysisWidget(BaseWidget):
 
         # Cheap preview of the membrane + junctions (the front-end of the pipeline) so the user can
         # tune Membrane Thickness / Border Gap and inspect them before the expensive per-mito run.
-        self.preview_button = QPushButton("Preview Membrane & Junctions")
+        self.preview_button = QPushButton("Preview Membrane && Junctions")
         self.preview_button.clicked.connect(self.on_preview)
 
         self.run_button = QPushButton("Run Cristae Analysis")
@@ -120,18 +112,6 @@ class CristaeAnalysisWidget(BaseWidget):
                     "comparable in magnitude to the exact value.\n"
                     "- Exact (full resolution): the true anisotropy (slowest).\n"
                     "- Skip (no orientation): fastest; leaves the orientation column empty.",
-        )
-        setting_values.layout().addLayout(layout)
-
-        self.geodesic_param, layout = self._add_choice_param(
-            "geodesic_backend", self._GEODESIC_MESH, list(self._GEODESIC_TO_BACKEND.keys()),
-            title="Junction geodesic backend",
-            tooltip="How the geodesic distances between crista-membrane junctions are computed "
-                    "(affects only the junction-distance columns).\n"
-                    "- Mesh (bioimage-cpp): surface geodesic on the mitochondrion mesh; the default "
-                    "(~3x faster). Requires a bioimage-cpp build with the geodesic API, else it "
-                    "falls back to Dijkstra.\n"
-                    "- Exact (Dijkstra): exact along the membrane voxel graph; always available.",
         )
         setting_values.layout().addLayout(layout)
 
@@ -246,12 +226,8 @@ class CristaeAnalysisWidget(BaseWidget):
         )
 
         method = self._ORIENTATION_TO_METHOD[self.orientation_param.currentText()]
-        geodesic_backend = self._GEODESIC_TO_BACKEND[self.geodesic_param.currentText()]
 
-        show_info(
-            f"INFO: Running cristae analysis per mitochondrion "
-            f"(orientation: {method}, junction geodesic: {geodesic_backend})..."
-        )
+        show_info(f"INFO: Running cristae analysis per mitochondrion (orientation: {method})...")
         pbar = {"bar": None}
 
         def _on_progress(done, total):
@@ -268,7 +244,6 @@ class CristaeAnalysisWidget(BaseWidget):
                 membrane_thickness_nm=mm_thickness,
                 border_gap_nm=border_gap,
                 method=method,
-                geodesic_backend=geodesic_backend,
                 membrane_mode=membrane_mode,
                 n_jobs=-1,  # mitochondria are independent — use all cores.
                 verbose=True,  # terminal tqdm bar.

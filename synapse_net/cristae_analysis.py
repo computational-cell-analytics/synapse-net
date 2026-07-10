@@ -510,65 +510,6 @@ def detect_contact_sites(
     }
 
 
-def _membrane_graph(membrane: np.ndarray, sampling: np.ndarray):
-    """Sparse 26-connectivity graph over the membrane voxels only (memory ∝ membrane).
-
-    Edge weight = Euclidean nm distance between adjacent voxels, so shortest paths equal the
-    cost-1 ``MCP_Geometric`` geodesic. Builds the CSR directly (unlike ``skimage.pixel_graph``,
-    which allocates full-image intermediates and OOMs on large bounding boxes).
-
-    Returns:
-        graph: (N, N) scipy.sparse CSR of the N membrane voxels (undirected → use directed=False).
-        node_id: int32 array over the input shape mapping each membrane voxel to its node index
-            (-1 elsewhere); use it to look a voxel up: ``node_id[z, y, x]``.
-    """
-    import itertools
-    from scipy.sparse import csr_matrix
-
-    shape = membrane.shape
-    ndim = membrane.ndim
-    sampling = np.asarray(sampling, dtype=float)
-    coords = np.argwhere(membrane)
-    n = coords.shape[0]
-    node_id = np.full(shape, -1, dtype=np.int32)
-    node_id[tuple(coords.T)] = np.arange(n, dtype=np.int32)
-
-    # One direction of each 26-connectivity offset pair (edges are made undirected by dijkstra).
-    seen, offsets = set(), []
-    for off in itertools.product((-1, 0, 1), repeat=ndim):
-        if not any(off) or tuple(-o for o in off) in seen:
-            continue
-        seen.add(off)
-        offsets.append(off)
-
-    src_parts, dst_parts, w_parts = [], [], []
-    upper = np.array(shape)
-    for off in offsets:
-        off_arr = np.array(off)
-        weight = float(np.sqrt(((off_arr * sampling) ** 2).sum()))
-        nb = coords + off_arr
-        in_bounds = np.all((nb >= 0) & (nb < upper), axis=1)
-        src_c = coords[in_bounds]
-        nb = nb[in_bounds]
-        nb_id = node_id[tuple(nb.T)]
-        valid = nb_id >= 0
-        if not valid.any():
-            continue
-        src_parts.append(node_id[tuple(src_c[valid].T)])
-        dst_parts.append(nb_id[valid])
-        w_parts.append(np.full(int(valid.sum()), weight, dtype=np.float32))
-
-    if src_parts:
-        src = np.concatenate(src_parts)
-        dst = np.concatenate(dst_parts)
-        weights = np.concatenate(w_parts)
-    else:
-        src = dst = np.empty(0, dtype=np.int32)
-        weights = np.empty(0, dtype=np.float32)
-    graph = csr_matrix((weights, (src, dst)), shape=(n, n))
-    return graph, node_id
-
-
 _JUNCTION_DISTANCE_NAN = {
     "junction_count": 0,
     "mean_nn_junction_distance_nm": np.nan,
@@ -588,9 +529,9 @@ def _junction_matrix_mesh(
 
     Snaps each junction centroid to its nearest mesh vertex and calls
     ``bioimage_cpp.distance.geodesic_distances_mesh``. The mesh comes from marching cubes on the
-    padded membrane mask (see :func:`_surface_mesh`), so voxel centroids are mapped to the mesh frame
-    with the matching ``+1`` pad offset. Returns None (caller falls back to Dijkstra) when the
-    bioimage-cpp geodesic API is unavailable or the mesh is empty.
+    padded eroded-mito (lumen) surface (see :func:`_surface_mesh`), so voxel centroids are mapped to
+    the mesh frame with the matching ``+1`` pad offset. Returns None (junction distances become NaN)
+    when the bioimage-cpp geodesic API is unavailable or the mesh is empty.
 
     Args:
         centroids: (n, ndim) junction centroids in voxel coordinates.
@@ -623,115 +564,39 @@ def _junction_matrix_mesh(
     return dm
 
 
-def _junction_matrix_dijkstra(
-    contact_labels: np.ndarray,
-    membrane: np.ndarray,
-    sampling: np.ndarray,
-    centroids: np.ndarray,
-    membrane_indices: Optional[np.ndarray],
-    n_jobs: int = 1,
-) -> np.ndarray:
-    """Pairwise junction geodesic distances (nm) over the membrane voxel graph (26-connectivity).
-
-    Snaps each junction centroid to the nearest membrane voxel, builds a sparse graph whose nodes
-    are ONLY the membrane voxels (edge weight = Euclidean nm distance) and runs a vectorised
-    multi-source Dijkstra. Memory is proportional to the (thin) membrane rather than the bounding
-    box — MCP_Geometric allocates full-grid arrays (~100 bytes/voxel) which OOMs on large
-    mitochondria. Dijkstra releases the GIL, so sources are threaded (sharing the one graph).
-    """
-    from scipy.sparse.csgraph import dijkstra
-
-    ndim = membrane.ndim
-    n = centroids.shape[0]
-    if membrane_indices is None:
-        _, nearest_idx = distance_transform_edt(~membrane, return_indices=True, sampling=sampling.tolist())
-    else:
-        nearest_idx = membrane_indices
-    shape_max = np.array(contact_labels.shape) - 1
-    seeds = []
-    for centroid in centroids:
-        c = np.clip(np.round(centroid).astype(int), 0, shape_max)
-        seeds.append(tuple(int(nearest_idx[d][tuple(c)]) for d in range(ndim)))
-
-    graph, node_id = _membrane_graph(membrane, sampling)
-    seed_nodes = np.array([int(node_id[s]) for s in seeds], dtype=np.int64)
-    distance_matrix = np.full((n, n), np.nan, dtype=float)
-
-    def _rows(seed_idxs):
-        # One vectorised multi-source Dijkstra over the whole chunk (C loop, releases the GIL)
-        # instead of a Python loop calling it once per seed; slice out the junction columns.
-        idxs = np.asarray(seed_idxs, dtype=np.int64)
-        dist = dijkstra(graph, directed=False, indices=seed_nodes[idxs])
-        block = dist[:, seed_nodes]
-        return [(int(i), block[r]) for r, i in enumerate(idxs)]
-
-    # Each Dijkstra source allocates one length-n_nodes distance array; cap threads by available
-    # memory. Threads still parallelise across chunks (Dijkstra releases the GIL, sharing one graph).
-    workers = _bounded_workers(n_jobs, per_worker_bytes=graph.shape[0] * 8)
-    if workers == 1 or n <= 2:
-        rows = _rows(list(range(n)))
-    else:
-        from joblib import Parallel, delayed
-        chunks = [list(range(k, n, workers)) for k in range(min(workers, n))]
-        results = Parallel(n_jobs=workers, prefer="threads")(
-            delayed(_rows)(ch) for ch in chunks
-        )
-        rows = [item for chunk in results for item in chunk]
-    for i, row in rows:
-        distance_matrix[i] = row
-    distance_matrix[~np.isfinite(distance_matrix)] = np.nan
-    np.fill_diagonal(distance_matrix, 0.0)
-    return distance_matrix
-
-
 def compute_junction_distances(
     contact_labels: np.ndarray,
     membrane_mask: np.ndarray,
     voxel_size: Union[float, Dict[str, float]],
     surface_area_nm2: Optional[float] = None,
-    membrane_indices: Optional[np.ndarray] = None,
     n_jobs: int = 1,
-    geodesic_backend: str = "dijkstra",
     mesh_vertices: Optional[np.ndarray] = None,
     mesh_faces: Optional[np.ndarray] = None,
 ) -> Tuple[np.ndarray, Dict[str, float]]:
-    """Geodesic distances between crista-membrane junctions measured along the membrane surface.
+    """Geodesic distances between crista-membrane junctions along the eroded-mito surface mesh.
 
-    Each junction (a connected component in ``contact_labels``) is reduced to its centroid and
-    pairwise geodesic distances are computed. Two backends are available:
-
-    - ``"dijkstra"`` (default): centroids are snapped to the nearest membrane voxel and distances
-      run over a sparse graph of the membrane voxels (26-connectivity, Euclidean nm edge weights,
-      ``scipy.sparse.csgraph.dijkstra``). Memory is proportional to the (thin) membrane, and it is
-      exact for the voxel graph. Always available.
-    - ``"mesh"``: a triangle-mesh surface geodesic via ``bioimage_cpp.distance.geodesic_distances_mesh``.
-      The mesh is the **eroded-mito (lumen) surface** passed in as ``mesh_vertices``/``mesh_faces`` by
-      :func:`_single_mito_row` (a clean, single-wall, connected surface at the membrane's inner edge);
-      each junction centroid is snapped to its nearest mesh vertex. If no mesh is supplied the mesh is
-      built from ``membrane_mask`` as a fallback. Falls back **silently** to ``"dijkstra"`` when
-      bioimage-cpp lacks the geodesic API or no usable mesh is available
-      (:func:`compute_mito_crista_statistics` emits a single warning for the missing-API case).
+    Each junction (a connected component in ``contact_labels``) is reduced to its centroid, snapped to
+    the nearest vertex of a triangle mesh, and pairwise surface geodesics are computed with
+    ``bioimage_cpp.distance.geodesic_distances_mesh``. The mesh is the **eroded-mito (lumen) surface**
+    passed in as ``mesh_vertices``/``mesh_faces`` by :func:`_single_mito_row` (a clean, single-wall
+    surface at the membrane's inner edge); if none is supplied a mesh is built from ``membrane_mask``
+    as a convenience. When the bioimage-cpp geodesic API is unavailable or the mesh is empty, the
+    junction distances are NaN (:func:`compute_mito_crista_statistics` emits a single warning).
 
     A Clark-Evans nearest-neighbour index summarises whether the junctions are clustered.
 
     Args:
         contact_labels: Integer junction label array (0 = background, 1..n = junctions),
             e.g. the first return value of :func:`detect_contact_sites`.
-        membrane_mask: Binary mitochondrial membrane mask the junctions sit on (and, for the mesh
-            backend, the surface the geodesic mesh is built from).
+        membrane_mask: Binary mitochondrial membrane mask the junctions sit on (used to build a
+            fallback mesh when ``mesh_vertices``/``mesh_faces`` are not supplied).
         voxel_size: Voxel size in nm — scalar or dict with "z"/"y"/"x" keys.
         surface_area_nm2: Membrane/mito surface area used as the reference area for the
             Clark-Evans expectation. If None or non-positive, the clustering index is NaN.
-        membrane_indices: Optional precomputed nearest-membrane-voxel index array (the second
-            output of ``distance_transform_edt(~membrane_mask, return_indices=True, sampling=...)``).
-            Used by the Dijkstra backend to avoid recomputing the distance transform.
-        n_jobs: 1 = serial, -1 = all cores. Forwarded to the per-source Dijkstra thread pool or the
-            mesh solver's thread count. Results are identical regardless of n_jobs.
-        geodesic_backend: ``"dijkstra"`` (default, exact voxel-graph) or ``"mesh"`` (bioimage-cpp
-            surface geodesic; falls back to Dijkstra if unavailable).
+        n_jobs: 1 = serial, -1 = all cores (forwarded to the mesh solver's thread count).
         mesh_vertices: Optional (n_vertices, 3) mesh vertices in nm (padded frame; see
-            :func:`_surface_mesh`) for the mesh backend — the eroded-mito (lumen) surface. If omitted,
-            the mesh backend builds one from ``membrane_mask``.
+            :func:`_surface_mesh`) — the eroded-mito (lumen) surface. If omitted, a mesh is built
+            from ``membrane_mask``.
         mesh_faces: Optional (n_faces, 3) triangle indices matching ``mesh_vertices``.
 
     Returns:
@@ -756,22 +621,14 @@ def compute_junction_distances(
         summary["junction_count"] = n
         return np.zeros((n, n), dtype=float), summary
 
-    # Junction centroids in one labelled reduction (uniform weights → geometric centroid, i.e.
-    # coords.mean(axis=0)) instead of an argwhere scan of the whole array per label — the old loop
-    # was O(n_voxels × n_junctions); this is a single pass. Both backends start from these.
+    # Junction centroids in one labelled reduction (uniform weights → geometric centroid).
     centroids = np.atleast_2d(
         np.asarray(center_of_mass(contact_labels > 0, labels=contact_labels, index=labels), dtype=float)
     )
 
-    if geodesic_backend not in ("dijkstra", "mesh"):
-        raise ValueError(f"geodesic_backend must be 'dijkstra' or 'mesh', got {geodesic_backend!r}")
-
-    # Mesh backend: geodesic along the eroded-mito (lumen) surface supplied by the caller, or a mesh
-    # built from `membrane_mask` as a fallback. Falls back to the exact voxel-graph Dijkstra silently
-    # when the bioimage-cpp geodesic API is missing or no usable mesh is available — the user-facing
-    # "API unavailable" notice is emitted once in compute_mito_crista_statistics.
+    # Surface geodesic along the supplied eroded-mito mesh (or a mesh built from the membrane).
     distance_matrix = None
-    if geodesic_backend == "mesh" and geodesic_distances_mesh is not None:
+    if geodesic_distances_mesh is not None:
         if mesh_vertices is not None and mesh_faces is not None and len(mesh_faces) > 0:
             mesh = (mesh_vertices, mesh_faces)
         else:
@@ -780,9 +637,10 @@ def compute_junction_distances(
             distance_matrix = _junction_matrix_mesh(centroids, sampling, mesh[0], mesh[1], n_jobs)
 
     if distance_matrix is None:
-        distance_matrix = _junction_matrix_dijkstra(
-            contact_labels, membrane, sampling, centroids, membrane_indices, n_jobs
-        )
+        # bioimage-cpp geodesic API unavailable or no usable mesh → distances are NaN (no fallback).
+        summary = dict(_JUNCTION_DISTANCE_NAN)
+        summary["junction_count"] = n
+        return np.full((n, n), np.nan, dtype=float), summary
 
     # Nearest-neighbour distance per junction (nearest reachable other junction). Vectorised:
     # exclude self (diagonal) and unreachable pairs (NaN) by setting them to +inf, take the row
@@ -863,7 +721,6 @@ def _single_mito_row(
     border_radius: int,
     method: str = "fast",
     inner_n_jobs: int = 1,
-    geodesic_backend: str = "dijkstra",
 ) -> Dict[str, float]:
     """Compute the statistics row for a single mitochondrion instance.
 
@@ -900,31 +757,22 @@ def _single_mito_row(
 
     if has_crista and has_membrane:
         contact_labels_local, contact_summary = detect_contact_sites(crista_local, membrane_local, voxel_size)
-        # One distance transform of the membrane, reused for proximity (distances) and for
-        # junction snapping (indices) — return_indices gives both at ~no extra cost.
-        membrane_distance, membrane_indices = distance_transform_edt(
-            ~membrane_local, sampling=sampling.tolist(), return_indices=True
-        )
+        # Distance transform of the membrane, for the crista→membrane proximity metric.
+        membrane_distance = distance_transform_edt(~membrane_local, sampling=sampling.tolist())
         _, proximity = compute_crista_proximity(
             crista_local, membrane_local, voxel_size, membrane_distance=membrane_distance
         )
-        # Mesh backend: measure the geodesic on the eroded-mito (lumen) surface — the mito interior
-        # inside the membrane band (mito & ~membrane). This is a clean, single-wall, connected surface
-        # at the membrane's inner edge (no per-slice fragmentation, no double wall). Built once here.
-        mesh_verts = mesh_faces = None
-        if geodesic_backend == "mesh":
-            lumen_local = mito_local & ~membrane_local
-            lumen_mesh = _surface_mesh(lumen_local, sampling)
-            if lumen_mesh is not None:
-                mesh_verts, mesh_faces = lumen_mesh
+        # Measure junction geodesics on the eroded-mito (lumen) surface — the mito interior inside the
+        # membrane band (mito & ~membrane): a clean, single-wall surface at the membrane's inner edge.
+        lumen_mesh = _surface_mesh(mito_local & ~membrane_local, sampling)
+        mesh_verts, mesh_faces = lumen_mesh if lumen_mesh is not None else (None, None)
         _, junction_dist = compute_junction_distances(
             contact_labels_local, membrane_local, voxel_size,
-            surface_area_nm2=mito_surface, membrane_indices=membrane_indices, n_jobs=inner_n_jobs,
-            geodesic_backend=geodesic_backend, mesh_vertices=mesh_verts, mesh_faces=mesh_faces,
+            surface_area_nm2=mito_surface, n_jobs=inner_n_jobs,
+            mesh_vertices=mesh_verts, mesh_faces=mesh_faces,
         )
-        # Free the (potentially large) distance-transform arrays before the orientation
-        # computation so they don't co-reside with its structure-tensor components.
-        del membrane_distance, membrane_indices, contact_labels_local
+        # Free the (potentially large) distance-transform array before the orientation computation.
+        del membrane_distance, contact_labels_local
     else:
         contact_summary = {"contact_voxel_count": 0, "crista_junction_count": 0, "contact_volume_nm3": 0.0}
         proximity = {"median_nm": np.nan}
@@ -989,7 +837,6 @@ def compute_mito_crista_statistics(
     n_jobs: int = 1,
     verbose: bool = False,
     progress_callback: Optional[Callable[[int, int], None]] = None,
-    geodesic_backend: str = "mesh",
     membrane_mode: str = "slice_2d",
 ) -> pd.DataFrame:
     """Compute all crista metrics organised by mitochondrial instance.
@@ -1021,15 +868,13 @@ def compute_mito_crista_statistics(
             (completed_count, total_count) — e.g. to drive a napari progress bar. It is
             always called from the calling thread (the joblib results generator is consumed
             here), so GUI updates from it need no cross-thread marshaling.
-        geodesic_backend: Backend for the junction nearest-neighbour geodesic distances —
-            ``"mesh"`` (default) uses the bioimage-cpp surface geodesic on the mito marching-cubes
-            mesh (~3x faster than Dijkstra with sub-nm agreement); ``"dijkstra"`` uses the exact
-            membrane voxel-graph. ``"mesh"`` falls back to ``"dijkstra"`` (with a single warning)
-            when the bioimage-cpp geodesic API is unavailable (needs bioimage-cpp>=0.6.0). Only the
-            junction-distance columns depend on this choice.
         membrane_mode: How the membrane shell is built when ``membrane_mask`` is None —
             ``"slice_2d"`` (default, per-Z-slice 2D erosion, z-parallel) or ``"shell_3d"`` (connected
             3D shell). See :func:`approximate_membrane`.
+
+    The junction nearest-neighbour distances are geodesics along the eroded-mito surface mesh
+    (``bioimage_cpp.distance.geodesic_distances_mesh``, needs bioimage-cpp>=0.6.0); when that API is
+    unavailable those columns are NaN (a single warning is emitted).
 
     Returns:
         DataFrame with one row per mito instance:
@@ -1048,17 +893,13 @@ def compute_mito_crista_statistics(
     """
     if method not in ("fast", "exact", "skip"):
         raise ValueError(f"method must be 'fast', 'exact', or 'skip', got {method!r}")
-    if geodesic_backend not in ("dijkstra", "mesh"):
-        raise ValueError(f"geodesic_backend must be 'dijkstra' or 'mesh', got {geodesic_backend!r}")
-    # Resolve mesh availability once here (not per mito) so the "API unavailable" notice is a single
-    # warning rather than one per mitochondrion.
-    if geodesic_backend == "mesh" and geodesic_distances_mesh is None:
+    # Warn once (not per mito) if the mesh geodesic API is unavailable → junction distances are NaN.
+    if geodesic_distances_mesh is None:
         warnings.warn(
-            "geodesic_backend='mesh' requested but the bioimage-cpp geodesic API is unavailable "
-            "(needs bioimage-cpp>=0.6.0); using the Dijkstra backend instead.",
+            "The bioimage-cpp geodesic API is unavailable (needs bioimage-cpp>=0.6.0); "
+            "junction nearest-neighbour distance columns will be NaN.",
             RuntimeWarning, stacklevel=2,
         )
-        geodesic_backend = "dijkstra"
     if membrane_mask is None:
         membrane_mask = approximate_membrane(
             mito_segmentation, voxel_size, membrane_thickness_nm, border_gap_nm,
@@ -1090,7 +931,7 @@ def compute_mito_crista_statistics(
         return _single_mito_row(
             label, bbox, mito_crop, crista_crop, membrane_crop,
             voxel_size, sampling, voxel_vol, vol_shape, border_radius,
-            method=method, inner_n_jobs=inner_n_jobs, geodesic_backend=geodesic_backend,
+            method=method, inner_n_jobs=inner_n_jobs,
         )
 
     n_workers = os.cpu_count() if n_jobs == -1 else max(1, n_jobs)
