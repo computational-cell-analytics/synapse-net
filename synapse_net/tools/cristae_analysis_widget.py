@@ -18,6 +18,21 @@ class CristaeAnalysisWidget(BaseWidget):
         "Skip (no orientation)": "skip",
     }
 
+    # Geodesic-backend dropdown labels -> the `geodesic_backend` argument.
+    _GEODESIC_DIJKSTRA = "Exact (Dijkstra)"
+    _GEODESIC_MESH = "Mesh (bioimage-cpp)"
+    _GEODESIC_TO_BACKEND = {
+        _GEODESIC_MESH: "mesh",
+        _GEODESIC_DIJKSTRA: "dijkstra",
+    }
+
+    # Membrane-mode dropdown labels -> the `membrane_mode` argument of approximate_membrane.
+    _MEMBRANE_SLICE_2D = "2D per-slice (z-parallel)"
+    _MEMBRANE_TO_MODE = {
+        _MEMBRANE_SLICE_2D: "slice_2d",
+        "3D connected shell": "shell_3d",
+    }
+
     def __init__(self):
         super().__init__()
 
@@ -27,10 +42,18 @@ class CristaeAnalysisWidget(BaseWidget):
         self.crista_selector_name = "Crista Mask"
         self.mito_selector_name = "Mito Segmentation"
 
-        self.crista_selector_widget = self._create_layer_selector(self.crista_selector_name, layer_type="Labels")
-        self.mito_selector_widget = self._create_layer_selector(self.mito_selector_name, layer_type="Labels")
+        # Auto-default each input to a layer whose name contains the matching keyword.
+        self.crista_selector_widget = self._create_layer_selector(
+            self.crista_selector_name, layer_type="Labels", prefer_substring="cristae")
+        self.mito_selector_widget = self._create_layer_selector(
+            self.mito_selector_name, layer_type="Labels", prefer_substring="mitochondria")
 
         self.settings = self._create_settings_widget()
+
+        # Cheap preview of the membrane + junctions (the front-end of the pipeline) so the user can
+        # tune Membrane Thickness / Border Gap and inspect them before the expensive per-mito run.
+        self.preview_button = QPushButton("Preview Membrane & Junctions")
+        self.preview_button.clicked.connect(self.on_preview)
 
         self.run_button = QPushButton("Run Cristae Analysis")
         self.run_button.clicked.connect(self.on_run)
@@ -38,9 +61,15 @@ class CristaeAnalysisWidget(BaseWidget):
         layout.addWidget(self.crista_selector_widget)
         layout.addWidget(self.mito_selector_widget)
         layout.addWidget(self.settings)
+        layout.addWidget(self.preview_button)
         layout.addWidget(self.run_button)
 
         self.setLayout(layout)
+
+    # Result layer names, shared by the preview and the full run so re-previewing / running updates
+    # the same layers instead of duplicating them.
+    _MEMBRANE_LAYER = "Membrane Mask"
+    _JUNCTION_LAYER = "Crista-Membrane Junctions"
 
     def _create_settings_widget(self):
         setting_values = QWidget()
@@ -94,22 +123,49 @@ class CristaeAnalysisWidget(BaseWidget):
         )
         setting_values.layout().addLayout(layout)
 
+        self.geodesic_param, layout = self._add_choice_param(
+            "geodesic_backend", self._GEODESIC_MESH, list(self._GEODESIC_TO_BACKEND.keys()),
+            title="Junction geodesic backend",
+            tooltip="How the geodesic distances between crista-membrane junctions are computed "
+                    "(affects only the junction-distance columns).\n"
+                    "- Mesh (bioimage-cpp): surface geodesic on the mitochondrion mesh; the default "
+                    "(~3x faster). Requires a bioimage-cpp build with the geodesic API, else it "
+                    "falls back to Dijkstra.\n"
+                    "- Exact (Dijkstra): exact along the membrane voxel graph; always available.",
+        )
+        setting_values.layout().addLayout(layout)
+
+        self.membrane_mode_param, layout = self._add_choice_param(
+            "membrane_mode", self._MEMBRANE_SLICE_2D, list(self._MEMBRANE_TO_MODE.keys()),
+            title="Membrane mode",
+            tooltip="How the membrane shell is approximated.\n"
+                    "- 2D per-slice (z-parallel): erode each Z-slice independently in XY (no z-bleed); "
+                    "the shell has no Z-caps and can fragment across slices (some junction pairs may "
+                    "then have no along-membrane path).\n"
+                    "- 3D connected shell: a single connected 3D shell including the Z-caps (no "
+                    "fragmentation), somewhat slower; thickness acts in all axes.",
+        )
+        setting_values.layout().addLayout(layout)
+
         return self._make_collapsible(widget=setting_values, title="Advanced Settings")
 
-    def on_run(self):
+    def _read_inputs(self):
+        """Validate the selected layers/voxel size and read the shared run/preview parameters.
+
+        Returns (crista_mask, mito_seg, voxel_size, layer_scale, layer_translate, mm_thickness,
+        border_gap) or None (after showing a guidance message) if inputs are incomplete.
+        """
         crista_mask = self._get_layer_selector_data(self.crista_selector_name)
         mito_seg = self._get_layer_selector_data(self.mito_selector_name)
-
         if crista_mask is None or mito_seg is None:
             show_info("Please select both a crista mask and a mito segmentation layer.")
-            return
+            return None
 
         metadata = self._get_layer_selector_data(self.crista_selector_name, return_metadata=True)
         voxel_size = self._handle_resolution(metadata, self.voxel_size_param, crista_mask.ndim, return_as_list=False)
-
         if voxel_size is None:
             show_info("Please provide a voxel size (or ensure layer metadata contains voxel_size).")
-            return
+            return None
 
         # Inherit the display scale/translate of the source layer so the result layers overlay
         # the input correctly (e.g. when the raw data was loaded with a physical voxel scale).
@@ -120,18 +176,82 @@ class CristaeAnalysisWidget(BaseWidget):
         mm_thickness = self.mm_thickness_param.value()
         border_gap_val = self.border_gap_param.value()
         border_gap = border_gap_val if border_gap_val > 0.0 else None
+        membrane_mode = self._MEMBRANE_TO_MODE[self.membrane_mode_param.currentText()]
+        return (crista_mask, mito_seg, voxel_size, layer_scale, layer_translate,
+                mm_thickness, border_gap, membrane_mode)
 
-        show_info("INFO: Approximating mitochondrial membrane...")
+    def _compute_membrane_and_contacts(self, mito_seg, crista_mask, voxel_size, mm_thickness,
+                                       border_gap, membrane_mode):
+        """The cheap front-end shared by preview and run: membrane shell + crista-membrane junctions."""
         membrane_mask = approximate_membrane(
             mito_seg, voxel_size,
-            membrane_thickness_nm=mm_thickness,
-            border_gap_nm=border_gap,
-            n_jobs=-1,  # parallelize the per-slice erosion across cores.
+            membrane_thickness_nm=mm_thickness, border_gap_nm=border_gap,
+            n_jobs=-1,  # parallelize across cores (per-Z-slice in 2D mode).
+            membrane_mode=membrane_mode,
+        )
+        contact_labels, contact_summary = detect_contact_sites(
+            crista_mask.astype(bool), membrane_mask, voxel_size
+        )
+        return membrane_mask, contact_labels, contact_summary
+
+    def _add_or_update_labels(self, name, data, scale, translate, opacity=None):
+        """Add a Labels layer, or refresh it in place if one with this name already exists."""
+        if name in self.viewer.layers:
+            layer = self.viewer.layers[name]
+            layer.data = data
+            if opacity is not None:
+                layer.opacity = opacity
+        else:
+            kwargs = {} if opacity is None else {"opacity": opacity}
+            self.viewer.add_labels(data, name=name, scale=scale, translate=translate, **kwargs)
+
+    def on_preview(self):
+        """Compute and show ONLY the membrane + junctions (seconds) — the front-end of the pipeline —
+        so the user can tune Membrane Thickness / Border Gap before the expensive per-mito run."""
+        inputs = self._read_inputs()
+        if inputs is None:
+            return
+        (crista_mask, mito_seg, voxel_size, layer_scale, layer_translate,
+         mm_thickness, border_gap, membrane_mode) = inputs
+
+        show_info("INFO: Previewing membrane & junctions...")
+        membrane_mask, contact_labels, contact_summary = self._compute_membrane_and_contacts(
+            mito_seg, crista_mask, voxel_size, mm_thickness, border_gap, membrane_mode
+        )
+        self._add_or_update_labels(
+            self._MEMBRANE_LAYER, membrane_mask.astype(np.uint8), layer_scale, layer_translate, opacity=0.4
+        )
+        if contact_labels.max() > 0:
+            self._add_or_update_labels(
+                self._JUNCTION_LAYER, contact_labels.astype(np.uint32), layer_scale, layer_translate
+            )
+        else:
+            show_info("INFO: No crista–membrane junctions detected at these settings.")
+        show_info(
+            f"INFO: Preview — {int(membrane_mask.sum())} membrane voxels, "
+            f"{contact_summary['crista_junction_count']} junctions. "
+            "Adjust Membrane Thickness / Border Gap and preview again, or Run."
+        )
+
+    def on_run(self):
+        inputs = self._read_inputs()
+        if inputs is None:
+            return
+        (crista_mask, mito_seg, voxel_size, layer_scale, layer_translate,
+         mm_thickness, border_gap, membrane_mode) = inputs
+
+        show_info("INFO: Approximating mitochondrial membrane & junctions...")
+        membrane_mask, contact_labels, contact_summary = self._compute_membrane_and_contacts(
+            mito_seg, crista_mask, voxel_size, mm_thickness, border_gap, membrane_mode
         )
 
         method = self._ORIENTATION_TO_METHOD[self.orientation_param.currentText()]
+        geodesic_backend = self._GEODESIC_TO_BACKEND[self.geodesic_param.currentText()]
 
-        show_info(f"INFO: Running cristae analysis per mitochondrion (orientation: {method})...")
+        show_info(
+            f"INFO: Running cristae analysis per mitochondrion "
+            f"(orientation: {method}, junction geodesic: {geodesic_backend})..."
+        )
         pbar = {"bar": None}
 
         def _on_progress(done, total):
@@ -148,6 +268,8 @@ class CristaeAnalysisWidget(BaseWidget):
                 membrane_thickness_nm=mm_thickness,
                 border_gap_nm=border_gap,
                 method=method,
+                geodesic_backend=geodesic_backend,
+                membrane_mode=membrane_mode,
                 n_jobs=-1,  # mitochondria are independent — use all cores.
                 verbose=True,  # terminal tqdm bar.
                 progress_callback=_on_progress,  # napari activity-dock bar.
@@ -157,20 +279,14 @@ class CristaeAnalysisWidget(BaseWidget):
                 pbar["bar"].close()
 
         if self.show_membranes_param.isChecked():
-            self.viewer.add_labels(
-                membrane_mask.astype(np.uint8), name="Membrane Mask", opacity=0.4,
-                scale=layer_scale, translate=layer_translate,
+            self._add_or_update_labels(
+                self._MEMBRANE_LAYER, membrane_mask.astype(np.uint8), layer_scale, layer_translate, opacity=0.4
             )
 
-        # Add crista-membrane junctions as a Labels layer (each junction has its own ID).
-        contact_labels, contact_summary = detect_contact_sites(
-            crista_mask.astype(bool), membrane_mask, voxel_size
-        )
+        # Crista-membrane junctions as a Labels layer (each junction has its own ID).
         if contact_labels.max() > 0:
-            self.viewer.add_labels(
-                contact_labels.astype(np.uint32),
-                name="Crista-Membrane Junctions",
-                scale=layer_scale, translate=layer_translate,
+            self._add_or_update_labels(
+                self._JUNCTION_LAYER, contact_labels.astype(np.uint32), layer_scale, layer_translate
             )
         else:
             show_info("INFO: No crista–membrane junctions detected — junction layer not added.")

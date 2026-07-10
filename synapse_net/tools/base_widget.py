@@ -33,12 +33,15 @@ class BaseWidget(QWidget):
         self.viewer = napari.current_viewer()
         self.attribute_dict = {}
 
-    def _create_layer_selector(self, selector_name, layer_type="Image"):
+    def _create_layer_selector(self, selector_name, layer_type="Image", prefer_substring=None):
         """Create a layer selector for an image or labels and store it in a dictionary.
 
         Args:
             selector_name (str): The name of the selector, used as a key in the dictionary.
             layer_type (str): The type of layer to filter for ("Image" or "Labels").
+            prefer_substring (str, optional): If given, the selector auto-defaults to the first
+                layer whose name contains this substring (case-insensitive); falls back to the first
+                layer otherwise. Re-applied whenever layers are added/removed.
         """
         if not hasattr(self, "layer_selectors"):
             self.layer_selectors = {}
@@ -58,11 +61,15 @@ class BaseWidget(QWidget):
         layer_label = QtWidgets.QLabel(f"{selector_name}:")
 
         # Populate initial options
-        self._update_selector(selector=image_selector, layer_filter=layer_filter)
+        self._update_selector(selector=image_selector, layer_filter=layer_filter, prefer_substring=prefer_substring)
 
         # Update selector on layer events
-        self.viewer.layers.events.inserted.connect(lambda event: self._update_selector(image_selector, layer_filter))
-        self.viewer.layers.events.removed.connect(lambda event: self._update_selector(image_selector, layer_filter))
+        self.viewer.layers.events.inserted.connect(
+            lambda event: self._update_selector(image_selector, layer_filter, prefer_substring)
+        )
+        self.viewer.layers.events.removed.connect(
+            lambda event: self._update_selector(image_selector, layer_filter, prefer_substring)
+        )
 
         # Store the selector in the dictionary
         self.layer_selectors[selector_name] = selector_widget
@@ -74,11 +81,20 @@ class BaseWidget(QWidget):
         selector_widget.setLayout(layout)
         return selector_widget
 
-    def _update_selector(self, selector, layer_filter):
-        """Update a single selector with the current image layers in the viewer."""
+    def _update_selector(self, selector, layer_filter, prefer_substring=None):
+        """Update a single selector with the current image layers in the viewer.
+
+        If ``prefer_substring`` is given, auto-select the first layer whose name contains it
+        (case-insensitive); otherwise the first layer stays selected (QComboBox default).
+        """
         selector.clear()
         image_layers = [layer.name for layer in self.viewer.layers if isinstance(layer, layer_filter)]
         selector.addItems(image_layers)
+        if prefer_substring:
+            needle = prefer_substring.lower()
+            match = next((name for name in image_layers if needle in name.lower()), None)
+            if match is not None:
+                selector.setCurrentText(match)
 
     def _get_layer_selector_layer(self, selector_name):
         """Return the layer currently selected in a given selector."""

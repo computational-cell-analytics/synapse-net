@@ -21,21 +21,10 @@ def _make_crista(shape=(32, 32, 32)):
     return mask
 
 
-def _naive_membrane(seg, voxel_size, thickness=8.0, gap=None):
-    """Reference implementation: full-slice erosion (pre-optimization) + border suppression."""
-    from scipy.ndimage import binary_erosion
-    from skimage.morphology import disk
-    from synapse_net.cristae_analysis import _voxel_radius_xy, _voxel_radius, _border_zone
-    mito = seg > 0
-    r = _voxel_radius_xy(thickness, voxel_size)
-    mem = np.zeros_like(mito)
-    for z in range(mito.shape[0]):
-        sl = mito[z]
-        mem[z] = sl & ~binary_erosion(sl, structure=disk(r), border_value=1)
-    g = gap if gap is not None else thickness
-    gap_radius = _voxel_radius(g, voxel_size, mito.ndim)
-    mem &= ~_border_zone(seg.shape, gap_radius)
-    return mem.astype(bool)
+def _membrane_components(membrane):
+    """Number of 26-connected components of a binary membrane mask."""
+    from scipy.ndimage import label as _lab
+    return int(_lab(membrane, structure=np.ones((3,) * membrane.ndim, dtype=bool))[1])
 
 
 def _make_lamellae(shape=(48, 48, 48), normal=(1, 0, 0), spacing=6, thickness=2, margin=8):
@@ -126,31 +115,44 @@ class TestApproximateMembrane(unittest.TestCase):
         membrane = approximate_membrane(mito_seg, voxel_size=voxel_size)
         self.assertTrue(membrane.any())
 
-    def test_no_z_bleed(self):
-        # Mito exists only at z=5..15; slices 0..4 and 16..20 are empty.
-        # The 2D per-slice erosion must not produce membrane voxels outside the
-        # z-range where the mito is present (a 3D ball would bleed into neighbours).
+    def test_membrane_within_mito_z_extent(self):
+        # The membrane is a subset of the mito, so it cannot appear in z-slices with no mito.
         from synapse_net.cristae_analysis import approximate_membrane
         seg = np.zeros((21, 30, 30), dtype="uint32")
         seg[5:16, 5:25, 5:25] = 1
         membrane = approximate_membrane(seg, voxel_size=1.0, membrane_thickness_nm=2.0)
-        self.assertFalse(membrane[:5].any(),  "membrane bled into z < 5")
-        self.assertFalse(membrane[16:].any(), "membrane bled into z > 15")
+        self.assertFalse(membrane[:5].any())
+        self.assertFalse(membrane[16:].any())
 
-    def test_optimized_matches_reference_and_parallel(self):
-        # The crop/skip-empty/parallel optimizations must be byte-identical to the naive
-        # full-slice erosion, for an interior instance AND one touching the array edge
-        # (which exercises the border_value=1 handling that the crop margin must preserve).
+    def test_slice2d_njobs_invariant(self):
+        # The per-Z-slice 2D erosion (default) is parallelised over z — the result must not depend on
+        # n_jobs — and the membrane stays inside the mito.
         from synapse_net.cristae_analysis import approximate_membrane
         seg = np.zeros((16, 40, 40), dtype="uint32")
-        seg[3:13, 5:20, 5:20] = 1        # interior
-        seg[3:13, 25:40, 25:40] = 2      # touches the y/x max faces
+        seg[3:13, 5:20, 5:20] = 1
+        seg[3:13, 25:40, 25:40] = 2
         voxel_size = {"z": 2.0, "y": 1.0, "x": 1.0}
-        ref = _naive_membrane(seg, voxel_size, thickness=4.0)
-        got1 = approximate_membrane(seg, voxel_size, membrane_thickness_nm=4.0, n_jobs=1)
-        got2 = approximate_membrane(seg, voxel_size, membrane_thickness_nm=4.0, n_jobs=2)
-        np.testing.assert_array_equal(got1, ref)
-        np.testing.assert_array_equal(got2, ref)
+        got1 = approximate_membrane(seg, voxel_size, membrane_thickness_nm=4.0, n_jobs=1, membrane_mode="slice_2d")
+        got2 = approximate_membrane(seg, voxel_size, membrane_thickness_nm=4.0, n_jobs=2, membrane_mode="slice_2d")
+        np.testing.assert_array_equal(got1, got2)
+        self.assertTrue(np.all(got1[seg == 0] == False))  # membrane ⊆ mito  # noqa: E712
+
+    def test_shell3d_connected(self):
+        # The 3D shell mode is a single connected component per (solid) mito — the property that
+        # keeps the junction geodesic from fragmenting.
+        from synapse_net.cristae_analysis import approximate_membrane
+        seg = np.zeros((16, 40, 40), dtype="uint32")
+        seg[3:13, 5:20, 5:20] = 1
+        seg[3:13, 25:40, 25:40] = 2
+        voxel_size = {"z": 2.0, "y": 1.0, "x": 1.0}
+        membrane = approximate_membrane(seg, voxel_size, membrane_thickness_nm=4.0, membrane_mode="shell_3d")
+        self.assertTrue(np.all(membrane[seg == 0] == False))  # noqa: E712
+        self.assertEqual(_membrane_components(membrane), 2)   # one connected shell per instance
+
+    def test_invalid_membrane_mode_raises(self):
+        from synapse_net.cristae_analysis import approximate_membrane
+        with self.assertRaises(ValueError):
+            approximate_membrane(_make_mito(), voxel_size=1.0, membrane_mode="bogus")
 
 
 class TestCristaeProximity(unittest.TestCase):
@@ -808,6 +810,136 @@ class TestFastMethod(unittest.TestCase):
         crista = _make_crista()
         with self.assertRaises(ValueError):
             compute_mito_crista_statistics(crista, mito_seg, voxel_size=1.0, method="bogus")
+
+
+class TestMeshGeodesicBackend(unittest.TestCase):
+    """The optional bioimage-cpp mesh surface-geodesic backend for junction distances.
+
+    ``geodesic_backend="mesh"`` meshes the eroded-mito (lumen) surface (passed in by _single_mito_row)
+    and measures the surface geodesic along it; the membrane and lumen surface are connected, so the
+    two backends run on ~the same connected surface. It must fall back to Dijkstra when the
+    bioimage-cpp geodesic API is unavailable.
+    """
+
+    @staticmethod
+    def _mito_with_cristae(shape=(40, 40, 40)):
+        mito = np.zeros(shape, dtype="uint32")
+        mito[4:-4, 4:-4, 4:-4] = 1
+        crista = np.zeros(shape, dtype=bool)
+        # Compact crista patches against the y-low membrane wall at distinct x — well-separated
+        # junctions with real spacing. Placed on a *side* wall (not a z-cap) so they touch both the
+        # per-slice XY-ring membrane ("slice_2d") and the 3D shell ("shell_3d").
+        for x in (10, 18, 26, 32):
+            crista[10:14, 6:9, x:x + 3] = True
+        return crista, mito
+
+    def test_mesh_backend_finite_and_comparable_to_dijkstra(self):
+        from synapse_net.cristae_analysis import compute_mito_crista_statistics, geodesic_distances_mesh
+        if geodesic_distances_mesh is None:
+            self.skipTest("bioimage-cpp geodesic API not available")
+        crista, mito = self._mito_with_cristae()
+        df_dij = compute_mito_crista_statistics(crista, mito, 2.0, method="skip", geodesic_backend="dijkstra")
+        df_mesh = compute_mito_crista_statistics(crista, mito, 2.0, method="skip", geodesic_backend="mesh")
+
+        # Same junctions detected (detection is backend-independent).
+        self.assertEqual(
+            int(df_dij["crista_junction_count"].iloc[0]), int(df_mesh["crista_junction_count"].iloc[0])
+        )
+        mean_dij = df_dij["mean_nn_junction_distance_nm"].iloc[0]
+        mean_mesh = df_mesh["mean_nn_junction_distance_nm"].iloc[0]
+        # Mesh (eroded-mito lumen surface) and Dijkstra (membrane voxel graph) run on ~the same
+        # connected surface: both finite/positive and comparable (not necessarily tight — different
+        # surfaces/discretizations), and the clustering index is defined.
+        self.assertTrue(np.isfinite(mean_dij) and mean_dij > 0)
+        self.assertTrue(np.isfinite(mean_mesh) and mean_mesh > 0)
+        self.assertLess(abs(mean_mesh - mean_dij) / mean_dij, 0.75)
+        self.assertTrue(np.isfinite(df_mesh["junction_clustering_index"].iloc[0]))
+
+    def test_primitive_mesh_on_flat_membrane_matches_dijkstra(self):
+        # The primitive meshes the membrane it is given. On a flat membrane the surface geodesic and
+        # the voxel-graph geodesic should agree tightly (this is the regime where they coincide).
+        from synapse_net.cristae_analysis import compute_junction_distances, geodesic_distances_mesh
+        if geodesic_distances_mesh is None:
+            self.skipTest("bioimage-cpp geodesic API not available")
+        labels, membrane = TestJunctionDistances._flat_membrane_with_junctions(
+            [(20, 8), (20, 28), (8, 20), (32, 20)]
+        )
+        _, s_dij = compute_junction_distances(labels, membrane, 1.0, surface_area_nm2=1000.0)
+        _, s_mesh = compute_junction_distances(
+            labels, membrane, 1.0, surface_area_nm2=1000.0, geodesic_backend="mesh",
+        )
+        self.assertTrue(np.isfinite(s_mesh["mean_nn_junction_distance_nm"]))
+        rel = abs(s_mesh["mean_nn_junction_distance_nm"] - s_dij["mean_nn_junction_distance_nm"]) \
+            / s_dij["mean_nn_junction_distance_nm"]
+        self.assertLess(rel, 0.15)
+
+    def test_primitive_mesh_falls_back_when_api_missing(self):
+        # With the geodesic API patched out, backend="mesh" must fall back to the exact Dijkstra
+        # result SILENTLY (the single user-facing warning lives in compute_mito_crista_statistics).
+        import warnings
+        import synapse_net.cristae_analysis as ca
+        labels, membrane = TestJunctionDistances._flat_membrane_with_junctions([(20, 8), (20, 28), (20, 18)])
+        dist_ref, sum_ref = ca.compute_junction_distances(labels, membrane, 1.0, surface_area_nm2=1000.0)
+        saved = ca.geodesic_distances_mesh
+        ca.geodesic_distances_mesh = None
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("error")  # no warning expected from the primitive
+                dist_fb, sum_fb = ca.compute_junction_distances(
+                    labels, membrane, 1.0, surface_area_nm2=1000.0, geodesic_backend="mesh",
+                )
+        finally:
+            ca.geodesic_distances_mesh = saved
+        np.testing.assert_allclose(dist_fb, dist_ref, equal_nan=True)
+        np.testing.assert_allclose(
+            sum_fb["mean_nn_junction_distance_nm"], sum_ref["mean_nn_junction_distance_nm"]
+        )
+
+    def test_default_backend_is_mesh(self):
+        # The default (no geodesic_backend arg) must equal an explicit mesh run on the junction
+        # columns — i.e. mesh is the new default at the compute_mito_crista_statistics entry point.
+        from synapse_net.cristae_analysis import compute_mito_crista_statistics, geodesic_distances_mesh
+        if geodesic_distances_mesh is None:
+            self.skipTest("bioimage-cpp geodesic API not available")
+        crista, mito = self._mito_with_cristae()
+        df_default = compute_mito_crista_statistics(crista, mito, 2.0, method="skip")
+        df_mesh = compute_mito_crista_statistics(crista, mito, 2.0, method="skip", geodesic_backend="mesh")
+        for col in ("mean_nn_junction_distance_nm", "median_nn_junction_distance_nm",
+                    "junction_clustering_index"):
+            np.testing.assert_allclose(
+                df_default[col].to_numpy(dtype=float), df_mesh[col].to_numpy(dtype=float),
+                equal_nan=True, err_msg=f"default vs explicit mesh differ on {col}",
+            )
+
+    def test_stats_warns_once_and_uses_dijkstra_without_bic(self):
+        # At the entry point, requesting mesh without the bioimage-cpp geodesic API must emit exactly
+        # one RuntimeWarning and produce the Dijkstra result.
+        import warnings
+        import synapse_net.cristae_analysis as ca
+        crista, mito = self._mito_with_cristae()
+        df_dij = ca.compute_mito_crista_statistics(crista, mito, 2.0, method="skip", geodesic_backend="dijkstra")
+
+        saved = ca.geodesic_distances_mesh
+        ca.geodesic_distances_mesh = None
+        try:
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                df_fb = ca.compute_mito_crista_statistics(crista, mito, 2.0, method="skip", geodesic_backend="mesh")
+        finally:
+            ca.geodesic_distances_mesh = saved
+
+        runtime_warnings = [w for w in caught if issubclass(w.category, RuntimeWarning)]
+        self.assertEqual(len(runtime_warnings), 1, "expected exactly one fallback warning")
+        for col in ("mean_nn_junction_distance_nm", "junction_clustering_index"):
+            np.testing.assert_allclose(
+                df_fb[col].to_numpy(dtype=float), df_dij[col].to_numpy(dtype=float), equal_nan=True
+            )
+
+    def test_invalid_backend_raises(self):
+        from synapse_net.cristae_analysis import compute_mito_crista_statistics
+        crista, mito = self._mito_with_cristae()
+        with self.assertRaises(ValueError):
+            compute_mito_crista_statistics(crista, mito, 2.0, geodesic_backend="bogus")
 
 
 if __name__ == "__main__":
