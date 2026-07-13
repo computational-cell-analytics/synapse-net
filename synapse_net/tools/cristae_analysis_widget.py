@@ -6,7 +6,9 @@ from napari.utils.notifications import show_info
 from qtpy.QtWidgets import QWidget, QVBoxLayout, QPushButton
 
 from .base_widget import BaseWidget
-from ..cristae_analysis import approximate_membrane, compute_mito_crista_statistics, detect_contact_sites
+from ..cristae_analysis import (
+    approximate_membrane, compute_mito_crista_statistics, detect_contact_sites, _surface_mesh
+)
 
 
 class CristaeAnalysisWidget(BaseWidget):
@@ -61,6 +63,7 @@ class CristaeAnalysisWidget(BaseWidget):
     # Result layer names, shared by the preview and the full run so re-previewing / running updates
     # the same layers instead of duplicating them.
     _MEMBRANE_LAYER = "Membrane Mask"
+    _MEMBRANE_MESH_LAYER = "Membrane Mesh"
     _JUNCTION_LAYER = "Crista-Membrane Junctions"
 
     def _create_settings_widget(self):
@@ -69,7 +72,8 @@ class CristaeAnalysisWidget(BaseWidget):
 
         self.save_path, layout = self._add_path_param(
             name="save_path", select_type="file", value="",
-            tooltip="Path to save the analysis results CSV file. An empty path will skip saving.",
+            tooltip="Path to save the analysis results CSV file. An empty path will skip saving. "
+                    "See docs/cristae_analysis.md for how each column is computed.",
         )
         setting_values.layout().addLayout(layout)
 
@@ -97,8 +101,9 @@ class CristaeAnalysisWidget(BaseWidget):
 
         self.show_membranes_param = self._add_boolean_param(
             "show_membranes", False,
-            title="Show Membrane Mask",
-            tooltip="Add the approximated mitochondrial membrane mask as a layer after running.",
+            title="Show Membrane Mesh",
+            tooltip="Add the eroded-mito (lumen) inner surface — the single-wall surface the junction "
+                    "geodesics run along — as a mesh (napari Surface layer) after running.",
         )
         setting_values.layout().addWidget(self.show_membranes_param)
 
@@ -174,16 +179,43 @@ class CristaeAnalysisWidget(BaseWidget):
         )
         return membrane_mask, contact_labels, contact_summary
 
-    def _add_or_update_labels(self, name, data, scale, translate, opacity=None):
+    def _add_or_update_labels(self, name, data, scale, translate, opacity=None, blending=None):
         """Add a Labels layer, or refresh it in place if one with this name already exists."""
         if name in self.viewer.layers:
             layer = self.viewer.layers[name]
             layer.data = data
             if opacity is not None:
                 layer.opacity = opacity
+            if blending is not None:
+                layer.blending = blending
         else:
-            kwargs = {} if opacity is None else {"opacity": opacity}
+            kwargs = {}
+            if opacity is not None:
+                kwargs["opacity"] = opacity
+            if blending is not None:
+                kwargs["blending"] = blending
             self.viewer.add_labels(data, name=name, scale=scale, translate=translate, **kwargs)
+
+    def _add_or_update_surface(self, name, vertices, faces, scale, translate, opacity=None, blending=None):
+        """Add a Surface layer, or refresh it in place if one with this name already exists."""
+        # Surface layers colour by per-vertex values; a constant gives a flat-coloured surface.
+        values = np.ones(len(vertices), dtype="float32")
+        if name in self.viewer.layers:
+            layer = self.viewer.layers[name]
+            layer.data = (vertices, faces, values)
+            if opacity is not None:
+                layer.opacity = opacity
+            if blending is not None:
+                layer.blending = blending
+        else:
+            kwargs = {}
+            if opacity is not None:
+                kwargs["opacity"] = opacity
+            if blending is not None:
+                kwargs["blending"] = blending
+            self.viewer.add_surface(
+                (vertices, faces, values), name=name, scale=scale, translate=translate, **kwargs
+            )
 
     def on_preview(self):
         """Compute and show ONLY the membrane + junctions (seconds) — the front-end of the pipeline —
@@ -203,7 +235,8 @@ class CristaeAnalysisWidget(BaseWidget):
         )
         if contact_labels.max() > 0:
             self._add_or_update_labels(
-                self._JUNCTION_LAYER, contact_labels.astype(np.uint32), layer_scale, layer_translate
+                self._JUNCTION_LAYER, contact_labels.astype(np.uint32), layer_scale, layer_translate,
+                blending="translucent_no_depth",
             )
         else:
             show_info("INFO: No crista–membrane junctions detected at these settings.")
@@ -254,14 +287,24 @@ class CristaeAnalysisWidget(BaseWidget):
                 pbar["bar"].close()
 
         if self.show_membranes_param.isChecked():
-            self._add_or_update_labels(
-                self._MEMBRANE_LAYER, membrane_mask.astype(np.uint8), layer_scale, layer_translate, opacity=0.4
-            )
+            # Eroded-mito (lumen) inner surface — the surface the junction geodesics run along.
+            lumen = (mito_seg > 0) & ~membrane_mask
+            mesh = _surface_mesh(lumen, np.ones(mito_seg.ndim))  # sampling=1 → verts in voxel units
+            if mesh is not None:
+                verts, faces = mesh
+                verts = verts - 1  # undo _surface_mesh's +1 pad → align with voxel indices
+                self._add_or_update_surface(
+                    self._MEMBRANE_MESH_LAYER, verts, faces, layer_scale, layer_translate,
+                    opacity=0.4, blending="translucent",
+                )
+            else:
+                show_info("INFO: No membrane surface to display at these settings.")
 
         # Crista-membrane junctions as a Labels layer (each junction has its own ID).
         if contact_labels.max() > 0:
             self._add_or_update_labels(
-                self._JUNCTION_LAYER, contact_labels.astype(np.uint32), layer_scale, layer_translate
+                self._JUNCTION_LAYER, contact_labels.astype(np.uint32), layer_scale, layer_translate,
+                blending="translucent_no_depth",
             )
         else:
             show_info("INFO: No crista–membrane junctions detected — junction layer not added.")
