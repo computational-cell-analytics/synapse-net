@@ -53,14 +53,16 @@ the junction geodesics run along (see §5 and the **Membrane Mesh** layer).
 the per‑slice erosion is parallelised.
 
 ### 2. Crista orientation — `compute_crista_orientation`
-Builds the **structure tensor** of the binary crista mask: gradients `∇I` (`np.gradient`), then
-`J[i,j] = Gaussian( ∇I_i · ∇I_j )` with `σ = neighborhood_size_nm / voxel` (default 30 nm). Per‑voxel
-eigenvalues (`np.linalg.eigvalsh`, low‑memory chunked) give
-**anisotropy = λ_max / (λ_min + ε)**. The reported `crista_orientation_anisotropy` is the mean over
-crista voxels.
+Computes the **structure-tensor eigenvalues** of the binary crista mask via
+`bioimage_cpp.filters.structure_tensor_eigenvalues` (a fast C++ routine): `inner_sigma` is the
+derivative scale (a minimal 1 voxel), `outer_sigma = neighborhood_size_nm / voxel` is the integration
+scale (default 30 nm). The per‑voxel eigenvalues (descending) give
+**anisotropy = λ_max / (λ_min + ε)**, and the reported `crista_orientation_anisotropy` is the mean
+over crista voxels. When bioimage‑cpp lacks this function, a **NumPy fallback** builds the tensor with
+`np.gradient` + Gaussian smoothing and a low‑memory chunked `eigvalsh`.
 *Interpretation:* high → strongly directional (parallel lamellae), ~1 → isotropic/tubular. It is a
-**magnitude, rotation‑invariant** — it says *how* laminar, not *which* direction (direction lives in
-the discarded eigenvectors).
+**magnitude, rotation‑invariant** — it says *how* laminar, not *which* direction (the orientation
+direction / eigenvectors are not computed).
 
 ### 3. Crista→membrane proximity — `compute_crista_proximity`
 `distance_transform_edt` of the non‑membrane, sampled by voxel size → distance (nm) from each crista
@@ -121,7 +123,7 @@ settings.
 | Step | Function | File |
 |---|---|---|
 | Membrane shell (`slice_2d` / `shell_3d`) | `approximate_membrane` | `synapse_net/cristae_analysis.py` |
-| Crista orientation anisotropy | `compute_crista_orientation` (`_downsampled_orientation_anisotropy` for `fast`) | `synapse_net/cristae_analysis.py` |
+| Crista orientation anisotropy | `compute_crista_orientation` (`bioimage_cpp.filters.structure_tensor_eigenvalues`, NumPy fallback; `_downsampled_orientation_anisotropy` for `fast`) | `synapse_net/cristae_analysis.py` |
 | Crista→membrane proximity | `compute_crista_proximity` | `synapse_net/cristae_analysis.py` |
 | Junctions (crista ∩ membrane) | `detect_contact_sites` | `synapse_net/cristae_analysis.py` |
 | Junction geodesic distances | `compute_junction_distances` → `_junction_matrix_mesh` → `bioimage_cpp.distance.geodesic_distances_mesh` | `synapse_net/cristae_analysis.py` |
@@ -169,8 +171,9 @@ labels layer.)
 - **NumPy** — arrays, gradients, linear algebra (`eigvalsh`).
 - **SciPy** — `scipy.ndimage` (`binary_erosion`, `distance_transform_edt`, `gaussian_filter`,
   `label`, `center_of_mass`); `scipy.spatial.cKDTree` (snap junction centroids to mesh vertices).
-- **bioimage‑cpp** (`bioimage_cpp.distance.geodesic_distances_mesh`, ≥ 0.6.0) — surface geodesic
-  distances between junctions along the eroded‑mito mesh.
+- **bioimage‑cpp** — `bioimage_cpp.distance.geodesic_distances_mesh` (≥ 0.6.0) for junction surface
+  geodesics, and `bioimage_cpp.filters.structure_tensor_eigenvalues` for the crista orientation
+  anisotropy (NumPy fallback if unavailable).
 - **scikit‑image** — `measure.marching_cubes`, `measure.mesh_surface_area`, `measure.regionprops`;
   `morphology.disk`, `morphology.local_maxima`.
 - **pandas** — results table. **tqdm** — progress. **napari** / **qtpy** — the widget/UI.

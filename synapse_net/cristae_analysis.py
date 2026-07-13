@@ -15,6 +15,11 @@ try:  # Optional: surface-mesh geodesic backend (postdates bioimage-cpp 0.5.0).
 except Exception:  # pragma: no cover - depends on installed bioimage-cpp version
     geodesic_distances_mesh = None
 
+try:  # Optional: C++ structure-tensor eigenvalues (falls back to the NumPy path below).
+    from bioimage_cpp.filters import structure_tensor_eigenvalues
+except Exception:  # pragma: no cover - depends on installed bioimage-cpp version
+    structure_tensor_eigenvalues = None
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -260,54 +265,49 @@ def compute_crista_orientation(
     crista_mask: np.ndarray,
     voxel_size: Union[float, Dict[str, float]],
     neighborhood_size_nm: float = 30.0,
-    need_eigenvectors: bool = True,
     n_jobs: int = 1,
-) -> Tuple[np.ndarray, Optional[np.ndarray], np.ndarray]:
-    """Compute dominant crista orientation via structure tensor.
+) -> np.ndarray:
+    """Compute the per-voxel crista orientation anisotropy via the structure tensor.
+
+    When available this uses ``bioimage_cpp.filters.structure_tensor_eigenvalues`` (a fast C++
+    routine); otherwise it falls back to a low-memory NumPy implementation. Only the anisotropy
+    is produced (the principal directions / eigenvectors are not computed).
 
     Args:
         crista_mask: Binary crista segmentation.
         voxel_size: Voxel size in nm — scalar or dict with "z"/"y"/"x" keys.
-        neighborhood_size_nm: Gaussian smoothing radius in nm for tensor averaging.
-        need_eigenvectors: If False, the eigenvectors are not computed and a low-memory path
-            is used: the full (..., ndim, ndim) structure tensor is never materialised (only
-            the unique smoothed components are kept) and eigenvalues are evaluated in chunks.
-            In that case the returned eigenvalues and eigenvectors are both None — only the
-            anisotropy is produced. Use this when only the anisotropy scalar is needed, e.g.
-            in :func:`compute_mito_crista_statistics`.
-        n_jobs: Number of threads for the structure-tensor Gaussian smoothing (low-memory path
-            only). The unique tensor components are independent and ``gaussian_filter`` releases
-            the GIL, so threads give a real speedup. 1 = serial; -1 = all cores.
+        neighborhood_size_nm: Gaussian integration radius in nm for tensor averaging (the
+            structure tensor's outer/integration scale).
+        n_jobs: Number of threads for the Gaussian smoothing in the NumPy fallback only (the
+            unique tensor components are independent and ``gaussian_filter`` releases the GIL).
+            1 = serial; -1 = all cores. Ignored on the bioimage-cpp path.
 
     Returns:
-        eigenvalues: (..., ndim) sorted ascending, or None when ``need_eigenvectors`` is False.
-        eigenvectors: (..., ndim, ndim) — columns are principal directions, or None when
-            ``need_eigenvectors`` is False.
         anisotropy: (...) — λ_max / (λ_min + ε) per voxel. High values indicate a strongly
             directional crista (e.g. parallel lamellae); low values indicate isotropic or
-            tubular/disordered morphology.
+            tubular/disordered morphology. Magnitude only (rotation-invariant).
     """
     ndim = crista_mask.ndim
     sampling = _to_sampling(voxel_size, ndim)
+
+    if structure_tensor_eigenvalues is not None:
+        # C++ structure tensor. outer_sigma is the integration scale (per axis, in voxels);
+        # inner_sigma is the derivative smoothing — it must be > 0 (0 is rejected), so we use a
+        # minimal 1-voxel scale (the previous NumPy path used plain gradients ≈ inner 0, so
+        # absolute anisotropy magnitudes shift slightly, but the ordering is preserved).
+        outer_sigma = [float(s) for s in (neighborhood_size_nm / sampling)]
+        inner_sigma = 1.0
+        evals = structure_tensor_eigenvalues(crista_mask.astype(np.float32), inner_sigma, outer_sigma)
+        # Eigenvalues are sorted descending along the trailing axis → [..., 0] = λ_max, [..., -1] = λ_min.
+        anisotropy = evals[..., 0] / (evals[..., -1] + 1e-10)
+        return anisotropy.astype(np.float32)
+
+    # NumPy fallback: keep only the ndim*(ndim+1)/2 unique smoothed components instead of the full
+    # (..., ndim, ndim) tensor, and evaluate eigenvalues chunk-wise along axis 0 so only a small
+    # block is stacked at any time. The unique components are independent Gaussian smoothings
+    # (GIL-releasing) → thread them.
     sigma = neighborhood_size_nm / sampling
-
     grads = np.gradient(crista_mask.astype(np.float32), *sampling.tolist())
-
-    if need_eigenvectors:
-        J = np.zeros(crista_mask.shape + (ndim, ndim), dtype=np.float32)
-        for i in range(ndim):
-            for j in range(i, ndim):
-                s = gaussian_filter(grads[i] * grads[j], sigma=sigma)
-                J[..., i, j] = s
-                J[..., j, i] = s
-        eigenvalues, eigenvectors = np.linalg.eigh(J)
-        anisotropy = eigenvalues[..., -1] / (eigenvalues[..., 0] + 1e-10)
-        return eigenvalues, eigenvectors, anisotropy
-
-    # Low-memory path: keep only the ndim*(ndim+1)/2 unique smoothed components instead of
-    # the full (..., ndim, ndim) tensor, and evaluate eigenvalues chunk-wise along axis 0 so
-    # only a small block is stacked at any time. Numerics match the full eigvalsh exactly.
-    # The unique components are independent Gaussian smoothings (GIL-releasing) → thread them.
     pairs = [(i, j) for i in range(ndim) for j in range(i, ndim)]
 
     def _component(i, j):
@@ -340,7 +340,7 @@ def compute_crista_orientation(
         evals = np.linalg.eigvalsh(block)
         anisotropy[z0:z1] = evals[..., -1] / (evals[..., 0] + 1e-10)
         del block, evals
-    return None, None, anisotropy
+    return anisotropy
 
 
 def _scale_voxel_size(
@@ -386,8 +386,8 @@ def _downsampled_orientation_anisotropy(
     region = field > 0.5
     if not region.any():
         return np.nan
-    _, _, anisotropy = compute_crista_orientation(
-        field, _scale_voxel_size(voxel_size, factor), need_eigenvectors=False, n_jobs=n_jobs
+    anisotropy = compute_crista_orientation(
+        field, _scale_voxel_size(voxel_size, factor), n_jobs=n_jobs
     )
     return float(np.mean(anisotropy[region]))
 
@@ -791,8 +791,8 @@ def _single_mito_row(
                 crista_local, voxel_size, factor=2, n_jobs=inner_n_jobs
             )
         else:  # exact
-            _, _, anisotropy = compute_crista_orientation(
-                crista_local, voxel_size, need_eigenvectors=False, n_jobs=inner_n_jobs
+            anisotropy = compute_crista_orientation(
+                crista_local, voxel_size, n_jobs=inner_n_jobs
             )
             crista_orientation_anisotropy = float(np.mean(anisotropy[crista_local]))
     else:
