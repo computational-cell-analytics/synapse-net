@@ -1,3 +1,4 @@
+import glob
 import os
 import sys
 import unittest
@@ -12,6 +13,53 @@ VIEW_ENV = "SYNAPSE_NET_VIEW"
 # distance-value tests when that API is unavailable.
 from synapse_net.cristae_analysis import geodesic_distances_mesh as _GEODESIC_MESH_API  # noqa: E402
 _MESH_REQUIRED = unittest.skipUnless(_GEODESIC_MESH_API is not None, "bioimage-cpp geodesic API unavailable")
+
+# Real-data integration test (skipped unless the data tree is present). Labels come from the
+# pre-converted HDF5 tree; voxel size from the sibling .mrc header. Override the root with
+# SYNAPSE_NET_CRISTAE_DATA.
+_CRISTAE_DATA_ROOT = os.environ.get("SYNAPSE_NET_CRISTAE_DATA", "/home/freckmann15/data/cristae/cooper")
+_H5_DIR = os.path.join(_CRISTAE_DATA_ROOT, "forgotten_cristae_h5")
+_MRC_DIR = os.path.join(_CRISTAE_DATA_ROOT, "forgotten_cristae")
+_DEFAULT_VOXEL_NM = 0.8681
+# One mito in CA3_PS_23 is ~174M voxels and crashes the per-mito pipeline; drop anything above
+# this so the test stays bounded. Keeps the normal-sized mitos in every file.
+_MAX_MITO_VOXELS = 60_000_000
+
+_REAL_DATA_AVAILABLE = bool(glob.glob(os.path.join(_H5_DIR, "*", "*.h5")))
+_REAL_DATA_REQUIRED = unittest.skipUnless(
+    _REAL_DATA_AVAILABLE, f"cristae real-data tree not found under {_H5_DIR}"
+)
+
+
+def _resolve_voxel_size(h5_path):
+    """Voxel size (nm) from the sibling .mrc header (Angstrom/10); else the isotropic fallback."""
+    import mrcfile
+
+    stem = os.path.basename(h5_path).replace("_crop.h5", "_crop.mrc")
+    matches = glob.glob(os.path.join(_MRC_DIR, "*", stem))
+    if matches:
+        try:
+            with mrcfile.open(matches[0], permissive=True, header_only=True) as f:
+                vs = f.voxel_size
+            return {"z": float(vs.z) / 10, "y": float(vs.y) / 10, "x": float(vs.x) / 10}
+        except Exception:  # pragma: no cover - depends on the local .mrc header
+            pass
+    return _DEFAULT_VOXEL_NM
+
+
+def _drop_large_mitos(mito, max_voxels):
+    """Zero out mito instances larger than ``max_voxels``; return (filtered_copy, n_surviving)."""
+    filtered = mito.copy()
+    labels, counts = np.unique(filtered, return_counts=True)
+    surviving = 0
+    for label, count in zip(labels, counts):
+        if label == 0:
+            continue
+        if count > max_voxels:
+            filtered[filtered == label] = 0
+        else:
+            surviving += 1
+    return filtered, surviving
 
 
 def _make_mito(shape=(32, 32, 32), label=1):
@@ -766,6 +814,100 @@ class TestMeshGeodesicBackend(unittest.TestCase):
         self.assertEqual(len(runtime_warnings), 1)
         self.assertTrue(np.isnan(df["mean_nn_junction_distance_nm"].iloc[0]))
         self.assertTrue(np.isnan(df["junction_clustering_index"].iloc[0]))
+
+
+_EXPECTED_COLUMNS = [
+    "mito_label_id", "mito_touches_border", "mito_volume_nm3",
+    "crista_volume_nm3", "crista_fraction", "contact_voxel_count",
+    "crista_junction_count", "contact_volume_nm3",
+    "avg_crista_to_membrane_nm", "mean_nn_junction_distance_nm",
+    "median_nn_junction_distance_nm", "junction_clustering_index",
+    "crista_orientation_anisotropy",
+    "cristae_surface_area_nm2", "mito_surface_area_nm2",
+    "crista_to_mito_surface_ratio", "avg_thickness_nm",
+]
+
+
+class TestCristaeIntegration(unittest.TestCase):
+    """End-to-end runs of compute_mito_crista_statistics on synthetic and real segmentations."""
+
+    def test_synthetic_end_to_end(self):
+        # Two mitos side by side: mito 1 holds parallel lamellae (strongly directional), mito 2
+        # holds an isotropic solid block. The full pipeline must produce well-formed metrics and
+        # a non-negative anisotropy that is larger for the lamellar mito than the isotropic one.
+        from synapse_net.cristae_analysis import compute_mito_crista_statistics
+        shape = (40, 96, 40)
+        voxel_size = 10.0  # 30 nm structure-tensor neighborhood == 3 voxels at this scale.
+        mito = np.zeros(shape, dtype="uint32")
+        mito[4:36, 4:44, 4:36] = 1
+        mito[4:36, 52:92, 4:36] = 2
+
+        crista = np.zeros(shape, dtype=bool)
+        lamellae = _make_lamellae(shape, normal=(1, 0, 0), spacing=6, thickness=2, margin=6)
+        crista |= lamellae & (mito == 1)
+        crista[12:28, 62:82, 12:28] = True  # isotropic block inside mito 2
+
+        df = compute_mito_crista_statistics(crista, mito, voxel_size, method="exact", n_jobs=1)
+
+        self.assertEqual(len(df), 2)
+        for col in _EXPECTED_COLUMNS:
+            self.assertIn(col, df.columns, msg=f"Missing column: {col}")
+        rows = df.set_index("mito_label_id")
+        for label in (1, 2):
+            self.assertGreater(rows.loc[label, "mito_volume_nm3"], 0.0)
+            frac = rows.loc[label, "crista_fraction"]
+            self.assertGreaterEqual(frac, 0.0)
+            self.assertLessEqual(frac, 1.0)
+            aniso = rows.loc[label, "crista_orientation_anisotropy"]
+            self.assertTrue(np.isfinite(aniso), msg=f"anisotropy not finite for mito {label}")
+            self.assertGreaterEqual(aniso, 0.0, msg=f"anisotropy negative for mito {label}: {aniso}")
+        self.assertGreater(
+            rows.loc[1, "crista_orientation_anisotropy"],
+            rows.loc[2, "crista_orientation_anisotropy"],
+        )
+
+    @_REAL_DATA_REQUIRED
+    def test_forgotten_cristae_real_data(self):
+        # Smoke test on the real forgotten_cristae segmentations: the pipeline must complete and
+        # produce well-formed metrics. The pathological ~174M-voxel mito is filtered out first so
+        # the per-mito computation stays bounded (see _MAX_MITO_VOXELS).
+        import h5py
+        from synapse_net.cristae_analysis import compute_mito_crista_statistics
+
+        files = sorted(glob.glob(os.path.join(_H5_DIR, "*", "*.h5")))
+        chosen = None
+        for path in files:
+            with h5py.File(path, "r") as f:
+                crista = f["labels/cristae"][:].astype(bool)
+                mito = f["labels/mitochondria"][:]
+            filtered, surviving = _drop_large_mitos(mito, _MAX_MITO_VOXELS)
+            if surviving > 0:
+                chosen = (path, crista, filtered, surviving)
+                break
+        if chosen is None:
+            self.skipTest("no forgotten_cristae file has a mito under the size threshold")
+        path, crista, filtered_mito, surviving = chosen
+
+        voxel_size = _resolve_voxel_size(path)
+        df = compute_mito_crista_statistics(
+            crista, filtered_mito, voxel_size,
+            method="fast", n_jobs=-1, membrane_mode="slice_2d",
+        )
+
+        self.assertEqual(len(df), surviving)
+        for col in _EXPECTED_COLUMNS:
+            self.assertIn(col, df.columns, msg=f"Missing column: {col}")
+        self.assertTrue((df["mito_volume_nm3"] > 0).all())
+        frac = df["crista_fraction"].to_numpy(dtype=float)
+        frac = frac[np.isfinite(frac)]
+        self.assertTrue(((frac >= 0.0) & (frac <= 1.0)).all())
+        # The negative-blowup regression (tiny-negative structure-tensor eigenvalue) must not recur.
+        aniso = df["crista_orientation_anisotropy"].to_numpy(dtype=float)
+        self.assertTrue((aniso[np.isfinite(aniso)] >= 0.0).all())
+        for col in ("mean_nn_junction_distance_nm", "median_nn_junction_distance_nm",
+                    "avg_crista_to_membrane_nm"):
+            vals = df[col].to_numpy(dtype=float)
+            self.assertTrue((vals[np.isfinite(vals)] >= 0.0).all(), msg=f"negative {col}")
 
 
 if __name__ == "__main__":

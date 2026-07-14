@@ -298,8 +298,12 @@ def compute_crista_orientation(
         outer_sigma = [float(s) for s in (neighborhood_size_nm / sampling)]
         inner_sigma = 1.0
         evals = structure_tensor_eigenvalues(crista_mask.astype(np.float32), inner_sigma, outer_sigma)
-        # Eigenvalues are sorted descending along the trailing axis → [..., 0] = λ_max, [..., -1] = λ_min.
-        anisotropy = evals[..., 0] / (evals[..., -1] + 1e-10)
+        # Structure-tensor eigenvalues are non-negative in theory, but the solver emits tiny
+        # negatives for near-rank-deficient tensors (degenerate sheets/tubes). Clamp them and take
+        # λ_max/λ_min via max/min over the trailing axis — order-agnostic and sign-safe, so a tiny
+        # negative minor eigenvalue can't flip the denominator and blow the ratio up.
+        evals = np.clip(evals, 0.0, None)
+        anisotropy = evals.max(axis=-1) / (evals.min(axis=-1) + 1e-10)
         return anisotropy.astype(np.float32)
 
     # NumPy fallback: keep only the ndim*(ndim+1)/2 unique smoothed components instead of the full
@@ -337,8 +341,8 @@ def compute_crista_orientation(
         for (i, j), comp in components.items():
             block[..., i, j] = comp[z0:z1]
             block[..., j, i] = comp[z0:z1]
-        evals = np.linalg.eigvalsh(block)
-        anisotropy[z0:z1] = evals[..., -1] / (evals[..., 0] + 1e-10)
+        evals = np.clip(np.linalg.eigvalsh(block), 0.0, None)
+        anisotropy[z0:z1] = evals.max(axis=-1) / (evals.min(axis=-1) + 1e-10)
         del block, evals
     return anisotropy
 
