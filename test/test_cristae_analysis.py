@@ -125,6 +125,81 @@ def _mean_anisotropy(mask, voxel_size=1.0, neighborhood_size_nm=4.0):
     return float(np.mean(anisotropy[mask.astype(bool)]))
 
 
+class TestSurfaceMesh(unittest.TestCase):
+    """The marching-cubes helper: unpadded return frame and selective (open-face) padding."""
+
+    def test_unpadded_return_frame(self):
+        # A block not touching any array edge: verts are returned in the mask's own index frame
+        # (surface at index ± 0.5), not shifted by the old +1 pad.
+        from synapse_net.cristae_analysis import _surface_mesh
+        block = np.zeros((16, 16, 16), dtype=bool)
+        block[4:8, 4:8, 4:8] = True  # occupies indices 4..7 on each axis
+        verts, _ = _surface_mesh(block, np.ones(3))
+        self.assertAlmostEqual(float(verts[:, 0].min()), 3.5, places=5)
+        self.assertAlmostEqual(float(verts[:, 0].max()), 7.5, places=5)
+
+    def test_open_faces_omit_cap(self):
+        # A block flush against z=0 and z=max: opening those faces omits the caps, leaving an open
+        # surface (fewer faces, smaller area, no vertices beyond the clipped planes) while the closed
+        # mesh caps them (vertices at z ≈ -0.5 and z ≈ 9.5).
+        from skimage.measure import mesh_surface_area
+        from synapse_net.cristae_analysis import _surface_mesh
+        block = np.zeros((10, 20, 20), dtype=bool)
+        block[:, 6:14, 6:14] = True  # spans the full z extent → touches z=0 and z=9
+        closed_v, closed_f = _surface_mesh(block, np.ones(3))
+        open_faces = np.array([[False, False], [True, True], [True, True]])  # z open, y/x closed
+        open_v, open_f = _surface_mesh(block, np.ones(3), closed_faces=open_faces)
+
+        self.assertLess(len(open_f), len(closed_f))
+        self.assertLess(mesh_surface_area(open_v, open_f), mesh_surface_area(closed_v, closed_f))
+        # Open mesh stays within the clipped z-planes; closed mesh extends beyond them (the caps).
+        self.assertGreaterEqual(float(open_v[:, 0].min()), -1e-6)
+        self.assertLessEqual(float(open_v[:, 0].max()), 9.0 + 1e-6)
+        self.assertLess(float(closed_v[:, 0].min()), 0.0)
+        self.assertGreater(float(closed_v[:, 0].max()), 9.0)
+
+    def test_closed_default_unchanged_topology(self):
+        # Default (closed_faces=None) is watertight: every boundary face capped.
+        from synapse_net.cristae_analysis import _surface_mesh
+        block = np.zeros((10, 20, 20), dtype=bool)
+        block[:, 6:14, 6:14] = True
+        _, faces_default = _surface_mesh(block, np.ones(3))
+        all_closed = np.ones((3, 2), dtype=bool)
+        _, faces_explicit = _surface_mesh(block, np.ones(3), closed_faces=all_closed)
+        self.assertEqual(len(faces_default), len(faces_explicit))
+
+    @staticmethod
+    def _has_boundary_edge(faces):
+        # An open (non-watertight) mesh has an edge used by only one triangle; a closed manifold uses
+        # every edge exactly twice.
+        from collections import Counter
+        edges = Counter()
+        for tri in faces:
+            for a, b in ((tri[0], tri[1]), (tri[1], tri[2]), (tri[2], tri[0])):
+                edges[(a, b) if a < b else (b, a)] += 1
+        return any(count == 1 for count in edges.values())
+
+    def test_open_trimmed_mesh(self):
+        # A block spanning the full z-extent (clipped at both z faces): _open_trimmed_mesh crops the
+        # border zone off and leaves the cut OPEN, so the mesh is trimmed to [gap, shape-gap] and is
+        # not watertight (no cap for geodesics to shortcut across). An interior block (no clipped face)
+        # stays closed and untrimmed.
+        from synapse_net.cristae_analysis import _open_trimmed_mesh
+        gap = 2
+        clipped = np.zeros((12, 20, 20), dtype=bool)
+        clipped[:, 6:14, 6:14] = True  # spans z=0..11 → clipped at both z faces
+        verts, faces = _open_trimmed_mesh(clipped, np.ones(3), gap, np.ones((3, 2), dtype=bool))
+        self.assertGreaterEqual(float(verts[:, 0].min()), gap - 1e-6)          # trimmed low
+        self.assertLessEqual(float(verts[:, 0].max()), clipped.shape[0] - gap + 1e-6)  # trimmed high
+        self.assertTrue(self._has_boundary_edge(faces))                        # open at the cut
+
+        interior = np.zeros((20, 20, 20), dtype=bool)
+        interior[6:14, 6:14, 6:14] = True  # touches no volume face
+        v2, f2 = _open_trimmed_mesh(interior, np.ones(3), gap, np.zeros((3, 2), dtype=bool))
+        self.assertFalse(self._has_boundary_edge(f2))                          # closed, watertight
+        self.assertAlmostEqual(float(v2[:, 0].min()), 5.5, places=5)           # untrimmed (index frame)
+
+
 class TestApproximateMembrane(unittest.TestCase):
     def test_returns_binary_mask(self):
         from synapse_net.cristae_analysis import approximate_membrane
@@ -180,6 +255,36 @@ class TestApproximateMembrane(unittest.TestCase):
         membrane = approximate_membrane(seg, voxel_size, membrane_thickness_nm=4.0, membrane_mode="shell_3d")
         self.assertTrue(np.all(membrane[seg == 0] == False))  # noqa: E712
         self.assertEqual(_membrane_components(membrane), 2)   # one connected shell per instance
+
+    def test_return_lumen_partitions_mito(self):
+        # return_lumen=True gives the eroded interior: a boolean mask inside the mito and disjoint from
+        # the membrane shell.
+        from synapse_net.cristae_analysis import approximate_membrane
+        mito_seg = _make_mito()
+        membrane, lumen = approximate_membrane(mito_seg, voxel_size=1.0, return_lumen=True)
+        mito_binary = mito_seg > 0
+        self.assertEqual(lumen.dtype, bool)
+        self.assertTrue(lumen.any())
+        self.assertTrue(np.all(lumen[~mito_binary] == False))  # lumen ⊆ mito  # noqa: E712
+        self.assertFalse((membrane & lumen).any())             # membrane ∩ lumen == ∅
+
+    def test_lumen_does_not_reinclude_outer_shell(self):
+        # A mito flush against a volume face: `mito & ~membrane` re-includes the outer shell wherever
+        # border-gap suppression zeroed the membrane, but the returned lumen does not — it is a strict
+        # subset. This is the bug the display/geodesic mesh hit when a mito touched the crop edge.
+        from synapse_net.cristae_analysis import approximate_membrane
+        seg = np.zeros((24, 30, 30), dtype="uint32")
+        seg[0:18, 6:24, 6:24] = 1  # touches the z=0 face
+        for mode in ("slice_2d", "shell_3d"):
+            membrane, lumen = approximate_membrane(
+                seg, voxel_size=1.0, membrane_thickness_nm=4.0, membrane_mode=mode, return_lumen=True
+            )
+            contaminated = (seg > 0) & ~membrane
+            self.assertFalse((lumen & ~contaminated).any(), msg=f"lumen ⊄ mito & ~membrane for {mode}")
+            self.assertLess(
+                int(lumen.sum()), int(contaminated.sum()),
+                msg=f"lumen not strictly smaller than mito & ~membrane for {mode}",
+            )
 
     def test_invalid_membrane_mode_raises(self):
         from synapse_net.cristae_analysis import approximate_membrane
@@ -682,12 +787,18 @@ class TestFastMethod(unittest.TestCase):
                 obj=f"column {col} (fast vs exact)",
             )
 
+    def test_default_orientation_is_skip(self):
+        # The library default method is "skip": orientation is NaN even with a crista present.
+        from synapse_net.cristae_analysis import compute_mito_crista_statistics
+        df = compute_mito_crista_statistics(_make_crista(), _make_mito(), voxel_size=1.0)
+        self.assertTrue(np.isnan(df["crista_orientation_anisotropy"].iloc[0]))
+
     def test_fast_orientation_is_finite_with_crista(self):
-        # Fast orientation is now computed (downsampled), so it is finite when a crista is present.
+        # Fast orientation is computed (downsampled), so it is finite when a crista is present.
         from synapse_net.cristae_analysis import compute_mito_crista_statistics
         mito_seg = _make_mito()
         crista = _make_crista()
-        df = compute_mito_crista_statistics(crista, mito_seg, voxel_size=1.0)  # default = fast
+        df = compute_mito_crista_statistics(crista, mito_seg, voxel_size=1.0, method="fast")
         self.assertEqual(len(df), 1)
         self.assertTrue(np.isfinite(df["crista_orientation_anisotropy"].iloc[0]))
 
@@ -757,8 +868,10 @@ class TestFastMethod(unittest.TestCase):
 class TestMeshGeodesicBackend(unittest.TestCase):
     """Junction distances are surface geodesics on the eroded-mito (lumen) mesh (bioimage-cpp).
 
-    The lumen surface (``mito & ~membrane``, built in ``_single_mito_row``) is what the geodesic runs
-    on. When the bioimage-cpp geodesic API is unavailable the junction columns are NaN (no fallback).
+    The lumen surface is the border-suppression-free eroded interior from
+    ``approximate_membrane(..., return_lumen=True)``, threaded through ``_single_mito_row`` (it falls
+    back to ``mito & ~membrane`` only when a caller supplies their own membrane and no lumen). When
+    the bioimage-cpp geodesic API is unavailable the junction columns are NaN (no fallback).
     """
 
     @staticmethod
@@ -781,6 +894,31 @@ class TestMeshGeodesicBackend(unittest.TestCase):
         mean_nn = df["mean_nn_junction_distance_nm"].iloc[0]
         self.assertTrue(np.isfinite(mean_nn) and mean_nn > 0)
         self.assertTrue(np.isfinite(df["junction_clustering_index"].iloc[0]))
+
+    @_MESH_REQUIRED
+    def test_clipped_mito_open_mesh_finite(self):
+        # A mito clipped by the volume boundary (spans the full z extent) meshes its lumen OPEN at the
+        # clipped z-caps. Guards that the bioimage-cpp geodesic solver accepts the resulting
+        # non-watertight (open) mesh and still returns finite junction distances (no spurious NaN), and
+        # that the clipped mito's outer surface area is smaller than the same mito meshed closed.
+        from synapse_net.cristae_analysis import compute_mito_crista_statistics, _surface_area
+        shape = (24, 40, 40)
+        mito = np.zeros(shape, dtype="uint32")
+        mito[:, 6:34, 6:34] = 1  # spans z=0..23 → clipped at both z faces
+        crista = np.zeros(shape, dtype=bool)
+        for x in (12, 20, 28):
+            crista[8:16, 8:11, x:x + 3] = True
+        df = compute_mito_crista_statistics(crista, mito, 1.0, method="skip")
+        self.assertGreaterEqual(int(df["crista_junction_count"].iloc[0]), 2)
+        mean_nn = df["mean_nn_junction_distance_nm"].iloc[0]
+        self.assertTrue(np.isfinite(mean_nn) and mean_nn > 0)  # open mesh accepted by the solver
+
+        mito_binary = mito > 0
+        ndim = mito.ndim
+        open_faces = np.zeros((ndim, 2), dtype=bool)  # z (and all) faces clipped here
+        area_open = _surface_area(mito_binary, np.ones(ndim), closed_faces=open_faces)
+        area_closed = _surface_area(mito_binary, np.ones(ndim))
+        self.assertLess(area_open, area_closed)  # the fabricated z-caps are no longer counted
 
     @_MESH_REQUIRED
     def test_primitive_mesh_on_flat_membrane(self):

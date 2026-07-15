@@ -47,8 +47,11 @@ done **per Z‑slice** with a 2D disk of radius `mm_thickness / voxel_xy`:
 `membrane = mito & ~binary_erosion(mito, disk(r))` — i.e. the rim removed by the erosion. Per‑slice
 (not a 3D ball) prevents the shell bleeding across slices when the shape changes in Z. Voxels within
 `border_gap` of any volume face are removed (so clipped mito edges aren't treated as membrane).
-The complementary interior `mito & ~membrane` is the **lumen**, whose inner‑wall surface is the mesh
-the junction geodesics run along (see §5 and the **Membrane Mesh** layer).
+The eroded interior is the **lumen**, whose inner‑wall surface is the mesh the junction geodesics run
+along (see §5 and the **Membrane Mesh** layer). At mesh time the lumen surface is trimmed to the
+certain region — the border zone within `border_gap` of the volume faces is cropped off, so it ends
+where the membrane ends instead of flaring to full mito width — and **left open** there (not capped),
+so geodesics cannot shortcut across a fabricated cap at a clipped face (`_open_trimmed_mesh`).
 *Math:* binary morphological erosion. *Perf:* cropped to the mito bbox, empty slices skipped, and
 the per‑slice erosion is parallelised.
 
@@ -127,7 +130,7 @@ settings.
 | Crista→membrane proximity | `compute_crista_proximity` | `synapse_net/cristae_analysis.py` |
 | Junctions (crista ∩ membrane) | `detect_contact_sites` | `synapse_net/cristae_analysis.py` |
 | Junction geodesic distances | `compute_junction_distances` → `_junction_matrix_mesh` → `bioimage_cpp.distance.geodesic_distances_mesh` | `synapse_net/cristae_analysis.py` |
-| Eroded‑mito (lumen) surface mesh | `_surface_mesh` (on `mito & ~membrane`) | `synapse_net/cristae_analysis.py` |
+| Eroded‑mito (lumen) surface mesh | `_open_trimmed_mesh` → `_surface_mesh` (eroded‑mito lumen, trimmed to the certain region and left open at clipped volume faces) | `synapse_net/cristae_analysis.py` |
 | Surface area & thickness | `compute_crista_morphology`, `_surface_area`, `_medial_axis_thickness_nm` | `synapse_net/cristae_analysis.py` |
 | Per‑mito assembly | `_single_mito_row` / `compute_mito_crista_statistics` | `synapse_net/cristae_analysis.py` |
 | Widget | `CristaeAnalysisWidget` | `synapse_net/tools/cristae_analysis_widget.py` |
@@ -153,7 +156,7 @@ correct if the voxel size is right (nm, not Å — see the units caveat above).
 | `mean_nn_junction_distance_nm` | nm | For each junction, the nearest‑neighbour **surface geodesic** to another junction (along the eroded‑mito lumen mesh); averaged over junctions. | `NaN` if the mito has <2 junctions reachable on the same connected surface. See §5. |
 | `median_nn_junction_distance_nm` | nm | As above, but the median of the per‑junction nearest‑neighbour geodesics. | Same `NaN` condition as the mean. |
 | `junction_clustering_index` | — | Clark–Evans `R = mean_NN / (0.5·√(A/n))`, with `A` = mito surface area, `n` = junction count. | `<1` clustered, `≈1` random, `>1` dispersed. Flat‑surface CSR approximation. `NaN` without a valid mean_NN / surface area. |
-| `crista_orientation_anisotropy` | — | Mean over crista voxels of `λ_max/(λ_min+ε)` from the crista structure tensor. | Depends on the **orientation mode**: `exact` = full resolution; `fast` = 2× downsampled (relative indicator only, **not** comparable in magnitude to `exact`); `skip` = `NaN`. Rotation‑invariant (magnitude, not direction). |
+| `crista_orientation_anisotropy` | — | Mean over crista voxels of `λ_max/(λ_min+ε)` from the crista structure tensor. | Depends on the **orientation mode**: `skip` (default) = `NaN`; `fast` = 2× downsampled (relative indicator only, **not** comparable in magnitude to `exact`); `exact` = full resolution. Rotation‑invariant (magnitude, not direction). |
 | `cristae_surface_area_nm2` | nm² | Marching‑cubes surface area of the crista mask. | — |
 | `mito_surface_area_nm2` | nm² | Marching‑cubes surface area of the mito (outer‑membrane surface). | Also used as `A` in the clustering index. |
 | `crista_to_mito_surface_ratio` | — | `cristae_surface_area_nm2 / mito_surface_area_nm2`. | Size‑normalised "crista surface density"; **can exceed 1** for folded cristae. |

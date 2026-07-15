@@ -7,17 +7,19 @@ from qtpy.QtWidgets import QWidget, QVBoxLayout, QPushButton
 
 from .base_widget import BaseWidget
 from ..cristae_analysis import (
-    approximate_membrane, compute_mito_crista_statistics, detect_contact_sites, _surface_mesh
+    approximate_membrane, compute_mito_crista_statistics, detect_contact_sites,
+    _open_trimmed_mesh, _voxel_radius,
 )
 
 
 class CristaeAnalysisWidget(BaseWidget):
     # Crista-orientation dropdown labels -> the `method` argument of compute_mito_crista_statistics.
     _ORIENTATION_FAST = "Fast (downsampled, approximate)"
+    _ORIENTATION_SKIP = "Skip (no orientation)"
     _ORIENTATION_TO_METHOD = {
         _ORIENTATION_FAST: "fast",
         "Exact (full resolution)": "exact",
-        "Skip (no orientation)": "skip",
+        _ORIENTATION_SKIP: "skip",
     }
 
     # Membrane-mode dropdown labels -> the `membrane_mode` argument of approximate_membrane.
@@ -108,7 +110,7 @@ class CristaeAnalysisWidget(BaseWidget):
         setting_values.layout().addWidget(self.show_membranes_param)
 
         self.orientation_param, layout = self._add_choice_param(
-            "orientation", self._ORIENTATION_FAST, list(self._ORIENTATION_TO_METHOD.keys()),
+            "orientation", self._ORIENTATION_SKIP, list(self._ORIENTATION_TO_METHOD.keys()),
             title="Crista orientation",
             tooltip="How to compute the crista orientation anisotropy — the most expensive stage "
                     "(structure tensor). All other metrics (surface areas, junction distances, "
@@ -167,23 +169,34 @@ class CristaeAnalysisWidget(BaseWidget):
 
     def _compute_membrane_and_contacts(self, mito_seg, crista_mask, voxel_size, mm_thickness,
                                        border_gap, membrane_mode):
-        """The cheap front-end shared by preview and run: membrane shell + crista-membrane junctions."""
-        membrane_mask = approximate_membrane(
+        """The cheap front-end shared by preview and run: membrane shell + crista-membrane junctions.
+
+        Also returns the border-trimmed lumen (eroded-mito interior) so the run can both display it
+        and feed it to the geodesic stage without recomputing the erosion.
+        """
+        membrane_mask, lumen_mask = approximate_membrane(
             mito_seg, voxel_size,
             membrane_thickness_nm=mm_thickness, border_gap_nm=border_gap,
             n_jobs=-1,  # parallelize across cores (per-Z-slice in 2D mode).
             membrane_mode=membrane_mode,
+            return_lumen=True,
         )
         contact_labels, contact_summary = detect_contact_sites(
             crista_mask.astype(bool), membrane_mask, voxel_size
         )
-        return membrane_mask, contact_labels, contact_summary
+        return membrane_mask, lumen_mask, contact_labels, contact_summary
 
     def _add_or_update_labels(self, name, data, scale, translate, opacity=None, blending=None):
         """Add a Labels layer, or refresh it in place if one with this name already exists."""
         if name in self.viewer.layers:
             layer = self.viewer.layers[name]
             layer.data = data
+            # Reapply the transform: a persisted layer keeps its original scale/translate, which may
+            # be stale if the source layer / voxel size changed between runs.
+            if scale is not None:
+                layer.scale = scale
+            if translate is not None:
+                layer.translate = translate
             if opacity is not None:
                 layer.opacity = opacity
             if blending is not None:
@@ -203,6 +216,12 @@ class CristaeAnalysisWidget(BaseWidget):
         if name in self.viewer.layers:
             layer = self.viewer.layers[name]
             layer.data = (vertices, faces, values)
+            # Reapply the transform: a persisted layer keeps its original scale/translate, which may
+            # be stale if the source layer / voxel size changed between runs.
+            if scale is not None:
+                layer.scale = scale
+            if translate is not None:
+                layer.translate = translate
             if opacity is not None:
                 layer.opacity = opacity
             if blending is not None:
@@ -227,7 +246,7 @@ class CristaeAnalysisWidget(BaseWidget):
          mm_thickness, border_gap, membrane_mode) = inputs
 
         show_info("INFO: Previewing membrane & junctions...")
-        membrane_mask, contact_labels, contact_summary = self._compute_membrane_and_contacts(
+        membrane_mask, _lumen_mask, contact_labels, contact_summary = self._compute_membrane_and_contacts(
             mito_seg, crista_mask, voxel_size, mm_thickness, border_gap, membrane_mode
         )
         self._add_or_update_labels(
@@ -254,7 +273,7 @@ class CristaeAnalysisWidget(BaseWidget):
          mm_thickness, border_gap, membrane_mode) = inputs
 
         show_info("INFO: Approximating mitochondrial membrane & junctions...")
-        membrane_mask, contact_labels, contact_summary = self._compute_membrane_and_contacts(
+        membrane_mask, lumen_mask, contact_labels, contact_summary = self._compute_membrane_and_contacts(
             mito_seg, crista_mask, voxel_size, mm_thickness, border_gap, membrane_mode
         )
 
@@ -274,6 +293,7 @@ class CristaeAnalysisWidget(BaseWidget):
             stats_df = compute_mito_crista_statistics(
                 crista_mask, mito_seg, voxel_size,
                 membrane_mask=membrane_mask,
+                lumen_mask=lumen_mask,  # clean lumen → geodesics run on the true inner wall.
                 membrane_thickness_nm=mm_thickness,
                 border_gap_nm=border_gap,
                 method=method,
@@ -287,12 +307,17 @@ class CristaeAnalysisWidget(BaseWidget):
                 pbar["bar"].close()
 
         if self.show_membranes_param.isChecked():
-            # Eroded-mito (lumen) inner surface — the surface the junction geodesics run along.
-            lumen = (mito_seg > 0) & ~membrane_mask
-            mesh = _surface_mesh(lumen, np.ones(mito_seg.ndim))  # sampling=1 → verts in voxel units
+            # Eroded-mito (lumen) inner surface, trimmed to the certain region and left OPEN at the
+            # volume faces (the array is the whole volume, so every face is a potential clip): it ends
+            # where the membrane ends and is not capped, so geodesics never shortcut across it.
+            # sampling=1 → verts already in voxel indices.
+            gap_nm = border_gap if border_gap is not None else mm_thickness
+            gap_radius = _voxel_radius(gap_nm, voxel_size, mito_seg.ndim)
+            mesh = _open_trimmed_mesh(
+                lumen_mask, np.ones(mito_seg.ndim), gap_radius, np.ones((mito_seg.ndim, 2), dtype=bool)
+            )
             if mesh is not None:
                 verts, faces = mesh
-                verts = verts - 1  # undo _surface_mesh's +1 pad → align with voxel indices
                 self._add_or_update_surface(
                     self._MEMBRANE_MESH_LAYER, verts, faces, layer_scale, layer_translate,
                     opacity=0.4, blending="translucent",
