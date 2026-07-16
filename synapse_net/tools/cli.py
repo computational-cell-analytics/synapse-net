@@ -270,7 +270,8 @@ def cristae_analysis_helper(
     Args:
         crista_path: Crista segmentation - a single file or a directory of them.
         mito_path: Mitochondria instance segmentation - a single file or a directory of them.
-        output_root: Directory where the ``<stem>_cristae_analysis.csv`` tables are written.
+        output_root: Directory where the ``<stem>_cristae_analysis.csv`` tables are written. A single
+            input file writes directly into it; a directory input mirrors the nested folder structure.
         crista_key: Internal dataset key for the crista segmentation. If None the crista files are
             assumed to be tif, otherwise hdf5 with this key.
         mito_key: Internal dataset key for the mitochondria segmentation, analogous to crista_key.
@@ -313,9 +314,9 @@ def cristae_analysis_helper(
     ):
         input_folder, input_name = os.path.split(crista_file)
         fname = os.path.splitext(input_name)[0] + "_cristae_analysis.csv"
-        if crista_root is None:  # Single input file -> write the table directly into output_root.
+        if crista_root is None:
             output_path = os.path.join(output_root, fname)
-        else:  # Directory input -> preserve the nested folder structure in the output.
+        else:
             rel_folder = os.path.relpath(input_folder, crista_root)
             output_path = os.path.join(output_root, rel_folder, fname)
 

@@ -1,6 +1,8 @@
 import napari
 import numpy as np
 
+from contextlib import contextmanager
+
 from napari.utils import progress
 from napari.utils.notifications import show_info
 from qtpy.QtCore import Qt
@@ -9,12 +11,21 @@ from qtpy.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton
 from .base_widget import BaseWidget
 from ..cristae_analysis import (
     approximate_membrane, compute_mito_crista_statistics, detect_contact_sites,
-    _open_trimmed_mesh, _voxel_radius,
+    _open_trimmed_mesh, _gap_radius,
 )
 
 
 class CristaeAnalysisWidget(BaseWidget):
-    # Crista-orientation dropdown labels -> the `method` argument of compute_mito_crista_statistics.
+    """Napari widget for the cristae analysis (preview + full per-mitochondrion run).
+
+    ``_ORIENTATION_TO_METHOD`` maps the orientation dropdown labels to the ``method`` argument of
+    :func:`~synapse_net.cristae_analysis.compute_mito_crista_statistics`, and ``_MEMBRANE_TO_MODE`` maps
+    the membrane-mode labels to the ``membrane_mode`` argument of
+    :func:`~synapse_net.cristae_analysis.approximate_membrane`. The ``_*_LAYER`` name constants are
+    shared by the preview and the full run so re-previewing / running updates the same layers instead
+    of duplicating them.
+    """
+
     _ORIENTATION_FAST = "Fast (downsampled, approximate)"
     _ORIENTATION_SKIP = "Skip (no orientation)"
     _ORIENTATION_TO_METHOD = {
@@ -23,7 +34,6 @@ class CristaeAnalysisWidget(BaseWidget):
         _ORIENTATION_SKIP: "skip",
     }
 
-    # Membrane-mode dropdown labels -> the `membrane_mode` argument of approximate_membrane.
     _MEMBRANE_SLICE_2D = "2D per-slice (z-parallel)"
     _MEMBRANE_TO_MODE = {
         _MEMBRANE_SLICE_2D: "slice_2d",
@@ -39,7 +49,6 @@ class CristaeAnalysisWidget(BaseWidget):
         self.crista_selector_name = "Crista Mask"
         self.mito_selector_name = "Mito Segmentation"
 
-        # Auto-default each input to a layer whose name contains the matching keyword.
         self.crista_selector_widget = self._create_layer_selector(
             self.crista_selector_name, layer_type="Labels", prefer_substring="cristae")
         self.mito_selector_widget = self._create_layer_selector(
@@ -47,8 +56,6 @@ class CristaeAnalysisWidget(BaseWidget):
 
         self.settings = self._create_settings_widget()
 
-        # Cheap preview of the membrane + junctions (the front-end of the pipeline) so the user can
-        # tune Membrane Thickness / Border Gap and inspect them before the expensive per-mito run.
         self.preview_button = QPushButton("Preview Membrane && Junctions")
         self.preview_button.clicked.connect(self.on_preview)
 
@@ -63,8 +70,6 @@ class CristaeAnalysisWidget(BaseWidget):
 
         self.setLayout(layout)
 
-    # Result layer names, shared by the preview and the full run so re-previewing / running updates
-    # the same layers instead of duplicating them.
     _MEMBRANE_LAYER = "Membrane Mask"
     _MEMBRANE_MESH_LAYER = "Membrane Mesh"
     _JUNCTION_LAYER = "Crista-Membrane Junctions"
@@ -140,6 +145,10 @@ class CristaeAnalysisWidget(BaseWidget):
     def _read_inputs(self):
         """Validate the selected layers/voxel size and read the shared run/preview parameters.
 
+        ``layer_scale``/``layer_translate`` are inherited from the source (crista) layer so the result
+        layers overlay the input correctly (e.g. when the raw data was loaded with a physical voxel
+        scale).
+
         Returns (crista_mask, mito_seg, voxel_size, layer_scale, layer_translate, mm_thickness,
         border_gap) or None (after showing a guidance message) if inputs are incomplete.
         """
@@ -155,8 +164,6 @@ class CristaeAnalysisWidget(BaseWidget):
             show_info("Please provide a voxel size (or ensure layer metadata contains voxel_size).")
             return None
 
-        # Inherit the display scale/translate of the source layer so the result layers overlay
-        # the input correctly (e.g. when the raw data was loaded with a physical voxel scale).
         ref_layer = self._get_layer_selector_layer(self.crista_selector_name)
         layer_scale = None if ref_layer is None else ref_layer.scale
         layer_translate = None if ref_layer is None else ref_layer.translate
@@ -178,7 +185,7 @@ class CristaeAnalysisWidget(BaseWidget):
         membrane_mask, lumen_mask = approximate_membrane(
             mito_seg, voxel_size,
             membrane_thickness_nm=mm_thickness, border_gap_nm=border_gap,
-            n_jobs=-1,  # parallelize across cores (per-Z-slice in 2D mode).
+            n_jobs=-1,
             membrane_mode=membrane_mode,
             return_lumen=True,
         )
@@ -188,12 +195,14 @@ class CristaeAnalysisWidget(BaseWidget):
         return membrane_mask, lumen_mask, contact_labels, contact_summary
 
     def _add_or_update_labels(self, name, data, scale, translate, opacity=None, blending=None):
-        """Add a Labels layer, or refresh it in place if one with this name already exists."""
+        """Add a Labels layer, or refresh it in place if one with this name already exists.
+
+        On refresh the scale/translate are reapplied: a persisted layer keeps its original transform,
+        which may be stale if the source layer / voxel size changed between runs.
+        """
         if name in self.viewer.layers:
             layer = self.viewer.layers[name]
             layer.data = data
-            # Reapply the transform: a persisted layer keeps its original scale/translate, which may
-            # be stale if the source layer / voxel size changed between runs.
             if scale is not None:
                 layer.scale = scale
             if translate is not None:
@@ -211,14 +220,15 @@ class CristaeAnalysisWidget(BaseWidget):
             self.viewer.add_labels(data, name=name, scale=scale, translate=translate, **kwargs)
 
     def _add_or_update_surface(self, name, vertices, faces, scale, translate, opacity=None, blending=None):
-        """Add a Surface layer, or refresh it in place if one with this name already exists."""
-        # Surface layers colour by per-vertex values; a constant gives a flat-coloured surface.
+        """Add a Surface layer, or refresh it in place if one with this name already exists.
+
+        Surface layers colour by per-vertex values, so a constant ``values`` gives a flat-coloured
+        surface. On refresh the scale/translate are reapplied (see :meth:`_add_or_update_labels`).
+        """
         values = np.ones(len(vertices), dtype="float32")
         if name in self.viewer.layers:
             layer = self.viewer.layers[name]
             layer.data = (vertices, faces, values)
-            # Reapply the transform: a persisted layer keeps its original scale/translate, which may
-            # be stale if the source layer / voxel size changed between runs.
             if scale is not None:
                 layer.scale = scale
             if translate is not None:
@@ -237,14 +247,38 @@ class CristaeAnalysisWidget(BaseWidget):
                 (vertices, faces, values), name=name, scale=scale, translate=translate, **kwargs
             )
 
+    @contextmanager
+    def _computing(self, button, busy_text, idle_text, message):
+        """Show a busy state around a synchronous, GUI-thread-blocking action, then restore it.
+
+        Disables and relabels ``button``, sets a wait cursor, shows ``message`` and forces one repaint
+        so the busy state is painted *before* the blocking call — otherwise none of it would render
+        until the call returned and the button would just look stuck. The cursor, button label and
+        enabled state are restored on exit (also on error). Disabling the button also blocks a
+        re-entrant second click while the action is in flight. All Qt calls are guarded so they no-op
+        without a running QApplication.
+        """
+        app = QApplication.instance()
+        button.setEnabled(False)
+        button.setText(busy_text)
+        if app is not None:
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+        show_info(message)
+        if app is not None:
+            app.processEvents()
+        try:
+            yield
+        finally:
+            if app is not None:
+                QApplication.restoreOverrideCursor()
+            button.setEnabled(True)
+            button.setText(idle_text)
+
     def on_preview(self):
         """Compute and show ONLY the membrane + junctions (seconds) — the front-end of the pipeline —
         so the user can tune Membrane Thickness / Border Gap before the expensive per-mito run.
 
-        The membrane/junction computation is synchronous (it blocks the GUI thread), so before it runs
-        we grey out the button, open a progress bar, set a wait cursor and force a repaint — otherwise
-        none of that feedback would paint until the (blocking) computation returned and the button
-        would just look stuck.
+        Runs synchronously; :meth:`_computing` provides the busy feedback while it blocks.
         """
         inputs = self._read_inputs()
         if inputs is None:
@@ -252,73 +286,62 @@ class CristaeAnalysisWidget(BaseWidget):
         (crista_mask, mito_seg, voxel_size, layer_scale, layer_translate,
          mm_thickness, border_gap, membrane_mode) = inputs
 
-        app = QApplication.instance()
-        self.preview_button.setEnabled(False)
-        self.preview_button.setText("Computing preview…")
-        if app is not None:
-            QApplication.setOverrideCursor(Qt.WaitCursor)
-        pbar = progress(total=2, desc="Preview: membrane & junctions")
-        show_info("INFO: Previewing membrane & junctions...")
-        if app is not None:
-            app.processEvents()  # render the busy state before the blocking computation
-        try:
-            membrane_mask, _lumen_mask, contact_labels, contact_summary = self._compute_membrane_and_contacts(
-                mito_seg, crista_mask, voxel_size, mm_thickness, border_gap, membrane_mode
-            )
-            pbar.update(1)
-            self._add_or_update_labels(
-                self._MEMBRANE_LAYER, membrane_mask.astype(np.uint8), layer_scale, layer_translate, opacity=0.4
-            )
-            if contact_labels.max() > 0:
-                self._add_or_update_labels(
-                    self._JUNCTION_LAYER, contact_labels.astype(np.uint32), layer_scale, layer_translate,
-                    blending="translucent_no_depth",
+        with self._computing(
+            self.preview_button, "Computing preview…", "Preview Membrane && Junctions",
+            "INFO: Previewing membrane & junctions...",
+        ):
+            pbar = progress(total=2, desc="Preview: membrane & junctions")
+            try:
+                membrane_mask, _lumen_mask, contact_labels, contact_summary = self._compute_membrane_and_contacts(
+                    mito_seg, crista_mask, voxel_size, mm_thickness, border_gap, membrane_mode
                 )
-            else:
-                show_info("INFO: No crista–membrane junctions detected at these settings.")
-            pbar.update(1)
-            show_info(
-                f"INFO: Preview — {int(membrane_mask.sum())} membrane voxels, "
-                f"{contact_summary['crista_junction_count']} junctions. "
-                "Adjust Membrane Thickness / Border Gap and preview again, or Run."
-            )
-        finally:
-            pbar.close()
-            if app is not None:
-                QApplication.restoreOverrideCursor()
-            self.preview_button.setEnabled(True)
-            self.preview_button.setText("Preview Membrane && Junctions")
+                pbar.update(1)
+                self._add_or_update_labels(
+                    self._MEMBRANE_LAYER, membrane_mask.astype(np.uint8), layer_scale, layer_translate, opacity=0.4
+                )
+                if contact_labels.max() > 0:
+                    self._add_or_update_labels(
+                        self._JUNCTION_LAYER, contact_labels.astype(np.uint32), layer_scale, layer_translate,
+                        blending="translucent_no_depth",
+                    )
+                else:
+                    show_info("INFO: No crista–membrane junctions detected at these settings.")
+                pbar.update(1)
+                show_info(
+                    f"INFO: Preview — {int(membrane_mask.sum())} membrane voxels, "
+                    f"{contact_summary['crista_junction_count']} junctions. "
+                    "Adjust Membrane Thickness / Border Gap and preview again, or Run."
+                )
+            finally:
+                pbar.close()
 
     def on_run(self):
+        """Run the full per-mitochondrion cristae analysis and add the result layers + stats table.
+
+        Runs synchronously; :meth:`_computing` provides the busy feedback while it blocks.
+        """
         inputs = self._read_inputs()
         if inputs is None:
             return
         (crista_mask, mito_seg, voxel_size, layer_scale, layer_translate,
          mm_thickness, border_gap, membrane_mode) = inputs
 
-        # Grey out the button and set a wait cursor before the (synchronous, GUI-thread-blocking) run,
-        # forcing a repaint so the busy state shows immediately instead of the button looking stuck.
-        app = QApplication.instance()
-        self.run_button.setEnabled(False)
-        self.run_button.setText("Computing analysis…")
-        if app is not None:
-            QApplication.setOverrideCursor(Qt.WaitCursor)
-        try:
-            show_info("INFO: Approximating mitochondrial membrane & junctions...")
-            if app is not None:
-                app.processEvents()  # render the busy state before the blocking computation
+        with self._computing(
+            self.run_button, "Computing analysis…", "Run Cristae Analysis",
+            "INFO: Approximating mitochondrial membrane & junctions...",
+        ):
             membrane_mask, lumen_mask, contact_labels, contact_summary = self._compute_membrane_and_contacts(
                 mito_seg, crista_mask, voxel_size, mm_thickness, border_gap, membrane_mode
             )
 
             method = self._ORIENTATION_TO_METHOD[self.orientation_param.currentText()]
-
             show_info(f"INFO: Running cristae analysis per mitochondrion (orientation: {method})...")
+
+            # compute_mito_crista_statistics calls progress_callback once per mitochondrion, on this
+            # (GUI) thread, so the activity-dock bar can be created/updated here directly.
             pbar = {"bar": None}
 
             def _on_progress(done, total):
-                # Runs on the GUI thread (the joblib results generator is consumed by the caller),
-                # so updating the napari progress bar here needs no cross-thread marshaling.
                 if pbar["bar"] is None:
                     pbar["bar"] = progress(total=total, desc="Cristae analysis")
                 pbar["bar"].update(1)
@@ -327,26 +350,21 @@ class CristaeAnalysisWidget(BaseWidget):
                 stats_df = compute_mito_crista_statistics(
                     crista_mask, mito_seg, voxel_size,
                     membrane_mask=membrane_mask,
-                    lumen_mask=lumen_mask,  # clean lumen → geodesics run on the true inner wall.
+                    lumen_mask=lumen_mask,
                     membrane_thickness_nm=mm_thickness,
                     border_gap_nm=border_gap,
                     method=method,
                     membrane_mode=membrane_mode,
-                    n_jobs=-1,  # mitochondria are independent — use all cores.
-                    verbose=True,  # terminal tqdm bar.
-                    progress_callback=_on_progress,  # napari activity-dock bar.
+                    n_jobs=-1,
+                    verbose=True,
+                    progress_callback=_on_progress,
                 )
             finally:
                 if pbar["bar"] is not None:
                     pbar["bar"].close()
 
             if self.show_membranes_param.isChecked():
-                # Eroded-mito (lumen) inner surface, trimmed to the certain region and left OPEN at the
-                # volume faces (the array is the whole volume, so every face is a potential clip): it
-                # ends where the membrane ends and is not capped, so geodesics never shortcut across it.
-                # sampling=1 → verts already in voxel indices.
-                gap_nm = border_gap if border_gap is not None else mm_thickness
-                gap_radius = _voxel_radius(gap_nm, voxel_size, mito_seg.ndim)
+                gap_radius = _gap_radius(voxel_size, mm_thickness, border_gap, mito_seg.ndim)
                 mesh = _open_trimmed_mesh(
                     lumen_mask, np.ones(mito_seg.ndim), gap_radius, np.ones((mito_seg.ndim, 2), dtype=bool)
                 )
@@ -359,7 +377,6 @@ class CristaeAnalysisWidget(BaseWidget):
                 else:
                     show_info("INFO: No membrane surface to display at these settings.")
 
-            # Crista-membrane junctions as a Labels layer (each junction has its own ID).
             if contact_labels.max() > 0:
                 self._add_or_update_labels(
                     self._JUNCTION_LAYER, contact_labels.astype(np.uint32), layer_scale, layer_translate,
@@ -368,7 +385,6 @@ class CristaeAnalysisWidget(BaseWidget):
             else:
                 show_info("INFO: No crista–membrane junctions detected — junction layer not added.")
 
-            # Attach per-mito stats table to the mito segmentation layer.
             mito_layer = self._get_layer_selector_layer(self.mito_selector_name)
             self._add_properties_and_table(mito_layer, stats_df, save_path=self.save_path.text())
 
@@ -378,8 +394,3 @@ class CristaeAnalysisWidget(BaseWidget):
                 f"INFO: Cristae analysis complete — {n_mito} mitochondria, "
                 f"{n_contacts} crista junction sites detected."
             )
-        finally:
-            if app is not None:
-                QApplication.restoreOverrideCursor()
-            self.run_button.setEnabled(True)
-            self.run_button.setText("Run Cristae Analysis")

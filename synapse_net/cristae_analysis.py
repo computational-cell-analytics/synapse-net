@@ -37,6 +37,17 @@ def _voxel_radius_xy(thickness_nm: float, voxel_size: Union[float, Dict[str, flo
     return max(1, int(round(thickness_nm / xy_nm)))
 
 
+def _gap_radius(
+    voxel_size: Union[float, Dict[str, float]],
+    membrane_thickness_nm: float,
+    border_gap_nm: Optional[float],
+    ndim: int,
+) -> int:
+    """Border-zone / mesh-trim radius in voxels; ``border_gap_nm`` defaults to ``membrane_thickness_nm``."""
+    gap_nm = border_gap_nm if border_gap_nm is not None else membrane_thickness_nm
+    return _voxel_radius(gap_nm, voxel_size, ndim)
+
+
 def _border_zone(shape: tuple, radius: int) -> np.ndarray:
     """Boolean mask that is True within `radius` voxels of any face of the volume."""
     mask = np.zeros(shape, dtype=bool)
@@ -89,7 +100,7 @@ def _surface_mesh(
     padded = np.pad(binary.astype(np.float32), pad_width)
     verts, faces, _, _ = marching_cubes(padded, level=0.5, spacing=tuple(float(s) for s in sampling))
     pad_before = np.array([pw[0] for pw in pad_width], dtype=float)
-    verts = verts - pad_before * np.asarray(sampling, dtype=float)  # padded frame -> unpadded mask frame
+    verts = verts - pad_before * np.asarray(sampling, dtype=float)
     return verts, faces
 
 
@@ -152,7 +163,7 @@ def _open_trimmed_mesh(
     if mesh is None:
         return None
     verts, faces = mesh
-    verts = verts + np.array(lo, dtype=float) * np.asarray(sampling, dtype=float)  # -> original frame
+    verts = verts + np.array(lo, dtype=float) * np.asarray(sampling, dtype=float)
     return verts, faces
 
 
@@ -189,7 +200,7 @@ def _available_memory_bytes() -> int:
         try:
             return int(os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE"))
         except Exception:
-            return 4 * 1024 ** 3  # conservative fallback
+            return 4 * 1024 ** 3
 
 
 def _bounded_workers(n_jobs: int, per_worker_bytes: int, fraction: float = 0.5) -> int:
@@ -242,6 +253,14 @@ def approximate_membrane(
     (and left open there) at mesh time by :func:`_open_trimmed_mesh`, which requires the untrimmed
     interior to produce an open cut rather than a fabricated cap.
 
+    Implementation notes: ``"slice_2d"`` erodes each Z-slice on the mito XY bbox with a
+    ``membrane_radius`` margin, so the cropped ``border_value=1`` erosion matches eroding the full
+    slice (empty slices are skipped), then adds Z-caps via a separable Z-only line erosion (which
+    inspects only the same column, so no XY-shape bleed); ``border_value=1`` leaves ends clipped by a
+    volume Z-face uncapped, and the ``border_gap`` removal clears anything near a face, so only true
+    ends are capped. ``"shell_3d"`` erodes the *merged* binary in each instance's padded bbox so
+    instances that share a boundary are handled together.
+
     Args:
         mito_segmentation: Instance label array (background = 0).
         voxel_size: Voxel size in nm — scalar or dict with "z"/"y"/"x" keys.
@@ -268,7 +287,6 @@ def approximate_membrane(
     mito_binary = mito_segmentation > 0
 
     if membrane_mode == "shell_3d":
-        # Full 3D erosion → single connected shell (incl. Z-caps), per instance on its padded bbox.
         sampling = _to_sampling(voxel_size, ndim)
         k = max(1, int(round(float(membrane_thickness_nm) / float(np.mean(sampling)))))
         struct = np.ones((3,) * ndim, dtype=bool)
@@ -280,15 +298,12 @@ def approximate_membrane(
                 slice(max(0, bbox[i] - k), min(mito_segmentation.shape[i], bbox[i + ndim] + k))
                 for i in range(ndim)
             )
-            sub = mito_binary[sl]  # merged mito (all instances in the crop) → shared boundaries
+            sub = mito_binary[sl]
             eroded = binary_erosion(sub, structure=struct, iterations=k, border_value=1)
             cur = mito_segmentation[sl] == prop.label
             membrane_mask[sl] |= cur & ~eroded
             lumen_mask[sl] |= cur & eroded
     elif ndim == 3:
-        # Per-Z-slice 2D erosion (no z-bleed), parallelised over Z. Only the mito XY bounding box
-        # needs eroding; a `membrane_radius` margin makes the cropped erosion (border_value=1)
-        # identical to eroding the full slice, and empty slices are skipped.
         membrane_radius = _voxel_radius_xy(membrane_thickness_nm, voxel_size)
         struct = disk(membrane_radius)
         membrane_mask = np.zeros_like(mito_binary)
@@ -306,7 +321,7 @@ def approximate_membrane(
                 if not sl.any():
                     return z, None
                 eroded = binary_erosion(sl, structure=struct, border_value=1)
-                return z, (sl & ~eroded, eroded)  # (membrane shell, lumen interior)
+                return z, (sl & ~eroded, eroded)
 
             z_range = range(int(zmin), int(zmax))
             if n_jobs == 1:
@@ -322,12 +337,6 @@ def approximate_membrane(
                     membrane_mask[z, y0:y1, x0:x1] = mem_sl
                     lumen_mask[z, y0:y1, x0:x1] = lum_sl
 
-            # Z-caps: the per-slice XY erosion never caps a column-end, so a mito that truly ends in Z
-            # (its top/bottom face, not a clipped volume face) would have no membrane there. Erode
-            # along Z only (a line structuring element that inspects just the same (y, x) column, so no
-            # XY-shape bleeds across slices) and treat the removed voxels as membrane. border_value=1
-            # leaves a clipped end (mito at a volume Z-face) uneroded — and the border_gap suppression
-            # below clears anything near a face — so only true ends are capped.
             k_z = max(1, int(round(float(membrane_thickness_nm) / float(_to_sampling(voxel_size, ndim)[0]))))
             z0m, z1m = max(0, int(zmin) - k_z), min(mito_binary.shape[0], int(zmax) + k_z)
             sub = mito_binary[z0m:z1m, y0:y1, x0:x1]
@@ -340,8 +349,7 @@ def approximate_membrane(
         membrane_mask = mito_binary & ~eroded
         lumen_mask = mito_binary & eroded
 
-    gap_nm = border_gap_nm if border_gap_nm is not None else membrane_thickness_nm
-    gap_radius = _voxel_radius(gap_nm, voxel_size, ndim)
+    gap_radius = _gap_radius(voxel_size, membrane_thickness_nm, border_gap_nm, ndim)
     membrane_mask &= ~_border_zone(mito_segmentation.shape, gap_radius)
     if return_lumen:
         return membrane_mask.astype(bool), lumen_mask.astype(bool)
@@ -362,6 +370,13 @@ def compute_crista_orientation(
     Uses ``bioimage_cpp.filters.structure_tensor_eigenvalues`` (a fast C++ routine). Only the
     anisotropy is produced (the principal directions / eigenvectors are not computed).
 
+    The structure tensor's outer/integration sigma is ``neighborhood_size_nm`` per axis (in voxels);
+    the inner (derivative) sigma must be > 0, so a minimal 1-voxel scale is used. Eigenvalues are
+    non-negative in theory, but the solver emits tiny negatives for near-rank-deficient tensors
+    (degenerate sheets/tubes), so they are clamped to 0 and the ratio is taken as
+    ``max/min`` over the trailing axis — order-agnostic and sign-safe, so a tiny negative minor
+    eigenvalue cannot flip the denominator and blow the ratio up.
+
     Args:
         crista_mask: Binary crista segmentation.
         voxel_size: Voxel size in nm — scalar or dict with "z"/"y"/"x" keys.
@@ -376,15 +391,9 @@ def compute_crista_orientation(
     ndim = crista_mask.ndim
     sampling = _to_sampling(voxel_size, ndim)
 
-    # outer_sigma is the integration scale (per axis, in voxels); inner_sigma is the derivative
-    # smoothing and must be > 0 (0 is rejected), so use a minimal 1-voxel scale.
     outer_sigma = [float(s) for s in (neighborhood_size_nm / sampling)]
     inner_sigma = 1.0
     evals = structure_tensor_eigenvalues(crista_mask.astype(np.float32), inner_sigma, outer_sigma)
-    # Structure-tensor eigenvalues are non-negative in theory, but the solver emits tiny negatives for
-    # near-rank-deficient tensors (degenerate sheets/tubes). Clamp them and take λ_max/λ_min via
-    # max/min over the trailing axis — order-agnostic and sign-safe, so a tiny negative minor
-    # eigenvalue can't flip the denominator and blow the ratio up.
     evals = np.clip(evals, 0.0, None)
     anisotropy = evals.max(axis=-1) / (evals.min(axis=-1) + 1e-10)
     return anisotropy.astype(np.float32)
@@ -426,8 +435,6 @@ def _downsampled_orientation_anisotropy(
         Mean anisotropy over the downsampled crista region, or NaN if it vanishes when downsampled.
     """
     ndim = crista_mask.ndim
-    # Nearest-neighbour downsample by strided subsampling — keeps the mask binary and needs no float
-    # conversion (compute_crista_orientation casts internally).
     sub = crista_mask[(slice(None, None, factor),) * ndim]
     region = sub.astype(bool)
     if not region.any():
@@ -480,34 +487,6 @@ def compute_crista_proximity(
     distance_map = np.zeros(crista_mask.shape, dtype=np.float32)
     distance_map[crista_mask.astype(bool)] = crista_dists
     return distance_map, summary
-
-
-def compute_crista_density(
-    crista_mask: np.ndarray,
-    mito_mask: np.ndarray,
-    voxel_size: Union[float, Dict[str, float]],
-) -> Dict[str, float]:
-    """Volume fraction of crista within a mitochondrion.
-
-    Args:
-        crista_mask: Binary crista segmentation.
-        mito_mask: Binary or instance mito mask (> 0 = inside mito).
-        voxel_size: Voxel size in nm — scalar or dict with "z"/"y"/"x" keys.
-
-    Returns:
-        Dict with crista_volume_nm3, mito_volume_nm3, crista_fraction.
-    """
-    sampling = _to_sampling(voxel_size, crista_mask.ndim)
-    voxel_vol = float(np.prod(sampling))
-    mito_binary = mito_mask > 0
-
-    mito_vol = float(mito_binary.sum()) * voxel_vol
-    crista_vol = float((crista_mask.astype(bool) & mito_binary).sum()) * voxel_vol
-    return {
-        "crista_volume_nm3": crista_vol,
-        "mito_volume_nm3": mito_vol,
-        "crista_fraction": crista_vol / mito_vol if mito_vol > 0 else np.nan,
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -582,10 +561,12 @@ def _junction_matrix_mesh(
         sampling: Voxel size per axis (nm), array (z, y, x) order.
         vertices: Mesh vertices (n_vertices, 3) in nm (unpadded mask frame).
         faces: Mesh triangle indices (n_faces, 3).
-        n_jobs: 1 = serial, -1 = all cores (forwarded to the C++ solver's thread count).
+        n_jobs: Forwarded to the C++ solver's ``number_of_threads``: -1/0 map to 0 (the solver's
+            "use hardware_concurrency"), otherwise that many threads.
 
     Returns:
         (n, n) geodesic distance matrix in nm (0 diagonal, NaN for disconnected pairs), or None.
+        Disconnected pairs come back from the solver as ``+inf`` and are converted to NaN.
     """
     verts = np.ascontiguousarray(vertices, dtype=np.float64)
     tris = np.ascontiguousarray(faces, dtype=np.int64)
@@ -593,15 +574,14 @@ def _junction_matrix_mesh(
         return None
     from scipy.spatial import cKDTree
 
-    # Mask voxel (z, y, x) sits at index * sampling in the unpadded mesh frame (_surface_mesh).
     points = np.asarray(centroids, dtype=float) * sampling
     _, vertex_ids = cKDTree(verts).query(points)
     vertex_ids = np.atleast_1d(np.asarray(vertex_ids, dtype=np.int64))
-    n_threads = 0 if n_jobs in (-1, 0) else max(1, int(n_jobs))  # bic: 0 = hardware_concurrency
+    n_threads = 0 if n_jobs in (-1, 0) else max(1, int(n_jobs))
     dm = np.asarray(
         geodesic_distances_mesh(verts, tris, vertex_ids, number_of_threads=n_threads), dtype=float
     )
-    dm[~np.isfinite(dm)] = np.nan  # disconnected components come back as +inf
+    dm[~np.isfinite(dm)] = np.nan
     np.fill_diagonal(dm, 0.0)
     return dm
 
@@ -651,6 +631,10 @@ def compute_junction_distances(
     Notes:
         The Clark-Evans expected nearest-neighbour distance uses the standard 2-D planar
         approximation ``0.5 * sqrt(A / n)`` with ``A = surface_area_nm2``.
+
+        Each junction's nearest-neighbour distance is the smallest distance to a *reachable* other
+        junction: self (diagonal) and unreachable (NaN) pairs are set to +inf before the per-row
+        minimum, and rows with no reachable neighbour (min stays +inf) are dropped.
     """
     ndim = contact_labels.ndim
     sampling = _to_sampling(voxel_size, ndim)
@@ -663,12 +647,10 @@ def compute_junction_distances(
         summary["junction_count"] = n
         return np.zeros((n, n), dtype=float), summary
 
-    # Junction centroids in one labelled reduction (uniform weights → geometric centroid).
     centroids = np.atleast_2d(
         np.asarray(center_of_mass(contact_labels > 0, labels=contact_labels, index=labels), dtype=float)
     )
 
-    # Surface geodesic along the supplied eroded-mito mesh (or a mesh built from the membrane).
     if mesh_vertices is not None and mesh_faces is not None and len(mesh_faces) > 0:
         mesh = (mesh_vertices, mesh_faces)
     else:
@@ -678,14 +660,10 @@ def compute_junction_distances(
     )
 
     if distance_matrix is None:
-        # No usable surface mesh (empty membrane / degenerate mesh) → distances are NaN.
         summary = dict(_JUNCTION_DISTANCE_NAN)
         summary["junction_count"] = n
         return np.full((n, n), np.nan, dtype=float), summary
 
-    # Nearest-neighbour distance per junction (nearest reachable other junction). Vectorised:
-    # exclude self (diagonal) and unreachable pairs (NaN) by setting them to +inf, take the row
-    # minimum, and drop rows with no reachable neighbour (min stays +inf).
     dm = distance_matrix.copy()
     np.fill_diagonal(dm, np.inf)
     dm[~np.isfinite(dm)] = np.inf
@@ -739,7 +717,6 @@ def compute_crista_morphology(
         result["cristae_surface_area_nm2"] = _surface_area(crista_mask, sampling)
 
     if method in ("medial_axis", "both"):
-        # Local maxima of the EDT form the medial axis; 2 × distance there = local thickness.
         result["avg_thickness_nm"] = _medial_axis_thickness_nm(crista_mask, sampling)
 
     return result
@@ -785,7 +762,8 @@ def _single_mito_row(
     are trimmed/opened at faces where the mito is clipped by the volume boundary: the lumen via
     :func:`_open_trimmed_mesh` (trimmed to the certain region and left open, so geodesics do not
     shortcut across a cap), the mito surface via ``closed_faces`` (open, so a fabricated cap is not
-    counted as membrane area).
+    counted as membrane area). The membrane distance transform is freed before the (memory-heavy)
+    orientation stage to cap peak memory.
     """
     ndim = mito_crop.ndim
     touches_border = any(
@@ -800,8 +778,6 @@ def _single_mito_row(
     mito_vol = float(mito_local.sum()) * voxel_vol
     crista_vol = float(crista_local.sum()) * voxel_vol
 
-    # True where the bbox face is at the volume boundary (mito clipped there). The mito outer surface
-    # leaves these open (no fabricated cap in the area); the lumen mesh is trimmed + opened there.
     boundary = np.array(
         [[bbox[a] == 0, bbox[a + ndim] == vol_shape[a]] for a in range(ndim)], dtype=bool
     )
@@ -824,7 +800,6 @@ def _single_mito_row(
             surface_area_nm2=mito_surface, n_jobs=inner_n_jobs,
             mesh_vertices=mesh_verts, mesh_faces=mesh_faces,
         )
-        # Free the (potentially large) distance-transform array before the orientation computation.
         del membrane_distance, contact_labels_local
     else:
         contact_summary = {"contact_voxel_count": 0, "crista_junction_count": 0, "contact_volume_nm3": 0.0}
@@ -841,7 +816,7 @@ def _single_mito_row(
             crista_orientation_anisotropy = _downsampled_orientation_anisotropy(
                 crista_local, voxel_size, factor=2
             )
-        else:  # exact
+        else:
             anisotropy = compute_crista_orientation(crista_local, voxel_size)
             crista_orientation_anisotropy = float(np.mean(anisotropy[crista_local]))
     else:
@@ -932,6 +907,16 @@ def compute_mito_crista_statistics(
     (``bioimage_cpp.distance.geodesic_distances_mesh``); for a mito with no usable mesh (empty
     membrane / degenerate mesh) those columns are NaN.
 
+    Implementation notes: each mito is pre-cropped to its bounding box by basic slicing (views, so
+    cropping is memory-free; only the bbox region is pickled to a process worker). Parallelism is
+    adaptive and single-level (never oversubscribed): with many mitochondria the work is parallelised
+    *across* them as loky processes (so the GIL-bound stages scale) with each worker's inner stages
+    serial and BLAS capped (``inner_max_num_threads=1``); with few mitochondria they run serially and
+    each mito's junction-distance stage gets all cores while BLAS multithreads the orientation. The
+    concurrent worker count is additionally capped so the combined per-mito working set (tensor
+    components + label crops, ~40 bytes/voxel of the largest mito) fits in RAM. Rows are finally
+    sorted by label for an n_jobs-independent ordering.
+
     Returns:
         DataFrame with one row per mito instance:
         label | mito_volume_nm3 | crista_volume_nm3 | crista_fraction |
@@ -950,8 +935,6 @@ def compute_mito_crista_statistics(
     if method not in ("fast", "exact", "skip"):
         raise ValueError(f"method must be 'fast', 'exact', or 'skip', got {method!r}")
     if membrane_mask is None:
-        # Derive the matching lumen alongside the membrane; a caller-supplied membrane keeps its
-        # (possibly None) lumen_mask and falls back per-instance in _single_mito_row.
         membrane_mask, lumen_mask = approximate_membrane(
             mito_segmentation, voxel_size, membrane_thickness_nm, border_gap_nm,
             n_jobs=n_jobs, membrane_mode=membrane_mode, return_lumen=True,
@@ -962,11 +945,8 @@ def compute_mito_crista_statistics(
     voxel_vol = float(np.prod(sampling))
     crista_binary = crista_mask.astype(bool)
     vol_shape = mito_segmentation.shape
-    effective_gap_nm = border_gap_nm if border_gap_nm is not None else membrane_thickness_nm
-    border_radius = _voxel_radius(effective_gap_nm, voxel_size, ndim)
+    border_radius = _gap_radius(voxel_size, membrane_thickness_nm, border_gap_nm, ndim)
 
-    # Pre-crop each mito to its bounding box (basic slicing → views, so this is memory-free;
-    # for the process path only the bbox region gets pickled, not the whole volume).
     tasks = []
     for prop in regionprops(mito_segmentation):
         bbox = prop.bbox
@@ -988,11 +968,6 @@ def compute_mito_crista_statistics(
         )
 
     n_workers = os.cpu_count() if n_jobs == -1 else max(1, n_jobs)
-    # Adaptive: many mitochondria → parallelize ACROSS them (processes, so the GIL-bound stages
-    # actually scale), BLAS capped per worker, inner stages serial. Few mitochondria (e.g. one
-    # dominant mito) → run them serially but give each mito's junction-distance stage all the
-    # cores and let BLAS multithread the orientation. Exactly one level of parallelism is ever
-    # active, so there is no process/thread oversubscription.
     across = n_workers > 1 and total >= n_workers
 
     rows = []
@@ -1007,12 +982,8 @@ def compute_mito_crista_statistics(
 
     if across:
         from joblib import Parallel, delayed, parallel_config
-        # Cap concurrent workers so their combined per-mito working set (graph + tensor
-        # components + label crops, ~40 bytes/voxel of the largest mito) fits in RAM.
         max_voxels = max(int(task[2].size) for task in tasks)
         across_workers = _bounded_workers(n_jobs, per_worker_bytes=max_voxels * 40)
-        # loky processes bypass the GIL; inner_max_num_threads=1 stops each worker's BLAS from
-        # oversubscribing against the pool.
         with parallel_config(backend="loky", inner_max_num_threads=1):
             _consume(
                 Parallel(n_jobs=across_workers, return_as="generator_unordered")(
@@ -1022,6 +993,5 @@ def compute_mito_crista_statistics(
     else:
         _consume(_run(task, n_workers) for task in tasks)
 
-    # Stable, n_jobs-independent ordering.
     rows.sort(key=lambda row: row["mito_label_id"])
     return pd.DataFrame(rows)
