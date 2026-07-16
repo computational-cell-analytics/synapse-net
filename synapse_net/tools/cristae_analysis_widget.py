@@ -3,7 +3,8 @@ import numpy as np
 
 from napari.utils import progress
 from napari.utils.notifications import show_info
-from qtpy.QtWidgets import QWidget, QVBoxLayout, QPushButton
+from qtpy.QtCore import Qt
+from qtpy.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton
 
 from .base_widget import BaseWidget
 from ..cristae_analysis import (
@@ -238,32 +239,55 @@ class CristaeAnalysisWidget(BaseWidget):
 
     def on_preview(self):
         """Compute and show ONLY the membrane + junctions (seconds) — the front-end of the pipeline —
-        so the user can tune Membrane Thickness / Border Gap before the expensive per-mito run."""
+        so the user can tune Membrane Thickness / Border Gap before the expensive per-mito run.
+
+        The membrane/junction computation is synchronous (it blocks the GUI thread), so before it runs
+        we grey out the button, open a progress bar, set a wait cursor and force a repaint — otherwise
+        none of that feedback would paint until the (blocking) computation returned and the button
+        would just look stuck.
+        """
         inputs = self._read_inputs()
         if inputs is None:
             return
         (crista_mask, mito_seg, voxel_size, layer_scale, layer_translate,
          mm_thickness, border_gap, membrane_mode) = inputs
 
+        app = QApplication.instance()
+        self.preview_button.setEnabled(False)
+        self.preview_button.setText("Computing preview…")
+        if app is not None:
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+        pbar = progress(total=2, desc="Preview: membrane & junctions")
         show_info("INFO: Previewing membrane & junctions...")
-        membrane_mask, _lumen_mask, contact_labels, contact_summary = self._compute_membrane_and_contacts(
-            mito_seg, crista_mask, voxel_size, mm_thickness, border_gap, membrane_mode
-        )
-        self._add_or_update_labels(
-            self._MEMBRANE_LAYER, membrane_mask.astype(np.uint8), layer_scale, layer_translate, opacity=0.4
-        )
-        if contact_labels.max() > 0:
-            self._add_or_update_labels(
-                self._JUNCTION_LAYER, contact_labels.astype(np.uint32), layer_scale, layer_translate,
-                blending="translucent_no_depth",
+        if app is not None:
+            app.processEvents()  # render the busy state before the blocking computation
+        try:
+            membrane_mask, _lumen_mask, contact_labels, contact_summary = self._compute_membrane_and_contacts(
+                mito_seg, crista_mask, voxel_size, mm_thickness, border_gap, membrane_mode
             )
-        else:
-            show_info("INFO: No crista–membrane junctions detected at these settings.")
-        show_info(
-            f"INFO: Preview — {int(membrane_mask.sum())} membrane voxels, "
-            f"{contact_summary['crista_junction_count']} junctions. "
-            "Adjust Membrane Thickness / Border Gap and preview again, or Run."
-        )
+            pbar.update(1)
+            self._add_or_update_labels(
+                self._MEMBRANE_LAYER, membrane_mask.astype(np.uint8), layer_scale, layer_translate, opacity=0.4
+            )
+            if contact_labels.max() > 0:
+                self._add_or_update_labels(
+                    self._JUNCTION_LAYER, contact_labels.astype(np.uint32), layer_scale, layer_translate,
+                    blending="translucent_no_depth",
+                )
+            else:
+                show_info("INFO: No crista–membrane junctions detected at these settings.")
+            pbar.update(1)
+            show_info(
+                f"INFO: Preview — {int(membrane_mask.sum())} membrane voxels, "
+                f"{contact_summary['crista_junction_count']} junctions. "
+                "Adjust Membrane Thickness / Border Gap and preview again, or Run."
+            )
+        finally:
+            pbar.close()
+            if app is not None:
+                QApplication.restoreOverrideCursor()
+            self.preview_button.setEnabled(True)
+            self.preview_button.setText("Preview Membrane && Junctions")
 
     def on_run(self):
         inputs = self._read_inputs()
@@ -272,75 +296,90 @@ class CristaeAnalysisWidget(BaseWidget):
         (crista_mask, mito_seg, voxel_size, layer_scale, layer_translate,
          mm_thickness, border_gap, membrane_mode) = inputs
 
-        show_info("INFO: Approximating mitochondrial membrane & junctions...")
-        membrane_mask, lumen_mask, contact_labels, contact_summary = self._compute_membrane_and_contacts(
-            mito_seg, crista_mask, voxel_size, mm_thickness, border_gap, membrane_mode
-        )
-
-        method = self._ORIENTATION_TO_METHOD[self.orientation_param.currentText()]
-
-        show_info(f"INFO: Running cristae analysis per mitochondrion (orientation: {method})...")
-        pbar = {"bar": None}
-
-        def _on_progress(done, total):
-            # Runs on the GUI thread (the joblib results generator is consumed by the caller),
-            # so updating the napari progress bar here needs no cross-thread marshaling.
-            if pbar["bar"] is None:
-                pbar["bar"] = progress(total=total, desc="Cristae analysis")
-            pbar["bar"].update(1)
-
+        # Grey out the button and set a wait cursor before the (synchronous, GUI-thread-blocking) run,
+        # forcing a repaint so the busy state shows immediately instead of the button looking stuck.
+        app = QApplication.instance()
+        self.run_button.setEnabled(False)
+        self.run_button.setText("Computing analysis…")
+        if app is not None:
+            QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
-            stats_df = compute_mito_crista_statistics(
-                crista_mask, mito_seg, voxel_size,
-                membrane_mask=membrane_mask,
-                lumen_mask=lumen_mask,  # clean lumen → geodesics run on the true inner wall.
-                membrane_thickness_nm=mm_thickness,
-                border_gap_nm=border_gap,
-                method=method,
-                membrane_mode=membrane_mode,
-                n_jobs=-1,  # mitochondria are independent — use all cores.
-                verbose=True,  # terminal tqdm bar.
-                progress_callback=_on_progress,  # napari activity-dock bar.
+            show_info("INFO: Approximating mitochondrial membrane & junctions...")
+            if app is not None:
+                app.processEvents()  # render the busy state before the blocking computation
+            membrane_mask, lumen_mask, contact_labels, contact_summary = self._compute_membrane_and_contacts(
+                mito_seg, crista_mask, voxel_size, mm_thickness, border_gap, membrane_mode
             )
-        finally:
-            if pbar["bar"] is not None:
-                pbar["bar"].close()
 
-        if self.show_membranes_param.isChecked():
-            # Eroded-mito (lumen) inner surface, trimmed to the certain region and left OPEN at the
-            # volume faces (the array is the whole volume, so every face is a potential clip): it ends
-            # where the membrane ends and is not capped, so geodesics never shortcut across it.
-            # sampling=1 → verts already in voxel indices.
-            gap_nm = border_gap if border_gap is not None else mm_thickness
-            gap_radius = _voxel_radius(gap_nm, voxel_size, mito_seg.ndim)
-            mesh = _open_trimmed_mesh(
-                lumen_mask, np.ones(mito_seg.ndim), gap_radius, np.ones((mito_seg.ndim, 2), dtype=bool)
-            )
-            if mesh is not None:
-                verts, faces = mesh
-                self._add_or_update_surface(
-                    self._MEMBRANE_MESH_LAYER, verts, faces, layer_scale, layer_translate,
-                    opacity=0.4, blending="translucent",
+            method = self._ORIENTATION_TO_METHOD[self.orientation_param.currentText()]
+
+            show_info(f"INFO: Running cristae analysis per mitochondrion (orientation: {method})...")
+            pbar = {"bar": None}
+
+            def _on_progress(done, total):
+                # Runs on the GUI thread (the joblib results generator is consumed by the caller),
+                # so updating the napari progress bar here needs no cross-thread marshaling.
+                if pbar["bar"] is None:
+                    pbar["bar"] = progress(total=total, desc="Cristae analysis")
+                pbar["bar"].update(1)
+
+            try:
+                stats_df = compute_mito_crista_statistics(
+                    crista_mask, mito_seg, voxel_size,
+                    membrane_mask=membrane_mask,
+                    lumen_mask=lumen_mask,  # clean lumen → geodesics run on the true inner wall.
+                    membrane_thickness_nm=mm_thickness,
+                    border_gap_nm=border_gap,
+                    method=method,
+                    membrane_mode=membrane_mode,
+                    n_jobs=-1,  # mitochondria are independent — use all cores.
+                    verbose=True,  # terminal tqdm bar.
+                    progress_callback=_on_progress,  # napari activity-dock bar.
+                )
+            finally:
+                if pbar["bar"] is not None:
+                    pbar["bar"].close()
+
+            if self.show_membranes_param.isChecked():
+                # Eroded-mito (lumen) inner surface, trimmed to the certain region and left OPEN at the
+                # volume faces (the array is the whole volume, so every face is a potential clip): it
+                # ends where the membrane ends and is not capped, so geodesics never shortcut across it.
+                # sampling=1 → verts already in voxel indices.
+                gap_nm = border_gap if border_gap is not None else mm_thickness
+                gap_radius = _voxel_radius(gap_nm, voxel_size, mito_seg.ndim)
+                mesh = _open_trimmed_mesh(
+                    lumen_mask, np.ones(mito_seg.ndim), gap_radius, np.ones((mito_seg.ndim, 2), dtype=bool)
+                )
+                if mesh is not None:
+                    verts, faces = mesh
+                    self._add_or_update_surface(
+                        self._MEMBRANE_MESH_LAYER, verts, faces, layer_scale, layer_translate,
+                        opacity=0.4, blending="translucent",
+                    )
+                else:
+                    show_info("INFO: No membrane surface to display at these settings.")
+
+            # Crista-membrane junctions as a Labels layer (each junction has its own ID).
+            if contact_labels.max() > 0:
+                self._add_or_update_labels(
+                    self._JUNCTION_LAYER, contact_labels.astype(np.uint32), layer_scale, layer_translate,
+                    blending="translucent_no_depth",
                 )
             else:
-                show_info("INFO: No membrane surface to display at these settings.")
+                show_info("INFO: No crista–membrane junctions detected — junction layer not added.")
 
-        # Crista-membrane junctions as a Labels layer (each junction has its own ID).
-        if contact_labels.max() > 0:
-            self._add_or_update_labels(
-                self._JUNCTION_LAYER, contact_labels.astype(np.uint32), layer_scale, layer_translate,
-                blending="translucent_no_depth",
+            # Attach per-mito stats table to the mito segmentation layer.
+            mito_layer = self._get_layer_selector_layer(self.mito_selector_name)
+            self._add_properties_and_table(mito_layer, stats_df, save_path=self.save_path.text())
+
+            n_mito = len(stats_df)
+            n_contacts = contact_summary["crista_junction_count"]
+            show_info(
+                f"INFO: Cristae analysis complete — {n_mito} mitochondria, "
+                f"{n_contacts} crista junction sites detected."
             )
-        else:
-            show_info("INFO: No crista–membrane junctions detected — junction layer not added.")
-
-        # Attach per-mito stats table to the mito segmentation layer.
-        mito_layer = self._get_layer_selector_layer(self.mito_selector_name)
-        self._add_properties_and_table(mito_layer, stats_df, save_path=self.save_path.text())
-
-        n_mito = len(stats_df)
-        n_contacts = contact_summary["crista_junction_count"]
-        show_info(
-            f"INFO: Cristae analysis complete — {n_mito} mitochondria, "
-            f"{n_contacts} crista junction sites detected."
-        )
+        finally:
+            if app is not None:
+                QApplication.restoreOverrideCursor()
+            self.run_button.setEnabled(True)
+            self.run_button.setText("Run Cristae Analysis")

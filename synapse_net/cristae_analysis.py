@@ -1,24 +1,16 @@
 import os
-import warnings
 from typing import Callable, Dict, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
-from scipy.ndimage import binary_erosion, center_of_mass, distance_transform_edt, gaussian_filter
+from scipy.ndimage import binary_erosion, center_of_mass, distance_transform_edt
 from scipy.ndimage import label as ndimage_label
 from skimage.measure import marching_cubes, mesh_surface_area, regionprops
 from skimage.morphology import disk, local_maxima
 from tqdm import tqdm
 
-try:  # Optional: surface-mesh geodesic backend (postdates bioimage-cpp 0.5.0).
-    from bioimage_cpp.distance import geodesic_distances_mesh
-except Exception:  # pragma: no cover - depends on installed bioimage-cpp version
-    geodesic_distances_mesh = None
-
-try:  # Optional: C++ structure-tensor eigenvalues (falls back to the NumPy path below).
-    from bioimage_cpp.filters import structure_tensor_eigenvalues
-except Exception:  # pragma: no cover - depends on installed bioimage-cpp version
-    structure_tensor_eigenvalues = None
+from bioimage_cpp.distance import geodesic_distances_mesh
+from bioimage_cpp.filters import structure_tensor_eigenvalues
 
 
 # ---------------------------------------------------------------------------
@@ -233,8 +225,10 @@ def approximate_membrane(
     - ``"slice_2d"`` (default): erode each Z-slice **independently in 2D** by an XY disk of radius
       ``round(thickness / xy_voxel)`` and keep ``slice & ~eroded``. A mitochondrion that changes shape
       rapidly along Z does not bleed into neighbouring slices, and the per-slice erosions are
-      parallelised over Z (``n_jobs``). The shell has no Z-caps and can fragment into disconnected
-      pieces across slices. (2D inputs get a single 2D erosion.)
+      parallelised over Z (``n_jobs``). A separable Z-only erosion (radius ``round(thickness /
+      z_voxel)``, no XY coupling) then adds **Z-caps** where a mito column truly ends in Z; ends
+      clipped by a volume Z-face are left uncapped (``border_value=1`` + the ``border_gap`` trim). The
+      XY shell can still fragment across slices. (2D inputs get a single 2D erosion.)
     - ``"shell_3d"``: a full 3D morphological erosion, ``mito & ~erode3d(mito, k)`` with
       ``k = round(thickness / mean_voxel)`` iterations of a 3×3×3 structuring element, per instance on
       its padded bounding box. A single **connected** shell including the Z-caps (no per-slice
@@ -327,6 +321,19 @@ def approximate_membrane(
                     mem_sl, lum_sl = res
                     membrane_mask[z, y0:y1, x0:x1] = mem_sl
                     lumen_mask[z, y0:y1, x0:x1] = lum_sl
+
+            # Z-caps: the per-slice XY erosion never caps a column-end, so a mito that truly ends in Z
+            # (its top/bottom face, not a clipped volume face) would have no membrane there. Erode
+            # along Z only (a line structuring element that inspects just the same (y, x) column, so no
+            # XY-shape bleeds across slices) and treat the removed voxels as membrane. border_value=1
+            # leaves a clipped end (mito at a volume Z-face) uneroded — and the border_gap suppression
+            # below clears anything near a face — so only true ends are capped.
+            k_z = max(1, int(round(float(membrane_thickness_nm) / float(_to_sampling(voxel_size, ndim)[0]))))
+            z0m, z1m = max(0, int(zmin) - k_z), min(mito_binary.shape[0], int(zmax) + k_z)
+            sub = mito_binary[z0m:z1m, y0:y1, x0:x1]
+            z_eroded = binary_erosion(sub, structure=np.ones((2 * k_z + 1, 1, 1), dtype=bool), border_value=1)
+            membrane_mask[z0m:z1m, y0:y1, x0:x1] |= sub & ~z_eroded
+            lumen_mask[z0m:z1m, y0:y1, x0:x1] &= z_eroded
     else:
         membrane_radius = _voxel_radius(membrane_thickness_nm, voxel_size, ndim)
         eroded = binary_erosion(mito_binary, structure=disk(membrane_radius), border_value=1)
@@ -349,22 +356,17 @@ def compute_crista_orientation(
     crista_mask: np.ndarray,
     voxel_size: Union[float, Dict[str, float]],
     neighborhood_size_nm: float = 30.0,
-    n_jobs: int = 1,
 ) -> np.ndarray:
     """Compute the per-voxel crista orientation anisotropy via the structure tensor.
 
-    When available this uses ``bioimage_cpp.filters.structure_tensor_eigenvalues`` (a fast C++
-    routine); otherwise it falls back to a low-memory NumPy implementation. Only the anisotropy
-    is produced (the principal directions / eigenvectors are not computed).
+    Uses ``bioimage_cpp.filters.structure_tensor_eigenvalues`` (a fast C++ routine). Only the
+    anisotropy is produced (the principal directions / eigenvectors are not computed).
 
     Args:
         crista_mask: Binary crista segmentation.
         voxel_size: Voxel size in nm — scalar or dict with "z"/"y"/"x" keys.
         neighborhood_size_nm: Gaussian integration radius in nm for tensor averaging (the
             structure tensor's outer/integration scale).
-        n_jobs: Number of threads for the Gaussian smoothing in the NumPy fallback only (the
-            unique tensor components are independent and ``gaussian_filter`` releases the GIL).
-            1 = serial; -1 = all cores. Ignored on the bioimage-cpp path.
 
     Returns:
         anisotropy: (...) — λ_max / (λ_min + ε) per voxel. High values indicate a strongly
@@ -374,61 +376,18 @@ def compute_crista_orientation(
     ndim = crista_mask.ndim
     sampling = _to_sampling(voxel_size, ndim)
 
-    if structure_tensor_eigenvalues is not None:
-        # C++ structure tensor. outer_sigma is the integration scale (per axis, in voxels);
-        # inner_sigma is the derivative smoothing — it must be > 0 (0 is rejected), so we use a
-        # minimal 1-voxel scale (the previous NumPy path used plain gradients ≈ inner 0, so
-        # absolute anisotropy magnitudes shift slightly, but the ordering is preserved).
-        outer_sigma = [float(s) for s in (neighborhood_size_nm / sampling)]
-        inner_sigma = 1.0
-        evals = structure_tensor_eigenvalues(crista_mask.astype(np.float32), inner_sigma, outer_sigma)
-        # Structure-tensor eigenvalues are non-negative in theory, but the solver emits tiny
-        # negatives for near-rank-deficient tensors (degenerate sheets/tubes). Clamp them and take
-        # λ_max/λ_min via max/min over the trailing axis — order-agnostic and sign-safe, so a tiny
-        # negative minor eigenvalue can't flip the denominator and blow the ratio up.
-        evals = np.clip(evals, 0.0, None)
-        anisotropy = evals.max(axis=-1) / (evals.min(axis=-1) + 1e-10)
-        return anisotropy.astype(np.float32)
-
-    # NumPy fallback: keep only the ndim*(ndim+1)/2 unique smoothed components instead of the full
-    # (..., ndim, ndim) tensor, and evaluate eigenvalues chunk-wise along axis 0 so only a small
-    # block is stacked at any time. The unique components are independent Gaussian smoothings
-    # (GIL-releasing) → thread them.
-    sigma = neighborhood_size_nm / sampling
-    grads = np.gradient(crista_mask.astype(np.float32), *sampling.tolist())
-    pairs = [(i, j) for i in range(ndim) for j in range(i, ndim)]
-
-    def _component(i, j):
-        return (i, j), gaussian_filter(grads[i] * grads[j], sigma=sigma)
-
-    # Each concurrent component holds a product + its smoothed output (~2 float32 arrays); cap the
-    # thread count by available memory so the smoothing peak can't OOM on a large mitochondrion.
-    workers = _bounded_workers(n_jobs, per_worker_bytes=crista_mask.size * 4 * 2)
-    if workers == 1 or len(pairs) == 1:
-        components = dict(_component(i, j) for i, j in pairs)
-    else:
-        from joblib import Parallel, delayed
-        components = dict(
-            Parallel(n_jobs=min(workers, len(pairs)), prefer="threads")(
-                delayed(_component)(i, j) for i, j in pairs
-            )
-        )
-    del grads
-
-    shape = crista_mask.shape
-    anisotropy = np.empty(shape, dtype=np.float32)
-    plane_voxels = int(np.prod(shape[1:])) if ndim > 1 else 1
-    chunk = max(1, 1_000_000 // max(1, plane_voxels))
-    for z0 in range(0, shape[0], chunk):
-        z1 = min(z0 + chunk, shape[0])
-        block = np.empty((z1 - z0,) + shape[1:] + (ndim, ndim), dtype=np.float32)
-        for (i, j), comp in components.items():
-            block[..., i, j] = comp[z0:z1]
-            block[..., j, i] = comp[z0:z1]
-        evals = np.clip(np.linalg.eigvalsh(block), 0.0, None)
-        anisotropy[z0:z1] = evals.max(axis=-1) / (evals.min(axis=-1) + 1e-10)
-        del block, evals
-    return anisotropy
+    # outer_sigma is the integration scale (per axis, in voxels); inner_sigma is the derivative
+    # smoothing and must be > 0 (0 is rejected), so use a minimal 1-voxel scale.
+    outer_sigma = [float(s) for s in (neighborhood_size_nm / sampling)]
+    inner_sigma = 1.0
+    evals = structure_tensor_eigenvalues(crista_mask.astype(np.float32), inner_sigma, outer_sigma)
+    # Structure-tensor eigenvalues are non-negative in theory, but the solver emits tiny negatives for
+    # near-rank-deficient tensors (degenerate sheets/tubes). Clamp them and take λ_max/λ_min via
+    # max/min over the trailing axis — order-agnostic and sign-safe, so a tiny negative minor
+    # eigenvalue can't flip the denominator and blow the ratio up.
+    evals = np.clip(evals, 0.0, None)
+    anisotropy = evals.max(axis=-1) / (evals.min(axis=-1) + 1e-10)
+    return anisotropy.astype(np.float32)
 
 
 def _scale_voxel_size(
@@ -444,7 +403,6 @@ def _downsampled_orientation_anisotropy(
     crista_mask: np.ndarray,
     voxel_size: Union[float, Dict[str, float]],
     factor: int = 2,
-    n_jobs: int = 1,
 ) -> float:
     """Mean crista orientation anisotropy computed on a downsampled crop (fast, approximate).
 
@@ -463,7 +421,6 @@ def _downsampled_orientation_anisotropy(
         crista_mask: Binary crista segmentation.
         voxel_size: Voxel size in nm — scalar or dict with "z"/"y"/"x" keys.
         factor: Integer downsampling factor per axis.
-        n_jobs: Threads forwarded to :func:`compute_crista_orientation`.
 
     Returns:
         Mean anisotropy over the downsampled crista region, or NaN if it vanishes when downsampled.
@@ -475,9 +432,7 @@ def _downsampled_orientation_anisotropy(
     region = sub.astype(bool)
     if not region.any():
         return np.nan
-    anisotropy = compute_crista_orientation(
-        sub, _scale_voxel_size(voxel_size, factor), n_jobs=n_jobs
-    )
+    anisotropy = compute_crista_orientation(sub, _scale_voxel_size(voxel_size, factor))
     return float(np.mean(anisotropy[region]))
 
 
@@ -620,8 +575,7 @@ def _junction_matrix_mesh(
     ``bioimage_cpp.distance.geodesic_distances_mesh`` (passing all junction vertices as sources, so it
     returns the full pairwise matrix directly). The mesh (see :func:`_surface_mesh`) returns vertices
     in the unpadded mask index frame, so voxel centroids map to it as ``index * sampling`` with no
-    offset. Returns None (junction distances become NaN) when the bioimage-cpp geodesic API is
-    unavailable or the mesh is empty.
+    offset. Returns None (junction distances become NaN) when the mesh is empty.
 
     Args:
         centroids: (n, ndim) junction centroids in voxel coordinates.
@@ -633,8 +587,6 @@ def _junction_matrix_mesh(
     Returns:
         (n, n) geodesic distance matrix in nm (0 diagonal, NaN for disconnected pairs), or None.
     """
-    if geodesic_distances_mesh is None:
-        return None
     verts = np.ascontiguousarray(vertices, dtype=np.float64)
     tris = np.ascontiguousarray(faces, dtype=np.int64)
     if verts.shape[0] == 0 or tris.shape[0] == 0:
@@ -670,8 +622,8 @@ def compute_junction_distances(
     ``bioimage_cpp.distance.geodesic_distances_mesh``. The mesh is the **eroded-mito (lumen) surface**
     passed in as ``mesh_vertices``/``mesh_faces`` by :func:`_single_mito_row` (a clean, single-wall
     surface at the membrane's inner edge); if none is supplied a mesh is built from ``membrane_mask``
-    as a convenience. When the bioimage-cpp geodesic API is unavailable or the mesh is empty, the
-    junction distances are NaN (:func:`compute_mito_crista_statistics` emits a single warning).
+    as a convenience. When no usable surface mesh exists (empty membrane / degenerate mesh), the
+    junction distances are NaN.
 
     A Clark-Evans nearest-neighbour index summarises whether the junctions are clustered.
 
@@ -717,17 +669,16 @@ def compute_junction_distances(
     )
 
     # Surface geodesic along the supplied eroded-mito mesh (or a mesh built from the membrane).
-    distance_matrix = None
-    if geodesic_distances_mesh is not None:
-        if mesh_vertices is not None and mesh_faces is not None and len(mesh_faces) > 0:
-            mesh = (mesh_vertices, mesh_faces)
-        else:
-            mesh = _surface_mesh(membrane, sampling)
-        if mesh is not None:
-            distance_matrix = _junction_matrix_mesh(centroids, sampling, mesh[0], mesh[1], n_jobs)
+    if mesh_vertices is not None and mesh_faces is not None and len(mesh_faces) > 0:
+        mesh = (mesh_vertices, mesh_faces)
+    else:
+        mesh = _surface_mesh(membrane, sampling)
+    distance_matrix = (
+        _junction_matrix_mesh(centroids, sampling, mesh[0], mesh[1], n_jobs) if mesh is not None else None
+    )
 
     if distance_matrix is None:
-        # bioimage-cpp geodesic API unavailable or no usable mesh → distances are NaN (no fallback).
+        # No usable surface mesh (empty membrane / degenerate mesh) → distances are NaN.
         summary = dict(_JUNCTION_DISTANCE_NAN)
         summary["junction_count"] = n
         return np.full((n, n), np.nan, dtype=float), summary
@@ -888,12 +839,10 @@ def _single_mito_row(
             crista_orientation_anisotropy = np.nan
         elif method == "fast":
             crista_orientation_anisotropy = _downsampled_orientation_anisotropy(
-                crista_local, voxel_size, factor=2, n_jobs=inner_n_jobs
+                crista_local, voxel_size, factor=2
             )
         else:  # exact
-            anisotropy = compute_crista_orientation(
-                crista_local, voxel_size, n_jobs=inner_n_jobs
-            )
+            anisotropy = compute_crista_orientation(crista_local, voxel_size)
             crista_orientation_anisotropy = float(np.mean(anisotropy[crista_local]))
     else:
         crista_orientation_anisotropy = np.nan
@@ -980,8 +929,8 @@ def compute_mito_crista_statistics(
             contaminated by the membrane's border-gap suppression near clipped volume faces.
 
     The junction nearest-neighbour distances are geodesics along the eroded-mito surface mesh
-    (``bioimage_cpp.distance.geodesic_distances_mesh``, needs bioimage-cpp>=0.6.0); when that API is
-    unavailable those columns are NaN (a single warning is emitted).
+    (``bioimage_cpp.distance.geodesic_distances_mesh``); for a mito with no usable mesh (empty
+    membrane / degenerate mesh) those columns are NaN.
 
     Returns:
         DataFrame with one row per mito instance:
@@ -1000,13 +949,6 @@ def compute_mito_crista_statistics(
     """
     if method not in ("fast", "exact", "skip"):
         raise ValueError(f"method must be 'fast', 'exact', or 'skip', got {method!r}")
-    # Warn once (not per mito) if the mesh geodesic API is unavailable → junction distances are NaN.
-    if geodesic_distances_mesh is None:
-        warnings.warn(
-            "The bioimage-cpp geodesic API is unavailable (needs bioimage-cpp>=0.6.0); "
-            "junction nearest-neighbour distance columns will be NaN.",
-            RuntimeWarning, stacklevel=2,
-        )
     if membrane_mask is None:
         # Derive the matching lumen alongside the membrane; a caller-supplied membrane keeps its
         # (possibly None) lumen_mask and falls back per-instance in _single_mito_row.

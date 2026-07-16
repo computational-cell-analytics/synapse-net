@@ -39,14 +39,71 @@ physical units (nm / nm² / nm³) using the voxel size.
 
 ---
 
+## Command-line interface
+
+The same analysis is available headlessly via the `synapse_net.run_cristae_analysis` console script
+(`cristae_analysis_cli` in `synapse_net/tools/cli.py`). It takes a crista segmentation and a
+mitochondria instance segmentation, computes `compute_mito_crista_statistics`, and writes one
+`<stem>_cristae_analysis.csv` per input pair. It accepts a single file **or** a directory for each
+input (batch); for a directory the input subfolder structure is mirrored under the output, and
+already-present tables are skipped unless `--force` is given.
+
+Segmentations are read as tif when no key is given, or from an hdf5 dataset when a key is given — so
+the crista and mito segmentations can live in separate files or in the *same* hdf5 file under
+different keys.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--crista_path` / `-c` | required | Crista segmentation — file or directory. |
+| `--mito_path` / `-m` | required | Mitochondria instance segmentation — file or directory. |
+| `--output_path` / `-o` | required | Output directory for the result table(s). |
+| `--crista_key` | — | HDF5 dataset key for the crista segmentation (omit → tif). |
+| `--mito_key` | — | HDF5 dataset key for the mito segmentation (omit → tif). |
+| `--voxel_size` | — | Voxel size in **nm**, applied to all inputs. |
+| `--tomogram_path` | — | Raw tomogram (mrc/rec), file or directory, used to read the voxel size when `--voxel_size` is omitted. |
+| `--membrane_thickness` | `8.0` | Membrane shell thickness (nm). |
+| `--border_gap` | thickness | Distance from volume faces where the membrane is suppressed (nm). |
+| `--method` | `skip` | Orientation anisotropy mode: `skip` / `fast` / `exact`. |
+| `--membrane_mode` | `slice_2d` | Membrane shell construction: `slice_2d` / `shell_3d`. |
+| `--n_jobs` | `-1` | Workers for the per-mitochondrion computation (`-1` = all cores). |
+| `--force` | off | Over-write already present result tables. |
+| `--verbose` / `-v` | off | Show a progress bar over the mitochondria of each file. |
+
+One of `--voxel_size` or `--tomogram_path` must be given (the physical-unit results are wrong without
+the correct voxel size — see the units caveat above).
+
+Examples:
+
+```bash
+# Single pair of tif segmentations, explicit voxel size.
+synapse_net.run_cristae_analysis -c crista.tif -m mito.tif -o results/ --voxel_size 0.868 -v
+
+# Both segmentations in one hdf5 file under different keys.
+synapse_net.run_cristae_analysis \
+    -c seg.h5 --crista_key labels/cristae \
+    -m seg.h5 --mito_key   labels/mitochondria \
+    -o results/ --voxel_size 0.868
+
+# Directory batch, reading the voxel size from the matching raw tomograms.
+synapse_net.run_cristae_analysis \
+    -c crista_dir/ -m mito_dir/ --tomogram_path tomo_dir/ -o results/
+```
+
+The output CSV has one row per mitochondrion with the columns documented in **Output columns** below.
+
+---
+
 ## Computational steps & math
 
 ### 1. Membrane approximation — `approximate_membrane`
 The membrane is approximated as the **outer boundary shell of the mitochondrion**. For 3D data it is
 done **per Z‑slice** with a 2D disk of radius `mm_thickness / voxel_xy`:
 `membrane = mito & ~binary_erosion(mito, disk(r))` — i.e. the rim removed by the erosion. Per‑slice
-(not a 3D ball) prevents the shell bleeding across slices when the shape changes in Z. Voxels within
-`border_gap` of any volume face are removed (so clipped mito edges aren't treated as membrane).
+(not a 3D ball) prevents the shell bleeding across slices when the shape changes in Z. A separable
+Z‑only erosion (radius `mm_thickness / voxel_z`) then adds **Z‑caps** where a mito column truly ends in
+Z; ends clipped by a volume Z‑face stay uncapped (`border_value=1` plus the `border_gap` trim below).
+Voxels within `border_gap` of any volume face are removed (so clipped mito edges aren't treated as
+membrane).
 The eroded interior is the **lumen**, whose inner‑wall surface is the mesh the junction geodesics run
 along (see §5 and the **Membrane Mesh** layer). At mesh time the lumen surface is trimmed to the
 certain region — the border zone within `border_gap` of the volume faces is cropped off, so it ends
@@ -61,8 +118,7 @@ Computes the **structure-tensor eigenvalues** of the binary crista mask via
 derivative scale (a minimal 1 voxel), `outer_sigma = neighborhood_size_nm / voxel` is the integration
 scale (default 30 nm). The per‑voxel eigenvalues (descending) give
 **anisotropy = λ_max / (λ_min + ε)**, and the reported `crista_orientation_anisotropy` is the mean
-over crista voxels. When bioimage‑cpp lacks this function, a **NumPy fallback** builds the tensor with
-`np.gradient` + Gaussian smoothing and a low‑memory chunked `eigvalsh`.
+over crista voxels.
 *Interpretation:* high → strongly directional (parallel lamellae), ~1 → isotropic/tubular. It is a
 **magnitude, rotation‑invariant** — it says *how* laminar, not *which* direction (the orientation
 direction / eigenvectors are not computed).
@@ -94,14 +150,15 @@ nearest‑neighbour distances (`mean_/median_nn_junction_distance_nm`; `NaN` whe
 junctions) and a **Clark‑Evans clustering index** `R = mean_NN / (0.5 · √(A/n))` with `A` = mito
 surface area and `n` = junction count (`junction_clustering_index`: <1 clustered, ≈1 random,
 >1 dispersed; flat‑surface CSR approximation).
-> When the bioimage‑cpp geodesic API is unavailable the junction‑distance columns are `NaN` and a
-> single warning is emitted — **there is no other backend**.
+> The bioimage‑cpp geodesic backend (`bioimage_cpp.distance.geodesic_distances_mesh`) is a hard
+> dependency — **there is no other backend**. A mito with no usable lumen mesh (empty/degenerate)
+> yields `NaN` junction‑distance columns.
 
 **"Missing" pairs.** Two junctions on **different connected components** of the lumen surface have no
 along‑surface path → that pair is `NaN` and is ignored by the nearest‑neighbour / clustering
-summaries. `membrane_mode="slice_2d"` (the default) has no Z‑caps and fragments across slices more
-readily than `"shell_3d"`. If junctions you expect to be connected are not, switch to `"shell_3d"`,
-increase `mm_thickness`, or check the mito segmentation.
+summaries. `membrane_mode="slice_2d"` (the default) caps true (non‑clipped) Z‑ends but its XY shell
+can still fragment across slices more readily than `"shell_3d"`. If junctions you expect to be
+connected are not, switch to `"shell_3d"`, increase `mm_thickness`, or check the mito segmentation.
 
 **What shifts with the membrane settings.** The membrane‑dependent outputs — `crista_junction_count`,
 the contact counts, `avg_crista_to_membrane_nm`, and the junction distances — change with
@@ -126,7 +183,7 @@ settings.
 | Step | Function | File |
 |---|---|---|
 | Membrane shell (`slice_2d` / `shell_3d`) | `approximate_membrane` | `synapse_net/cristae_analysis.py` |
-| Crista orientation anisotropy | `compute_crista_orientation` (`bioimage_cpp.filters.structure_tensor_eigenvalues`, NumPy fallback; `_downsampled_orientation_anisotropy` for `fast`) | `synapse_net/cristae_analysis.py` |
+| Crista orientation anisotropy | `compute_crista_orientation` (`bioimage_cpp.filters.structure_tensor_eigenvalues`; `_downsampled_orientation_anisotropy` for `fast`) | `synapse_net/cristae_analysis.py` |
 | Crista→membrane proximity | `compute_crista_proximity` | `synapse_net/cristae_analysis.py` |
 | Junctions (crista ∩ membrane) | `detect_contact_sites` | `synapse_net/cristae_analysis.py` |
 | Junction geodesic distances | `compute_junction_distances` → `_junction_matrix_mesh` → `bioimage_cpp.distance.geodesic_distances_mesh` | `synapse_net/cristae_analysis.py` |
@@ -171,12 +228,12 @@ labels layer.)
 ---
 
 ## Libraries used
-- **NumPy** — arrays, gradients, linear algebra (`eigvalsh`).
-- **SciPy** — `scipy.ndimage` (`binary_erosion`, `distance_transform_edt`, `gaussian_filter`,
-  `label`, `center_of_mass`); `scipy.spatial.cKDTree` (snap junction centroids to mesh vertices).
-- **bioimage‑cpp** — `bioimage_cpp.distance.geodesic_distances_mesh` (≥ 0.6.0) for junction surface
-  geodesics, and `bioimage_cpp.filters.structure_tensor_eigenvalues` for the crista orientation
-  anisotropy (NumPy fallback if unavailable).
+- **NumPy** — arrays and numerics.
+- **SciPy** — `scipy.ndimage` (`binary_erosion`, `distance_transform_edt`, `label`,
+  `center_of_mass`); `scipy.spatial.cKDTree` (snap junction centroids to mesh vertices).
+- **bioimage‑cpp** (≥ 0.6.0, required) — `bioimage_cpp.distance.geodesic_distances_mesh` for junction
+  surface geodesics, and `bioimage_cpp.filters.structure_tensor_eigenvalues` for the crista
+  orientation anisotropy.
 - **scikit‑image** — `measure.marching_cubes`, `measure.mesh_surface_area`, `measure.regionprops`;
   `morphology.disk`, `morphology.local_maxima`.
 - **pandas** — results table. **tqdm** — progress. **napari** / **qtpy** — the widget/UI.

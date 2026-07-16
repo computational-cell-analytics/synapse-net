@@ -9,11 +9,6 @@ import numpy as np
 # napari — see TestCristaOrientation.test_visualize_orientations.
 VIEW_ENV = "SYNAPSE_NET_VIEW"
 
-# Junction distances are surface geodesics on the eroded-mito mesh (bioimage-cpp); skip the
-# distance-value tests when that API is unavailable.
-from synapse_net.cristae_analysis import geodesic_distances_mesh as _GEODESIC_MESH_API  # noqa: E402
-_MESH_REQUIRED = unittest.skipUnless(_GEODESIC_MESH_API is not None, "bioimage-cpp geodesic API unavailable")
-
 # Real-data integration test (skipped unless the data tree is present). Labels come from the
 # pre-converted HDF5 tree; voxel size from the sibling .mrc header. Override the root with
 # SYNAPSE_NET_CRISTAE_DATA.
@@ -255,6 +250,28 @@ class TestApproximateMembrane(unittest.TestCase):
         membrane = approximate_membrane(seg, voxel_size, membrane_thickness_nm=4.0, membrane_mode="shell_3d")
         self.assertTrue(np.all(membrane[seg == 0] == False))  # noqa: E712
         self.assertEqual(_membrane_components(membrane), 2)   # one connected shell per instance
+
+    def test_slice2d_caps_true_z_end(self):
+        # A mito that ends within the volume in Z: slice_2d must cap the true Z-ends (membrane fills the
+        # end slices' interior, like shell_3d), while a middle slice's interior stays lumen.
+        from synapse_net.cristae_analysis import approximate_membrane
+        seg = np.zeros((20, 40, 40), dtype="uint32")
+        seg[6:14, 8:32, 8:32] = 1  # z-extent 6..13, away from z=0 and z=19
+        mem = approximate_membrane(seg, voxel_size=1.0, membrane_thickness_nm=3.0, membrane_mode="slice_2d")
+        self.assertFalse(mem[10, 20, 20])  # middle-slice interior → lumen, not membrane
+        self.assertTrue(mem[6, 20, 20])    # true Z-start cap → membrane
+        self.assertTrue(mem[13, 20, 20])   # true Z-end cap → membrane
+
+    def test_slice2d_no_cap_at_clipped_z_end(self):
+        # A mito clipped by the z=0 volume face: that end must NOT be capped (unknown / near-face),
+        # while the true interior end at the other side is capped.
+        from synapse_net.cristae_analysis import approximate_membrane
+        seg = np.zeros((20, 40, 40), dtype="uint32")
+        seg[0:14, 8:32, 8:32] = 1  # touches the z=0 face
+        mem = approximate_membrane(seg, voxel_size=1.0, membrane_thickness_nm=3.0, membrane_mode="slice_2d")
+        self.assertFalse(mem[0, 20, 20])   # clipped end interior → not membrane
+        self.assertFalse(mem[2, 20, 20])
+        self.assertTrue(mem[13, 20, 20])   # true interior Z-end → capped
 
     def test_return_lumen_partitions_mito(self):
         # return_lumen=True gives the eroded interior: a boolean mask inside the mito and disjoint from
@@ -555,7 +572,6 @@ class TestJunctionDistances(unittest.TestCase):
 
     # These exercise compute_junction_distances directly; with no mesh supplied it meshes the given
     # membrane and takes the surface geodesic, so they require the bioimage-cpp geodesic API.
-    @_MESH_REQUIRED
     def test_geodesic_follows_bent_membrane(self):
         # An L-shaped membrane: the geodesic around the bend is longer than the straight line
         # between the two seed voxels.
@@ -581,7 +597,6 @@ class TestJunctionDistances(unittest.TestCase):
         self.assertTrue(np.isnan(summary["mean_nn_junction_distance_nm"]))
         self.assertTrue(np.isnan(summary["junction_clustering_index"]))
 
-    @_MESH_REQUIRED
     def test_clustered_index_lower_than_dispersed(self):
         # Same membrane/area and junction count, but tightly grouped vs evenly spread:
         # the clustered arrangement must give a smaller Clark-Evans index.
@@ -885,7 +900,6 @@ class TestMeshGeodesicBackend(unittest.TestCase):
             crista[10:14, 6:9, x:x + 3] = True
         return crista, mito
 
-    @_MESH_REQUIRED
     def test_mesh_junction_distances_finite(self):
         from synapse_net.cristae_analysis import compute_mito_crista_statistics
         crista, mito = self._mito_with_cristae()
@@ -895,7 +909,6 @@ class TestMeshGeodesicBackend(unittest.TestCase):
         self.assertTrue(np.isfinite(mean_nn) and mean_nn > 0)
         self.assertTrue(np.isfinite(df["junction_clustering_index"].iloc[0]))
 
-    @_MESH_REQUIRED
     def test_clipped_mito_open_mesh_finite(self):
         # A mito clipped by the volume boundary (spans the full z extent) meshes its lumen OPEN at the
         # clipped z-caps. Guards that the bioimage-cpp geodesic solver accepts the resulting
@@ -920,7 +933,6 @@ class TestMeshGeodesicBackend(unittest.TestCase):
         area_closed = _surface_area(mito_binary, np.ones(ndim))
         self.assertLess(area_open, area_closed)  # the fabricated z-caps are no longer counted
 
-    @_MESH_REQUIRED
     def test_primitive_mesh_on_flat_membrane(self):
         # With no mesh supplied the primitive meshes the given membrane surface — finite, positive,
         # and of the right order (junctions ~17-20 apart). Absolute accuracy on a 1-voxel sheet is not
@@ -933,25 +945,6 @@ class TestMeshGeodesicBackend(unittest.TestCase):
         mean_nn = summary["mean_nn_junction_distance_nm"]
         self.assertTrue(np.isfinite(mean_nn) and mean_nn > 0)
         self.assertLess(mean_nn, 100.0)  # sane order of magnitude, not a runaway path
-
-    def test_junction_distances_nan_when_api_missing(self):
-        # No graph fallback: with the geodesic API patched out, the junction columns are NaN and a
-        # single warning is emitted (no crash).
-        import warnings
-        import synapse_net.cristae_analysis as ca
-        crista, mito = self._mito_with_cristae()
-        saved = ca.geodesic_distances_mesh
-        ca.geodesic_distances_mesh = None
-        try:
-            with warnings.catch_warnings(record=True) as caught:
-                warnings.simplefilter("always")
-                df = ca.compute_mito_crista_statistics(crista, mito, 2.0, method="skip")
-        finally:
-            ca.geodesic_distances_mesh = saved
-        runtime_warnings = [w for w in caught if issubclass(w.category, RuntimeWarning)]
-        self.assertEqual(len(runtime_warnings), 1)
-        self.assertTrue(np.isnan(df["mean_nn_junction_distance_nm"].iloc[0]))
-        self.assertTrue(np.isnan(df["junction_clustering_index"].iloc[0]))
 
 
 _EXPECTED_COLUMNS = [
@@ -1046,6 +1039,89 @@ class TestCristaeIntegration(unittest.TestCase):
                     "avg_crista_to_membrane_nm"):
             vals = df[col].to_numpy(dtype=float)
             self.assertTrue((vals[np.isfinite(vals)] >= 0.0).all(), msg=f"negative {col}")
+
+
+class TestCristaeAnalysisCLI(unittest.TestCase):
+    """The headless CLI helper: file discovery, loading, and CSV output (no network)."""
+
+    @staticmethod
+    def _write_tif(path, array):
+        import imageio.v3 as imageio
+        imageio.imwrite(path, array)
+
+    def test_single_file_pair(self):
+        import tempfile
+        import pandas as pd
+        from synapse_net.tools.cli import cristae_analysis_helper
+
+        mito_seg = _make_mito()
+        crista = _make_crista().astype("uint8")
+        with tempfile.TemporaryDirectory() as tmp:
+            crista_path = os.path.join(tmp, "crista.tif")
+            mito_path = os.path.join(tmp, "mito.tif")
+            out_dir = os.path.join(tmp, "out")
+            self._write_tif(crista_path, crista)
+            self._write_tif(mito_path, mito_seg)
+
+            cristae_analysis_helper(
+                crista_path, mito_path, out_dir, voxel_size=1.0, method="skip",
+            )
+
+            csv_path = os.path.join(out_dir, "crista_cristae_analysis.csv")
+            self.assertTrue(os.path.exists(csv_path), msg=f"missing output: {csv_path}")
+            df = pd.read_csv(csv_path)
+            self.assertEqual(len(df), 1)
+            for col in _EXPECTED_COLUMNS:
+                self.assertIn(col, df.columns, msg=f"Missing column: {col}")
+
+    def test_directory_batch(self):
+        import tempfile
+        import pandas as pd
+        from synapse_net.tools.cli import cristae_analysis_helper
+
+        with tempfile.TemporaryDirectory() as tmp:
+            crista_dir = os.path.join(tmp, "crista")
+            mito_dir = os.path.join(tmp, "mito")
+            out_dir = os.path.join(tmp, "out")
+            os.makedirs(crista_dir)
+            os.makedirs(mito_dir)
+            for name in ("sample_1", "sample_2"):
+                self._write_tif(os.path.join(crista_dir, f"{name}.tif"), _make_crista().astype("uint8"))
+                self._write_tif(os.path.join(mito_dir, f"{name}.tif"), _make_mito())
+
+            cristae_analysis_helper(crista_dir, mito_dir, out_dir, voxel_size=1.0, method="skip")
+
+            for name in ("sample_1", "sample_2"):
+                csv_path = os.path.join(out_dir, f"{name}_cristae_analysis.csv")
+                self.assertTrue(os.path.exists(csv_path), msg=f"missing output: {csv_path}")
+                self.assertEqual(len(pd.read_csv(csv_path)), 1)
+
+    def test_requires_voxel_size_or_tomogram(self):
+        import tempfile
+        from synapse_net.tools.cli import cristae_analysis_helper
+
+        with tempfile.TemporaryDirectory() as tmp:
+            crista_path = os.path.join(tmp, "crista.tif")
+            mito_path = os.path.join(tmp, "mito.tif")
+            self._write_tif(crista_path, _make_crista().astype("uint8"))
+            self._write_tif(mito_path, _make_mito())
+            with self.assertRaises(ValueError):
+                cristae_analysis_helper(crista_path, mito_path, os.path.join(tmp, "out"))
+
+    def test_mismatched_input_counts(self):
+        import tempfile
+        from synapse_net.tools.cli import cristae_analysis_helper
+
+        with tempfile.TemporaryDirectory() as tmp:
+            crista_dir = os.path.join(tmp, "crista")
+            mito_dir = os.path.join(tmp, "mito")
+            os.makedirs(crista_dir)
+            os.makedirs(mito_dir)
+            self._write_tif(os.path.join(crista_dir, "a.tif"), _make_crista().astype("uint8"))
+            self._write_tif(os.path.join(crista_dir, "b.tif"), _make_crista().astype("uint8"))
+            self._write_tif(os.path.join(mito_dir, "a.tif"), _make_mito())
+            with self.assertRaises(ValueError):
+                cristae_analysis_helper(crista_dir, mito_dir, os.path.join(tmp, "out"), voxel_size=1.0)
 
 
 if __name__ == "__main__":
