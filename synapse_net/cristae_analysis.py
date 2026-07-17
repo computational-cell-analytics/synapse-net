@@ -7,12 +7,13 @@ import numpy as np
 import pandas as pd
 from scipy.ndimage import binary_erosion, center_of_mass
 from scipy.ndimage import label as ndimage_label
-from skimage.measure import marching_cubes, mesh_surface_area, regionprops
+from skimage.measure import mesh_surface_area, regionprops
 from skimage.morphology import disk, local_maxima
 from tqdm import tqdm
 
 from bioimage_cpp.distance import distance_transform, geodesic_distances_mesh
 from bioimage_cpp.filters import structure_tensor_eigenvalues
+from bioimage_cpp.mesh import marching_cubes
 
 
 # ---------------------------------------------------------------------------
