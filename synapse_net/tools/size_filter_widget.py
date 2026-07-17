@@ -84,7 +84,5 @@ class SizeFilterWidget(BaseWidget):
         layer_name = self.output_layer_param.text()
         if layer_name is None or layer_name == "":
             seg_layer.data = segmentation
-        elif layer_name in self.viewer.layers:
-            self.viewer.layers[layer_name].data = segmentation
         else:
-            self.viewer.add_labels(segmentation, name=layer_name)
+            self.add_or_update_labels(layer_name, segmentation)

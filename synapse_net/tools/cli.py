@@ -4,7 +4,14 @@ from functools import partial
 
 import torch
 import torch_em
-from ..imod.to_imod import export_helper, write_segmentation_to_imod_as_points, write_segmentation_to_imod
+from tqdm import tqdm
+
+from ..cristae_analysis import compute_mito_crista_statistics
+from ..file_utils import read_voxel_size
+from ..imod.to_imod import (
+    _get_file_paths, _load_segmentation, export_helper,
+    write_segmentation_to_imod_as_points, write_segmentation_to_imod,
+)
 from ..inference.inference import _get_model_registry, get_model, get_model_training_resolution, run_segmentation
 from ..inference.scalable_segmentation import scalable_segmentation
 from ..inference.util import inference_helper, parse_tiling
@@ -242,4 +249,167 @@ def segmentation_cli():
         output_key=args.segmentation_key, model_resolution=model_resolution, scale=scale,
         allocate_output=allocate_output, extra_input_path=args.extra_input_path,
         extra_input_ext=args.extra_input_ext
+    )
+
+
+def cristae_analysis_helper(
+    crista_path, mito_path, output_root,
+    crista_key=None, mito_key=None,
+    voxel_size=None, tomogram_path=None,
+    membrane_thickness_nm=8.0, border_gap_nm=None,
+    method="skip", membrane_mode="slice_2d",
+    n_jobs=-1, force=False, verbose=False,
+):
+    """Batch-compute per-mitochondrion cristae statistics and save one CSV per input pair.
+
+    This is the headless equivalent of the napari cristae-analysis widget. It matches crista and
+    mitochondria segmentations by sorted order (a single file each, or two directories), computes
+    the statistics via :func:`synapse_net.cristae_analysis.compute_mito_crista_statistics`, and
+    writes the resulting table next to a mirrored input folder structure.
+
+    Args:
+        crista_path: Crista segmentation - a single file or a directory of them.
+        mito_path: Mitochondria instance segmentation - a single file or a directory of them.
+        output_root: Directory where the ``<stem>_cristae_analysis.csv`` tables are written. A single
+            input file writes directly into it; a directory input mirrors the nested folder structure.
+        crista_key: Internal dataset key for the crista segmentation. If None the crista files are
+            assumed to be tif, otherwise hdf5 with this key.
+        mito_key: Internal dataset key for the mitochondria segmentation, analogous to crista_key.
+        voxel_size: Voxel size in nm applied to every file. If None it is read per file from the
+            raw tomogram given via tomogram_path.
+        tomogram_path: Raw tomogram (mrc/rec) - a single file or a directory - used to read the
+            voxel size when voxel_size is None.
+        membrane_thickness_nm: Membrane shell thickness in nm.
+        border_gap_nm: Distance from the volume faces where the membrane is suppressed (nm).
+            Defaults to membrane_thickness_nm when None.
+        method: How the crista orientation anisotropy is computed ("skip", "fast" or "exact").
+        membrane_mode: How the membrane shell is built ("slice_2d" or "shell_3d").
+        n_jobs: Number of workers for the per-mitochondrion computation (-1 = all cores).
+        force: Whether to over-write already present result tables.
+        verbose: Whether to show a progress bar over the mitochondria of each file.
+    """
+    crista_files, crista_root = _get_file_paths(crista_path, ext=".h5" if crista_key else ".tif")
+    mito_files, _ = _get_file_paths(mito_path, ext=".h5" if mito_key else ".tif")
+    if len(crista_files) != len(mito_files):
+        raise ValueError(
+            f"The number of crista ({len(crista_files)}) and mitochondria ({len(mito_files)}) "
+            "segmentations does not match."
+        )
+
+    if voxel_size is not None:
+        voxel_sizes = [voxel_size] * len(crista_files)
+    elif tomogram_path is not None:
+        tomo_files, _ = _get_file_paths(tomogram_path, ext=(".mrc", ".rec"))
+        if len(tomo_files) != len(crista_files):
+            raise ValueError(
+                f"The number of tomograms ({len(tomo_files)}) does not match the number of "
+                f"crista segmentations ({len(crista_files)})."
+            )
+        voxel_sizes = [read_voxel_size(path) for path in tomo_files]
+    else:
+        raise ValueError("Provide either --voxel_size or --tomogram_path to determine the voxel size.")
+
+    for crista_file, mito_file, this_voxel_size in tqdm(
+        zip(crista_files, mito_files, voxel_sizes), total=len(crista_files), desc="Processing files"
+    ):
+        input_folder, input_name = os.path.split(crista_file)
+        fname = os.path.splitext(input_name)[0] + "_cristae_analysis.csv"
+        if crista_root is None:
+            output_path = os.path.join(output_root, fname)
+        else:
+            rel_folder = os.path.relpath(input_folder, crista_root)
+            output_path = os.path.join(output_root, rel_folder, fname)
+
+        if os.path.exists(output_path) and not force:
+            continue
+
+        crista = _load_segmentation(crista_file, crista_key)
+        mito = _load_segmentation(mito_file, mito_key)
+        stats_df = compute_mito_crista_statistics(
+            crista, mito, this_voxel_size,
+            membrane_thickness_nm=membrane_thickness_nm, border_gap_nm=border_gap_nm,
+            method=method, membrane_mode=membrane_mode, n_jobs=n_jobs, verbose=verbose,
+        )
+
+        os.makedirs(os.path.split(output_path)[0], exist_ok=True)
+        stats_df.to_csv(output_path, index=False)
+        print(f"Saved cristae analysis to {output_path}.")
+
+
+def cristae_analysis_cli():
+    parser = argparse.ArgumentParser(
+        description="Compute per-mitochondrion cristae statistics from a crista segmentation and a "
+        "mitochondria instance segmentation, and save the results as a CSV table. This is the "
+        "command-line equivalent of the napari cristae-analysis widget."
+    )
+    parser.add_argument(
+        "--crista_path", "-c", required=True,
+        help="The filepath to the crista segmentation, or a directory containing multiple of them."
+    )
+    parser.add_argument(
+        "--mito_path", "-m", required=True,
+        help="The filepath to the mitochondria instance segmentation, or a directory containing multiple of them."
+    )
+    parser.add_argument(
+        "--output_path", "-o", required=True,
+        help="The filepath to the directory where the result tables will be saved."
+    )
+    parser.add_argument(
+        "--crista_key",
+        help="The key in the crista segmentation file. If not given the crista segmentation is assumed to be tif. "
+        "If given, it is assumed to be an hdf5 file and the key is used to load the internal dataset."
+    )
+    parser.add_argument(
+        "--mito_key",
+        help="The key in the mitochondria segmentation file, analogous to --crista_key."
+    )
+    parser.add_argument(
+        "--voxel_size", type=float,
+        help="The voxel size in nm, applied to all inputs. If not given it is read from the raw tomogram "
+        "passed via --tomogram_path."
+    )
+    parser.add_argument(
+        "--tomogram_path",
+        help="The filepath to the raw tomogram (mrc/rec), or a directory of them, used to read the voxel size "
+        "when --voxel_size is not given."
+    )
+    parser.add_argument(
+        "--membrane_thickness", type=float, default=8.0,
+        help="The membrane shell thickness in nm. By default 8.0."
+    )
+    parser.add_argument(
+        "--border_gap", type=float, default=None,
+        help="The distance from the volume faces where the membrane is suppressed, in nm. "
+        "By default the same as the membrane thickness."
+    )
+    parser.add_argument(
+        "--method", default="skip", choices=["skip", "fast", "exact"],
+        help="How the crista orientation anisotropy is computed. 'skip' (default) does not compute it, "
+        "'fast' uses a downsampled crop (relative only), 'exact' uses the full-resolution structure tensor."
+    )
+    parser.add_argument(
+        "--membrane_mode", default="slice_2d", choices=["slice_2d", "shell_3d"],
+        help="How the membrane shell is built - 'slice_2d' (default, per-Z-slice) or 'shell_3d' (connected 3D shell)."
+    )
+    parser.add_argument(
+        "--n_jobs", type=int, default=-1,
+        help="The number of workers for the per-mitochondrion computation. By default -1 (all cores)."
+    )
+    parser.add_argument(
+        "--force", action="store_true",
+        help="Whether to over-write already present result tables."
+    )
+    parser.add_argument(
+        "--verbose", "-v", action="store_true",
+        help="Whether to show a progress bar over the mitochondria of each file."
+    )
+    args = parser.parse_args()
+
+    cristae_analysis_helper(
+        args.crista_path, args.mito_path, args.output_path,
+        crista_key=args.crista_key, mito_key=args.mito_key,
+        voxel_size=args.voxel_size, tomogram_path=args.tomogram_path,
+        membrane_thickness_nm=args.membrane_thickness, border_gap_nm=args.border_gap,
+        method=args.method, membrane_mode=args.membrane_mode,
+        n_jobs=args.n_jobs, force=args.force, verbose=args.verbose,
     )

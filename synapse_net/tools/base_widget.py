@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 
 import napari
+import numpy as np
 import qtpy.QtWidgets as QtWidgets
 
 from napari.utils.notifications import show_info
@@ -33,12 +34,15 @@ class BaseWidget(QWidget):
         self.viewer = napari.current_viewer()
         self.attribute_dict = {}
 
-    def _create_layer_selector(self, selector_name, layer_type="Image"):
+    def _create_layer_selector(self, selector_name, layer_type="Image", prefer_substring=None):
         """Create a layer selector for an image or labels and store it in a dictionary.
 
         Args:
             selector_name (str): The name of the selector, used as a key in the dictionary.
             layer_type (str): The type of layer to filter for ("Image" or "Labels").
+            prefer_substring (str, optional): If given, the selector auto-defaults to the first
+                layer whose name contains this substring (case-insensitive); falls back to the first
+                layer otherwise. Re-applied whenever layers are added/removed.
         """
         if not hasattr(self, "layer_selectors"):
             self.layer_selectors = {}
@@ -58,11 +62,15 @@ class BaseWidget(QWidget):
         layer_label = QtWidgets.QLabel(f"{selector_name}:")
 
         # Populate initial options
-        self._update_selector(selector=image_selector, layer_filter=layer_filter)
+        self._update_selector(selector=image_selector, layer_filter=layer_filter, prefer_substring=prefer_substring)
 
         # Update selector on layer events
-        self.viewer.layers.events.inserted.connect(lambda event: self._update_selector(image_selector, layer_filter))
-        self.viewer.layers.events.removed.connect(lambda event: self._update_selector(image_selector, layer_filter))
+        self.viewer.layers.events.inserted.connect(
+            lambda event: self._update_selector(image_selector, layer_filter, prefer_substring)
+        )
+        self.viewer.layers.events.removed.connect(
+            lambda event: self._update_selector(image_selector, layer_filter, prefer_substring)
+        )
 
         # Store the selector in the dictionary
         self.layer_selectors[selector_name] = selector_widget
@@ -74,11 +82,20 @@ class BaseWidget(QWidget):
         selector_widget.setLayout(layout)
         return selector_widget
 
-    def _update_selector(self, selector, layer_filter):
-        """Update a single selector with the current image layers in the viewer."""
+    def _update_selector(self, selector, layer_filter, prefer_substring=None):
+        """Update a single selector with the current image layers in the viewer.
+
+        If ``prefer_substring`` is given, auto-select the first layer whose name contains it
+        (case-insensitive); otherwise the first layer stays selected (QComboBox default).
+        """
         selector.clear()
         image_layers = [layer.name for layer in self.viewer.layers if isinstance(layer, layer_filter)]
         selector.addItems(image_layers)
+        if prefer_substring:
+            needle = prefer_substring.lower()
+            match = next((name for name in image_layers if needle in name.lower()), None)
+            if match is not None:
+                selector.setCurrentText(match)
 
     def _get_layer_selector_layer(self, selector_name):
         """Return the layer currently selected in a given selector."""
@@ -337,3 +354,54 @@ class BaseWidget(QWidget):
         if save_path != "":
             file_path = self._save_table(self.save_path.text(), table_data)
             show_info(f"INFO: Added table and saved file to {file_path}.")
+
+    def _add_or_update_layer(self, add_fn, name, data, scale, translate, layer_kwargs):
+        """Add a layer via ``add_fn`` (e.g. ``self.viewer.add_labels``), or refresh it in place if a
+        layer with this name already exists.
+
+        On refresh the ``scale``/``translate`` are reapplied (when provided) because a persisted layer
+        keeps its original transform, which may be stale if the source layer / voxel size changed
+        between runs; any ``layer_kwargs`` (e.g. ``opacity``, ``blending``, ``colormap``) are reapplied
+        too. On first add these go through the layer constructor. Returns the (new or existing) layer.
+        """
+        if name in self.viewer.layers:
+            layer = self.viewer.layers[name]
+            layer.data = data
+            if scale is not None:
+                layer.scale = scale
+            if translate is not None:
+                layer.translate = translate
+            for key, value in layer_kwargs.items():
+                setattr(layer, key, value)
+        else:
+            ctor_kwargs = dict(layer_kwargs)
+            if scale is not None:
+                ctor_kwargs["scale"] = scale
+            if translate is not None:
+                ctor_kwargs["translate"] = translate
+            layer = add_fn(data, name=name, **ctor_kwargs)
+        return layer
+
+    def add_or_update_labels(self, name, data, *, scale=None, translate=None, **layer_kwargs):
+        """Add a Labels layer, or refresh it in place if one with this name already exists.
+
+        See :meth:`_add_or_update_layer` for the refresh/transform semantics. Extra keyword arguments
+        (``opacity``, ``blending``, ``colormap``, …) are forwarded to the layer. Returns the layer.
+        """
+        return self._add_or_update_layer(
+            self.viewer.add_labels, name, data, scale, translate, layer_kwargs
+        )
+
+    def add_or_update_surface(self, name, vertices, faces, *, scale=None, translate=None,
+                              values=None, **layer_kwargs):
+        """Add a Surface layer, or refresh it in place if one with this name already exists.
+
+        Surface layers colour by per-vertex ``values``; a constant array (the default) gives a
+        flat-coloured surface. See :meth:`_add_or_update_layer` for the refresh/transform semantics.
+        Returns the layer.
+        """
+        if values is None:
+            values = np.ones(len(vertices), dtype="float32")
+        return self._add_or_update_layer(
+            self.viewer.add_surface, name, (vertices, faces, values), scale, translate, layer_kwargs
+        )
