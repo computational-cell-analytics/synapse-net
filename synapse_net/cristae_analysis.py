@@ -1,15 +1,17 @@
+import multiprocessing as mp
 import os
+from concurrent import futures
 from typing import Callable, Dict, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
-from scipy.ndimage import binary_erosion, center_of_mass, distance_transform_edt
+from scipy.ndimage import binary_erosion, center_of_mass
 from scipy.ndimage import label as ndimage_label
 from skimage.measure import marching_cubes, mesh_surface_area, regionprops
 from skimage.morphology import disk, local_maxima
 from tqdm import tqdm
 
-from bioimage_cpp.distance import geodesic_distances_mesh
+from bioimage_cpp.distance import distance_transform, geodesic_distances_mesh
 from bioimage_cpp.filters import structure_tensor_eigenvalues
 
 
@@ -185,7 +187,7 @@ def _medial_axis_thickness_nm(mask: np.ndarray, sampling: np.ndarray) -> float:
     binary = mask.astype(bool)
     if not binary.any():
         return np.nan
-    dist = distance_transform_edt(binary, sampling=tuple(float(s) for s in sampling))
+    dist = distance_transform(binary, sampling=tuple(float(s) for s in sampling), number_of_threads=1)
     ridges = local_maxima(dist) & binary
     ridge_dists = dist[ridges]
     return float(2.0 * np.mean(ridge_dists)) if ridge_dists.size > 0 else np.nan
@@ -286,6 +288,12 @@ def approximate_membrane(
     ndim = mito_segmentation.ndim
     mito_binary = mito_segmentation > 0
 
+    # NOTE (possible simplification, deferred): the "shell_3d" branch below builds the shell with an
+    # iterated 3x3x3 erosion per instance. It could likely be a single anisotropic distance transform
+    # instead — membrane = mito & (distance_transform(mito, sampling) <= thickness), lumen = the rest —
+    # which is simpler and handles anisotropy directly. This would NOT replace "slice_2d": a distance
+    # transform couples all axes, so it cannot reproduce slice_2d's per-Z-slice-independent erosion,
+    # whose whole purpose is to stop the shell bleeding across slices in XY. Worth investigating.
     if membrane_mode == "shell_3d":
         sampling = _to_sampling(voxel_size, ndim)
         k = max(1, int(round(float(membrane_thickness_nm) / float(np.mean(sampling)))))
@@ -327,10 +335,9 @@ def approximate_membrane(
             if n_jobs == 1:
                 results = [_erode_slice(z) for z in z_range]
             else:
-                from joblib import Parallel, delayed
-                results = Parallel(n_jobs=n_jobs, prefer="threads")(
-                    delayed(_erode_slice)(z) for z in z_range
-                )
+                n_workers = mp.cpu_count() if n_jobs == -1 else n_jobs
+                with futures.ThreadPoolExecutor(n_workers) as tp:
+                    results = list(tp.map(_erode_slice, z_range))
             for z, res in results:
                 if res is not None:
                     mem_sl, lum_sl = res
@@ -460,7 +467,7 @@ def compute_crista_proximity(
         membrane_mask: Binary membrane mask (OM or IMM).
         voxel_size: Voxel size in nm — scalar or dict with "z"/"y"/"x" keys.
         membrane_distance: Optional precomputed per-voxel distance to the nearest membrane
-            voxel (nm), i.e. ``distance_transform_edt(~membrane_mask, sampling=...)``. When
+            voxel (nm), i.e. ``distance_transform(~membrane_mask, sampling=...)``. When
             given, the distance transform is not recomputed (used to avoid redundant work in
             :func:`compute_mito_crista_statistics`).
 
@@ -470,7 +477,7 @@ def compute_crista_proximity(
     """
     sampling = _to_sampling(voxel_size, crista_mask.ndim)
     if membrane_distance is None:
-        dist = distance_transform_edt(~membrane_mask.astype(bool), sampling=sampling.tolist())
+        dist = distance_transform(~membrane_mask.astype(bool), sampling=sampling.tolist(), number_of_threads=1)
     else:
         dist = membrane_distance
     crista_dists = dist[crista_mask.astype(bool)]
@@ -746,7 +753,7 @@ def _single_mito_row(
     Factored out of :func:`compute_mito_crista_statistics` so the per-mito work (which is
     independent between instances) can be parallelised. Takes the bbox-cropped label arrays
     (``mito_crop`` = label array cropped to ``bbox``; ``crista_crop``/``membrane_crop`` the
-    matching binary crops), so it can be dispatched to a process worker without pickling the
+    matching binary crops), so a worker only touches its own mito's bbox region rather than the
     whole volume. ``inner_n_jobs`` is forwarded to the (parallelisable) junction-distance stage.
 
     ``method`` controls only the crista orientation anisotropy — every other metric (marching-cubes
@@ -788,7 +795,7 @@ def _single_mito_row(
 
     if has_crista and has_membrane:
         contact_labels_local, contact_summary = detect_contact_sites(crista_local, membrane_local, voxel_size)
-        membrane_distance = distance_transform_edt(~membrane_local, sampling=sampling.tolist())
+        membrane_distance = distance_transform(~membrane_local, sampling=sampling.tolist(), number_of_threads=1)
         _, proximity = compute_crista_proximity(
             crista_local, membrane_local, voxel_size, membrane_distance=membrane_distance
         )
@@ -886,13 +893,13 @@ def compute_mito_crista_statistics(
             ``method="exact"``. ``"exact"`` computes the anisotropy from the full-resolution structure
             tensor (use it when the magnitude must be precise).
         n_jobs: Number of workers for processing mitochondria in parallel (they are
-            independent). 1 (default) runs serially; other values use a joblib thread pool
-            (-1 = all cores). Results are identical regardless of n_jobs.
+            independent). 1 (default) runs serially; other values use a ``concurrent.futures``
+            thread pool (-1 = all cores). Results are identical regardless of n_jobs.
         verbose: If True, show a terminal tqdm progress bar over mitochondria.
         progress_callback: Optional callable invoked once per completed mitochondrion with
             (completed_count, total_count) — e.g. to drive a napari progress bar. It is
-            always called from the calling thread (the joblib results generator is consumed
-            here), so GUI updates from it need no cross-thread marshaling.
+            always called from the calling thread (the futures are consumed here as they
+            complete), so GUI updates from it need no cross-thread marshaling.
         membrane_mode: How the membrane shell is built when ``membrane_mask`` is None —
             ``"slice_2d"`` (default, per-Z-slice 2D erosion, z-parallel) or ``"shell_3d"`` (connected
             3D shell). See :func:`approximate_membrane`.
@@ -908,14 +915,15 @@ def compute_mito_crista_statistics(
     membrane / degenerate mesh) those columns are NaN.
 
     Implementation notes: each mito is pre-cropped to its bounding box by basic slicing (views, so
-    cropping is memory-free; only the bbox region is pickled to a process worker). Parallelism is
-    adaptive and single-level (never oversubscribed): with many mitochondria the work is parallelised
-    *across* them as loky processes (so the GIL-bound stages scale) with each worker's inner stages
-    serial and BLAS capped (``inner_max_num_threads=1``); with few mitochondria they run serially and
-    each mito's junction-distance stage gets all cores while BLAS multithreads the orientation. The
-    concurrent worker count is additionally capped so the combined per-mito working set (tensor
-    components + label crops, ~40 bytes/voxel of the largest mito) fits in RAM. Rows are finally
-    sorted by label for an n_jobs-independent ordering.
+    cropping is memory-free). Parallelism is adaptive and single-level (never oversubscribed): with
+    many mitochondria the work is parallelised *across* them on a ``concurrent.futures``
+    ``ThreadPoolExecutor`` — the heavy per-mito stages (structure tensor, EDT, geodesics) are
+    GIL-releasing C++, so threads scale them — with each worker's inner stages kept single-threaded
+    (the EDT/geodesic solvers are called with ``number_of_threads=1``); with few mitochondria they run
+    serially and each mito's junction-distance stage gets all cores. The concurrent worker count is
+    additionally capped so the combined per-mito working set (tensor components + label crops,
+    ~40 bytes/voxel of the largest mito) fits in RAM. Results stream in as they complete and are
+    finally sorted by label for an n_jobs-independent ordering.
 
     Returns:
         DataFrame with one row per mito instance:
@@ -981,15 +989,16 @@ def compute_mito_crista_statistics(
                 progress_callback(i, total)
 
     if across:
-        from joblib import Parallel, delayed, parallel_config
         max_voxels = max(int(task[2].size) for task in tasks)
         across_workers = _bounded_workers(n_jobs, per_worker_bytes=max_voxels * 40)
-        with parallel_config(backend="loky", inner_max_num_threads=1):
-            _consume(
-                Parallel(n_jobs=across_workers, return_as="generator_unordered")(
-                    delayed(_run)(task, 1) for task in tasks
-                )
-            )
+        # Parallelise across mitochondria with a thread pool (the heavy per-mito stages — structure
+        # tensor, EDT, geodesics — are GIL-releasing C++). Each worker's inner stages run
+        # single-threaded (``_run(task, 1)`` passes ``number_of_threads=1`` down to the EDT/geodesic
+        # solvers) so the across-mito threads do not oversubscribe the cores. Results stream in as they
+        # complete (``as_completed``) to drive the progress bar; rows are label-sorted below.
+        with futures.ThreadPoolExecutor(across_workers) as tp:
+            submitted = [tp.submit(_run, task, 1) for task in tasks]
+            _consume(future.result() for future in futures.as_completed(submitted))
     else:
         _consume(_run(task, n_workers) for task in tasks)
 

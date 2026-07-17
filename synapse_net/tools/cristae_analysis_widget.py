@@ -194,59 +194,6 @@ class CristaeAnalysisWidget(BaseWidget):
         )
         return membrane_mask, lumen_mask, contact_labels, contact_summary
 
-    def _add_or_update_labels(self, name, data, scale, translate, opacity=None, blending=None):
-        """Add a Labels layer, or refresh it in place if one with this name already exists.
-
-        On refresh the scale/translate are reapplied: a persisted layer keeps its original transform,
-        which may be stale if the source layer / voxel size changed between runs.
-        """
-        if name in self.viewer.layers:
-            layer = self.viewer.layers[name]
-            layer.data = data
-            if scale is not None:
-                layer.scale = scale
-            if translate is not None:
-                layer.translate = translate
-            if opacity is not None:
-                layer.opacity = opacity
-            if blending is not None:
-                layer.blending = blending
-        else:
-            kwargs = {}
-            if opacity is not None:
-                kwargs["opacity"] = opacity
-            if blending is not None:
-                kwargs["blending"] = blending
-            self.viewer.add_labels(data, name=name, scale=scale, translate=translate, **kwargs)
-
-    def _add_or_update_surface(self, name, vertices, faces, scale, translate, opacity=None, blending=None):
-        """Add a Surface layer, or refresh it in place if one with this name already exists.
-
-        Surface layers colour by per-vertex values, so a constant ``values`` gives a flat-coloured
-        surface. On refresh the scale/translate are reapplied (see :meth:`_add_or_update_labels`).
-        """
-        values = np.ones(len(vertices), dtype="float32")
-        if name in self.viewer.layers:
-            layer = self.viewer.layers[name]
-            layer.data = (vertices, faces, values)
-            if scale is not None:
-                layer.scale = scale
-            if translate is not None:
-                layer.translate = translate
-            if opacity is not None:
-                layer.opacity = opacity
-            if blending is not None:
-                layer.blending = blending
-        else:
-            kwargs = {}
-            if opacity is not None:
-                kwargs["opacity"] = opacity
-            if blending is not None:
-                kwargs["blending"] = blending
-            self.viewer.add_surface(
-                (vertices, faces, values), name=name, scale=scale, translate=translate, **kwargs
-            )
-
     @contextmanager
     def _computing(self, button, busy_text, idle_text, message):
         """Show a busy state around a synchronous, GUI-thread-blocking action, then restore it.
@@ -296,12 +243,14 @@ class CristaeAnalysisWidget(BaseWidget):
                     mito_seg, crista_mask, voxel_size, mm_thickness, border_gap, membrane_mode
                 )
                 pbar.update(1)
-                self._add_or_update_labels(
-                    self._MEMBRANE_LAYER, membrane_mask.astype(np.uint8), layer_scale, layer_translate, opacity=0.4
+                self.add_or_update_labels(
+                    self._MEMBRANE_LAYER, membrane_mask.astype(np.uint8),
+                    scale=layer_scale, translate=layer_translate, opacity=0.4,
                 )
                 if contact_labels.max() > 0:
-                    self._add_or_update_labels(
-                        self._JUNCTION_LAYER, contact_labels.astype(np.uint32), layer_scale, layer_translate,
+                    self.add_or_update_labels(
+                        self._JUNCTION_LAYER, contact_labels.astype(np.uint32),
+                        scale=layer_scale, translate=layer_translate,
                         blending="translucent_no_depth",
                     )
                 else:
@@ -370,16 +319,18 @@ class CristaeAnalysisWidget(BaseWidget):
                 )
                 if mesh is not None:
                     verts, faces = mesh
-                    self._add_or_update_surface(
-                        self._MEMBRANE_MESH_LAYER, verts, faces, layer_scale, layer_translate,
+                    self.add_or_update_surface(
+                        self._MEMBRANE_MESH_LAYER, verts, faces,
+                        scale=layer_scale, translate=layer_translate,
                         opacity=0.4, blending="translucent",
                     )
                 else:
                     show_info("INFO: No membrane surface to display at these settings.")
 
             if contact_labels.max() > 0:
-                self._add_or_update_labels(
-                    self._JUNCTION_LAYER, contact_labels.astype(np.uint32), layer_scale, layer_translate,
+                self.add_or_update_labels(
+                    self._JUNCTION_LAYER, contact_labels.astype(np.uint32),
+                    scale=layer_scale, translate=layer_translate,
                     blending="translucent_no_depth",
                 )
             else:

@@ -642,7 +642,10 @@ class TestOptimizationEquivalence(unittest.TestCase):
         pd.testing.assert_frame_equal(df_cb, df_plain)
 
     def test_proximity_precomputed_distance_matches(self):
-        from scipy.ndimage import distance_transform_edt
+        # The precomputed distance is built with the same backend the internal path uses
+        # (bioimage_cpp.distance.distance_transform), so passing it in must reproduce the internally
+        # computed result bit-for-bit — this checks the reuse plumbing, not cross-backend agreement.
+        from bioimage_cpp.distance import distance_transform
         from synapse_net.cristae_analysis import compute_crista_proximity
         crista = np.zeros((20, 20, 20), dtype=bool)
         membrane = np.zeros((20, 20, 20), dtype=bool)
@@ -651,7 +654,7 @@ class TestOptimizationEquivalence(unittest.TestCase):
         membrane[10, 10, 5] = True
         vs = {"z": 2.0, "y": 1.5, "x": 1.5}
         sampling = np.array([2.0, 1.5, 1.5])
-        precomputed = distance_transform_edt(~membrane, sampling=sampling.tolist())
+        precomputed = distance_transform(~membrane, sampling=sampling.tolist(), number_of_threads=1)
         map_a, sum_a = compute_crista_proximity(crista, membrane, vs)
         map_b, sum_b = compute_crista_proximity(crista, membrane, vs, membrane_distance=precomputed)
         np.testing.assert_allclose(map_a, map_b)

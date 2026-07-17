@@ -237,15 +237,17 @@ labels layer.)
 - **scikit‑image** — `measure.marching_cubes`, `measure.mesh_surface_area`, `measure.regionprops`;
   `morphology.disk`, `morphology.local_maxima`.
 - **pandas** — results table. **tqdm** — progress. **napari** / **qtpy** — the widget/UI.
-- **joblib** (loky processes / threads) + **psutil** — parallelism and memory‑aware worker caps.
+- **concurrent.futures** (`ThreadPoolExecutor`) + **psutil** — parallelism and memory‑aware worker caps.
 
 ---
 
 ## Performance & memory (important facts)
-- **Adaptive parallelism** across mitochondria: with many mitos it parallelises **across** them
-  (loky processes, so the GIL‑bound stages scale); with few/one dominant mito it runs them serially
-  and parallelises **within** the mito (junction Dijkstra threads, threaded Gaussian smoothing,
-  multithreaded BLAS). Exactly one level of parallelism is active — no oversubscription.
+- **Adaptive parallelism** across mitochondria: with many mitos it parallelises **across** them on a
+  `concurrent.futures.ThreadPoolExecutor` — the heavy per‑mito stages (structure tensor, EDT,
+  geodesics) are GIL‑releasing C++, so threads scale them — with each worker's inner stages kept
+  single‑threaded (the EDT/geodesic solvers are called with `number_of_threads=1`); with few/one
+  dominant mito it runs them serially and parallelises **within** the mito (junction geodesic
+  threads). Exactly one level of parallelism is active — no oversubscription.
 - **Memory‑aware caps** (`_available_memory_bytes`/`_bounded_workers` via `psutil`) bound the worker/
   thread counts of every parallel stage so it degrades to fewer workers instead of OOMing.
 - Junction geodesics run on the **eroded‑mito surface mesh** (`bioimage_cpp.distance.geodesic_distances_mesh`),

@@ -59,10 +59,7 @@ class PostprocessingWidget(BaseWidget):
 
     def _write_pp(self, segmentation):
         layer_name = self.output_layer_param.text()
-        if layer_name in self.viewer.layers:
-            self.viewer.layers[layer_name].data = segmentation
-        else:
-            self.viewer.add_labels(segmentation, name=layer_name)
+        self.add_or_update_labels(layer_name, segmentation)
 
     def _conditions_met(self):
         if self.output_layer_param.text() == "":

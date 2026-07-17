@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 
 import napari
+import numpy as np
 import qtpy.QtWidgets as QtWidgets
 
 from napari.utils.notifications import show_info
@@ -353,3 +354,54 @@ class BaseWidget(QWidget):
         if save_path != "":
             file_path = self._save_table(self.save_path.text(), table_data)
             show_info(f"INFO: Added table and saved file to {file_path}.")
+
+    def _add_or_update_layer(self, add_fn, name, data, scale, translate, layer_kwargs):
+        """Add a layer via ``add_fn`` (e.g. ``self.viewer.add_labels``), or refresh it in place if a
+        layer with this name already exists.
+
+        On refresh the ``scale``/``translate`` are reapplied (when provided) because a persisted layer
+        keeps its original transform, which may be stale if the source layer / voxel size changed
+        between runs; any ``layer_kwargs`` (e.g. ``opacity``, ``blending``, ``colormap``) are reapplied
+        too. On first add these go through the layer constructor. Returns the (new or existing) layer.
+        """
+        if name in self.viewer.layers:
+            layer = self.viewer.layers[name]
+            layer.data = data
+            if scale is not None:
+                layer.scale = scale
+            if translate is not None:
+                layer.translate = translate
+            for key, value in layer_kwargs.items():
+                setattr(layer, key, value)
+        else:
+            ctor_kwargs = dict(layer_kwargs)
+            if scale is not None:
+                ctor_kwargs["scale"] = scale
+            if translate is not None:
+                ctor_kwargs["translate"] = translate
+            layer = add_fn(data, name=name, **ctor_kwargs)
+        return layer
+
+    def add_or_update_labels(self, name, data, *, scale=None, translate=None, **layer_kwargs):
+        """Add a Labels layer, or refresh it in place if one with this name already exists.
+
+        See :meth:`_add_or_update_layer` for the refresh/transform semantics. Extra keyword arguments
+        (``opacity``, ``blending``, ``colormap``, …) are forwarded to the layer. Returns the layer.
+        """
+        return self._add_or_update_layer(
+            self.viewer.add_labels, name, data, scale, translate, layer_kwargs
+        )
+
+    def add_or_update_surface(self, name, vertices, faces, *, scale=None, translate=None,
+                              values=None, **layer_kwargs):
+        """Add a Surface layer, or refresh it in place if one with this name already exists.
+
+        Surface layers colour by per-vertex ``values``; a constant array (the default) gives a
+        flat-coloured surface. See :meth:`_add_or_update_layer` for the refresh/transform semantics.
+        Returns the layer.
+        """
+        if values is None:
+            values = np.ones(len(vertices), dtype="float32")
+        return self._add_or_update_layer(
+            self.viewer.add_surface, name, (vertices, faces, values), scale, translate, layer_kwargs
+        )
