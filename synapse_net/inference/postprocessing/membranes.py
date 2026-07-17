@@ -31,7 +31,7 @@ def segment_membrane_next_to_object(
     original_shape = boundary_prediction.shape
 
     # Cut away the exclude mask.
-    slice_mask = np.s_[n_slices_exclude:-n_slices_exclude]
+    slice_mask = np.s_[:] if n_slices_exclude == 0 else np.s_[n_slices_exclude:-n_slices_exclude]
     boundary_prediction = boundary_prediction[slice_mask]
     object_segmentation = object_segmentation[slice_mask]
 
@@ -103,7 +103,7 @@ def segment_membrane_distance_based(
     original_shape = boundary_prediction.shape
 
     # Cut away the exclude mask.
-    slice_mask = np.s_[n_slices_exclude:-n_slices_exclude]
+    slice_mask = np.s_[:] if n_slices_exclude == 0 else np.s_[n_slices_exclude:-n_slices_exclude]
     boundary_prediction = boundary_prediction[slice_mask]
     reference_segmentation = reference_segmentation[slice_mask]
 

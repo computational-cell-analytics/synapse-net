@@ -29,7 +29,7 @@ def segment_presynaptic_density(
     original_shape = ribbon_segmentation.shape
 
     # Cut away the exclude mask.
-    slice_mask = np.s_[n_slices_exclude:-n_slices_exclude]
+    slice_mask = np.s_[:] if n_slices_exclude == 0 else np.s_[n_slices_exclude:-n_slices_exclude]
     presyn_prediction = presyn_prediction[slice_mask]
     ribbon_segmentation = ribbon_segmentation[slice_mask]
 

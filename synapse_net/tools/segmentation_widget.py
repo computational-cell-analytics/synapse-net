@@ -1,4 +1,5 @@
 import copy
+import inspect
 import re
 from typing import Optional, Union
 
@@ -7,11 +8,58 @@ import numpy as np
 import torch
 
 from napari.utils.notifications import show_info
-from qtpy.QtWidgets import QWidget, QVBoxLayout, QPushButton, QLabel, QComboBox
+from qtpy.QtWidgets import QCheckBox, QComboBox, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from .base_widget import BaseWidget
-from ..inference.inference import _get_model_registry, get_model, run_segmentation, compute_scale_from_voxel_size
+from ..inference.active_zone import segment_active_zone
+from ..inference.compartments import segment_compartments
+from ..inference.cristae import segment_cristae
+from ..inference.inference import (
+    _get_model_registry,
+    _segment_ribbon_AZ,
+    compute_scale_from_voxel_size,
+    get_model,
+    get_segmentation_function,
+    run_segmentation,
+)
+from ..inference.mitochondria import segment_mitochondria
 from ..inference.util import get_default_tiling, get_device
+from ..inference.vesicles import segment_vesicles
+
+
+_MAX_MIN_SIZE = 100_000_000
+_POSTPROCESSING_PARAMETER_SPECS = {
+    segment_vesicles: {
+        "min_size": {"type": "int", "min": 0, "max": _MAX_MIN_SIZE, "step": 1},
+        "distance_based_segmentation": {"type": "bool"},
+    },
+    segment_mitochondria: {
+        "min_size": {"type": "int", "min": 0, "max": _MAX_MIN_SIZE, "step": 1},
+        "seed_distance": {"type": "int", "min": 0, "max": 10_000, "step": 1},
+    },
+    segment_active_zone: {
+        "min_size": {"type": "int", "min": 0, "max": _MAX_MIN_SIZE, "step": 1},
+        "foreground_threshold": {"type": "float", "min": 0.0, "max": 1.0, "step": 0.01, "decimals": 2},
+    },
+    segment_compartments: {
+        "boundary_threshold": {"type": "float", "min": 0.0, "max": 1.0, "step": 0.01, "decimals": 2},
+        "n_slices_exclude": {"type": "int", "min": 0, "max": 10_000, "step": 1},
+        "min_z_extent": {"type": "int", "min": 0, "max": 10_000, "step": 1},
+    },
+    _segment_ribbon_AZ: {
+        "threshold": {"type": "float", "min": 0.0, "max": 1.0, "step": 0.01, "decimals": 2},
+        "n_slices_exclude": {"type": "int", "min": 0, "max": 10_000, "step": 1},
+        "min_membrane_size": {
+            "type": "int", "min": 0, "max": _MAX_MIN_SIZE, "step": 1, "default": 50_000,
+        },
+        "n_ribbons": {"type": "int", "min": 1, "max": 1_000, "step": 1},
+    },
+    segment_cristae: {
+        "min_size": {"type": "int", "min": 0, "max": _MAX_MIN_SIZE, "step": 1},
+        "foreground_threshold": {"type": "float", "min": 0.0, "max": 1.0, "step": 0.01, "decimals": 2},
+        "erosion_distance_nm": {"type": "float", "min": 0.0, "max": 1_000.0, "step": 0.1, "decimals": 1},
+    },
+}
 
 
 def _load_custom_model(model_path: str, device: Optional[Union[str, torch.device]] = None) -> torch.nn.Module:
@@ -116,6 +164,63 @@ class SegmentationWidget(BaseWidget):
 
         self.setLayout(layout)
 
+    @staticmethod
+    def _clear_layout(layout):
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            child_layout = item.layout()
+            if widget is not None:
+                widget.deleteLater()
+            elif child_layout is not None:
+                SegmentationWidget._clear_layout(child_layout)
+                child_layout.deleteLater()
+
+    def _update_postprocessing_settings(self, model_type):
+        self._clear_layout(self.postprocessing_settings_layout)
+        self.postprocessing_parameter_widgets = {}
+        if model_type == "- choose -":
+            return
+
+        segmentation_function = get_segmentation_function(model_type)
+        parameter_specs = _POSTPROCESSING_PARAMETER_SPECS.get(segmentation_function, {})
+        function_parameters = inspect.signature(segmentation_function).parameters
+
+        for name, spec in parameter_specs.items():
+            if name not in function_parameters or function_parameters[name].default is inspect.Parameter.empty:
+                raise ValueError(
+                    f"Configured post-processing parameter '{name}' is not an optional parameter "
+                    f"of {segmentation_function.__name__}."
+                )
+            default = spec.get("default", function_parameters[name].default)
+            if spec["type"] == "int":
+                parameter_widget, parameter_layout = self._add_int_param(
+                    name, default, min_val=spec["min"], max_val=spec["max"], step=spec["step"]
+                )
+                self.postprocessing_settings_layout.addLayout(parameter_layout)
+            elif spec["type"] == "float":
+                parameter_widget, parameter_layout = self._add_float_param(
+                    name,
+                    default,
+                    min_val=spec["min"],
+                    max_val=spec["max"],
+                    step=spec["step"],
+                    decimals=spec["decimals"],
+                )
+                self.postprocessing_settings_layout.addLayout(parameter_layout)
+            elif spec["type"] == "bool":
+                parameter_widget = self._add_boolean_param(name, default)
+                self.postprocessing_settings_layout.addWidget(parameter_widget)
+            else:
+                raise ValueError(f"Unsupported post-processing parameter type: {spec['type']}")
+            self.postprocessing_parameter_widgets[name] = parameter_widget
+
+    def _get_postprocessing_kwargs(self):
+        kwargs = {}
+        for name, widget in self.postprocessing_parameter_widgets.items():
+            kwargs[name] = widget.isChecked() if isinstance(widget, QCheckBox) else widget.value()
+        return kwargs
+
     def load_model_widget(self):
         model_widget = QWidget()
         title_label = QLabel("Select Model:")
@@ -189,7 +294,7 @@ class SegmentationWidget(BaseWidget):
         if model_type == "ribbon":  # Currently only the ribbon model needs the extra seg.
             extra_seg = self._get_layer_selector_data(self.extra_seg_selector_name)
             resolution = tuple(voxel_size[ax] for ax in "zyx")
-            kwargs = {"extra_segmentation": extra_seg, "resolution": resolution, "min_membrane_size": 50_000}
+            kwargs = {"extra_segmentation": extra_seg, "resolution": resolution}
         elif "cristae" in model_type:  # Cristae model expects 2 3D volumes
             kwargs = {
                 "extra_segmentation": self._get_layer_selector_data(self.extra_seg_selector_name),
@@ -198,6 +303,7 @@ class SegmentationWidget(BaseWidget):
             }
         else:
             kwargs = {}
+        kwargs.update(self._get_postprocessing_kwargs())
         segmentation = run_segmentation(
             image, model=model, model_type=model_type, tiling=self.tiling, scale=scale, **kwargs
         )
@@ -258,6 +364,17 @@ class SegmentationWidget(BaseWidget):
         self.extra_seg_selector_name = "Extra Segmentation"
         self.extra_selector_widget = self._create_layer_selector(self.extra_seg_selector_name, layer_type="Labels")
         setting_values.layout().addWidget(self.extra_selector_widget)
+
+        # Add model-specific post-processing settings that are updated when the selected model changes.
+        setting_values.layout().addWidget(QLabel("Post-processing:"))
+        self.postprocessing_settings_widget = QWidget()
+        self.postprocessing_settings_layout = QVBoxLayout()
+        self.postprocessing_settings_layout.setContentsMargins(0, 0, 0, 0)
+        self.postprocessing_settings_widget.setLayout(self.postprocessing_settings_layout)
+        setting_values.layout().addWidget(self.postprocessing_settings_widget)
+        self.postprocessing_parameter_widgets = {}
+        self.model_selector.currentTextChanged.connect(self._update_postprocessing_settings)
+        self._update_postprocessing_settings(self.model_selector.currentText())
 
         settings = self._make_collapsible(widget=setting_values, title="Advanced Settings")
         return settings
