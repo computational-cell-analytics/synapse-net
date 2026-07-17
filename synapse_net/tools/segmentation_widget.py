@@ -24,14 +24,15 @@ from ..inference.inference import (
 )
 from ..inference.mitochondria import segment_mitochondria
 from ..inference.util import get_default_tiling, get_device
-from ..inference.vesicles import segment_vesicles
+from ..inference.vesicles import VESICLE_SEGMENTATION_MODES, segment_vesicles
 
 
 _MAX_MIN_SIZE = 100_000_000
 _POSTPROCESSING_PARAMETER_SPECS = {
     segment_vesicles: {
         "min_size": {"type": "int", "min": 0, "max": _MAX_MIN_SIZE, "step": 1},
-        "distance_based_segmentation": {"type": "bool"},
+        "mode": {"type": "choice", "options": list(VESICLE_SEGMENTATION_MODES)},
+        "threshold": {"type": "float", "min": 0.0, "max": 1.0, "step": 0.01, "decimals": 2},
     },
     segment_mitochondria: {
         "min_size": {"type": "int", "min": 0, "max": _MAX_MIN_SIZE, "step": 1},
@@ -211,6 +212,9 @@ class SegmentationWidget(BaseWidget):
             elif spec["type"] == "bool":
                 parameter_widget = self._add_boolean_param(name, default)
                 self.postprocessing_settings_layout.addWidget(parameter_widget)
+            elif spec["type"] == "choice":
+                parameter_widget, parameter_layout = self._add_choice_param(name, default, spec["options"])
+                self.postprocessing_settings_layout.addLayout(parameter_layout)
             else:
                 raise ValueError(f"Unsupported post-processing parameter type: {spec['type']}")
             self.postprocessing_parameter_widgets[name] = parameter_widget
@@ -218,7 +222,13 @@ class SegmentationWidget(BaseWidget):
     def _get_postprocessing_kwargs(self):
         kwargs = {}
         for name, widget in self.postprocessing_parameter_widgets.items():
-            kwargs[name] = widget.isChecked() if isinstance(widget, QCheckBox) else widget.value()
+            if isinstance(widget, QCheckBox):
+                value = widget.isChecked()
+            elif isinstance(widget, QComboBox):
+                value = widget.currentText()
+            else:
+                value = widget.value()
+            kwargs[name] = value
         return kwargs
 
     def load_model_widget(self):
