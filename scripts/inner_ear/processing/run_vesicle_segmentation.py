@@ -12,11 +12,11 @@ from parse_table import parse_table, get_data_root
 VERSIONS = {
     1: {
         "model": "/scratch/projects/nim00007/data/synapse_net/models/moser/vesicles/mean-teacher-v3.zip",
-        "distance_based_segmentation": True,
+        "mode": "distance-watershed",
     },
     2: {
         "model": "/scratch/projects/nim00007/data/synapse_net/models/moser/vesicles/mean-teacher-v5.zip",
-        "distance_based_segmentation": True,
+        "mode": "distance-watershed",
         "closing_iterations": 4,
     }
 }
@@ -46,7 +46,7 @@ def segment_folder(model_path, folder, version, is_new):
 
     segmentation = segment_vesicles(
         data, model_path, verbose=False,
-        distance_based_segmentation=VERSIONS[version]["distance_based_segmentation"],
+        mode=VERSIONS[version]["mode"],
         scale=scale,
     )
     closing_iterations = VERSIONS[version].get("closing_iterations", None)
