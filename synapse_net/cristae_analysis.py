@@ -608,24 +608,25 @@ def compute_junction_distances(
     the nearest vertex of a triangle mesh, and pairwise surface geodesics are computed with
     ``bioimage_cpp.distance.geodesic_distances_mesh``. The mesh is the **eroded-mito (lumen) surface**
     passed in as ``mesh_vertices``/``mesh_faces`` by :func:`_single_mito_row` (a clean, single-wall
-    surface at the membrane's inner edge); if none is supplied a mesh is built from ``membrane_mask``
-    as a convenience. When no usable surface mesh exists (empty membrane / degenerate mesh), the
-    junction distances are NaN.
+    surface at the membrane's inner edge). If no mesh is supplied — or no usable surface mesh exists
+    (empty membrane / degenerate mesh) — the junction distances are NaN. (There is no membrane-band
+    fallback mesh: the metric is defined on the lumen surface, and meshing the thick membrane band
+    would give a different, capped double-wall surface.)
 
     A Clark-Evans nearest-neighbour index summarises whether the junctions are clustered.
 
     Args:
         contact_labels: Integer junction label array (0 = background, 1..n = junctions),
             e.g. the first return value of :func:`detect_contact_sites`.
-        membrane_mask: Binary mitochondrial membrane mask the junctions sit on (used to build a
-            fallback mesh when ``mesh_vertices``/``mesh_faces`` are not supplied).
+        membrane_mask: Binary mitochondrial membrane mask the junctions sit on. Only used for the
+            empty-membrane early-out (no membrane → NaN); it is not meshed.
         voxel_size: Voxel size in nm — scalar or dict with "z"/"y"/"x" keys.
         surface_area_nm2: Membrane/mito surface area used as the reference area for the
             Clark-Evans expectation. If None or non-positive, the clustering index is NaN.
         n_jobs: 1 = serial, -1 = all cores (forwarded to the mesh solver's thread count).
         mesh_vertices: Optional (n_vertices, 3) mesh vertices in nm (unpadded mask frame; see
-            :func:`_surface_mesh`) — the eroded-mito (lumen) surface. If omitted, a mesh is built
-            from ``membrane_mask``.
+            :func:`_surface_mesh`) — the eroded-mito (lumen) surface. If omitted, the junction
+            distances are NaN.
         mesh_faces: Optional (n_faces, 3) triangle indices matching ``mesh_vertices``.
 
     Returns:
@@ -659,12 +660,9 @@ def compute_junction_distances(
     )
 
     if mesh_vertices is not None and mesh_faces is not None and len(mesh_faces) > 0:
-        mesh = (mesh_vertices, mesh_faces)
+        distance_matrix = _junction_matrix_mesh(centroids, sampling, mesh_vertices, mesh_faces, n_jobs)
     else:
-        mesh = _surface_mesh(membrane, sampling)
-    distance_matrix = (
-        _junction_matrix_mesh(centroids, sampling, mesh[0], mesh[1], n_jobs) if mesh is not None else None
-    )
+        distance_matrix = None
 
     if distance_matrix is None:
         summary = dict(_JUNCTION_DISTANCE_NAN)

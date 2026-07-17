@@ -570,12 +570,13 @@ class TestJunctionDistances(unittest.TestCase):
             labels[z, y, x] = i
         return labels, membrane
 
-    # These exercise compute_junction_distances directly; with no mesh supplied it meshes the given
-    # membrane and takes the surface geodesic, so they require the bioimage-cpp geodesic API.
+    # These exercise compute_junction_distances directly. The metric is defined on the lumen surface,
+    # so the mesh must be supplied explicitly (there is no membrane-band fallback); here the membrane's
+    # own surface is meshed as the test fixture. They require the bioimage-cpp geodesic API.
     def test_geodesic_follows_bent_membrane(self):
         # An L-shaped membrane: the geodesic around the bend is longer than the straight line
         # between the two seed voxels.
-        from synapse_net.cristae_analysis import compute_junction_distances
+        from synapse_net.cristae_analysis import compute_junction_distances, _surface_mesh
         shape = (5, 40, 40)
         membrane = np.zeros(shape, dtype=bool)
         z = 2
@@ -584,7 +585,10 @@ class TestJunctionDistances(unittest.TestCase):
         labels = np.zeros(shape, dtype=np.int32)
         labels[z, 5, 6] = 1               # near the far end of the horizontal arm
         labels[z, 33, 34] = 2             # near the far end of the vertical arm
-        dist, _ = compute_junction_distances(labels, membrane, voxel_size=1.0)
+        verts, faces = _surface_mesh(membrane, np.ones(3))
+        dist, _ = compute_junction_distances(
+            labels, membrane, voxel_size=1.0, mesh_vertices=verts, mesh_faces=faces
+        )
         straight = np.sqrt((33 - 5) ** 2 + (34 - 6) ** 2)
         self.assertGreater(dist[0, 1], straight * 1.2)
 
@@ -600,16 +604,21 @@ class TestJunctionDistances(unittest.TestCase):
     def test_clustered_index_lower_than_dispersed(self):
         # Same membrane/area and junction count, but tightly grouped vs evenly spread:
         # the clustered arrangement must give a smaller Clark-Evans index.
-        from synapse_net.cristae_analysis import compute_junction_distances
+        from synapse_net.cristae_analysis import compute_junction_distances, _surface_mesh
         area = 40.0 * 40.0
         clustered_pos = [(18, 18), (18, 20), (20, 18), (20, 20)]
         dispersed_pos = [(8, 8), (8, 30), (30, 8), (30, 30)]
-        _, clustered = compute_junction_distances(
-            *self._flat_membrane_with_junctions(clustered_pos), voxel_size=1.0, surface_area_nm2=area
-        )
-        _, dispersed = compute_junction_distances(
-            *self._flat_membrane_with_junctions(dispersed_pos), voxel_size=1.0, surface_area_nm2=area
-        )
+
+        def _cjd(positions):
+            labels, membrane = self._flat_membrane_with_junctions(positions)
+            verts, faces = _surface_mesh(membrane, np.ones(3))
+            return compute_junction_distances(
+                labels, membrane, voxel_size=1.0, surface_area_nm2=area,
+                mesh_vertices=verts, mesh_faces=faces,
+            )
+
+        _, clustered = _cjd(clustered_pos)
+        _, dispersed = _cjd(dispersed_pos)
         self.assertLess(clustered["junction_clustering_index"], dispersed["junction_clustering_index"])
 
 
@@ -936,18 +945,18 @@ class TestMeshGeodesicBackend(unittest.TestCase):
         area_closed = _surface_area(mito_binary, np.ones(ndim))
         self.assertLess(area_open, area_closed)  # the fabricated z-caps are no longer counted
 
-    def test_primitive_mesh_on_flat_membrane(self):
-        # With no mesh supplied the primitive meshes the given membrane surface — finite, positive,
-        # and of the right order (junctions ~17-20 apart). Absolute accuracy on a 1-voxel sheet is not
-        # asserted (that degenerate mesh is only the fallback; the pipeline meshes the thicker lumen).
+    def test_no_mesh_supplied_is_nan(self):
+        # With no lumen mesh supplied the junction distances are NaN — there is no membrane-band
+        # fallback mesh (the metric is defined on the eroded-mito lumen surface).
         from synapse_net.cristae_analysis import compute_junction_distances
         labels, membrane = TestJunctionDistances._flat_membrane_with_junctions(
             [(20, 8), (20, 28), (8, 20), (32, 20)]
         )
         _, summary = compute_junction_distances(labels, membrane, 1.0, surface_area_nm2=1000.0)
-        mean_nn = summary["mean_nn_junction_distance_nm"]
-        self.assertTrue(np.isfinite(mean_nn) and mean_nn > 0)
-        self.assertLess(mean_nn, 100.0)  # sane order of magnitude, not a runaway path
+        self.assertEqual(summary["junction_count"], 4)
+        self.assertTrue(np.isnan(summary["mean_nn_junction_distance_nm"]))
+        self.assertTrue(np.isnan(summary["median_nn_junction_distance_nm"]))
+        self.assertTrue(np.isnan(summary["junction_clustering_index"]))
 
 
 _EXPECTED_COLUMNS = [
