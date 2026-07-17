@@ -1,5 +1,5 @@
 import os
-from typing import Dict, List, Optional, Union
+from typing import Callable, Dict, List, Optional, Union
 
 import torch
 import numpy as np
@@ -197,14 +197,22 @@ def _ribbon_AZ_postprocessing(predictions, vesicles, n_slices_exclude, n_ribbons
     return segmentations
 
 
-def _segment_ribbon_AZ(image, model, tiling, scale, verbose, return_predictions=False, **kwargs):
+def _segment_ribbon_AZ(
+    image,
+    model,
+    tiling,
+    scale,
+    verbose,
+    return_predictions=False,
+    threshold=0.5,
+    n_slices_exclude=20,
+    min_membrane_size=0,
+    n_ribbons=1,
+    **kwargs,
+):
     # Parse additional keyword arguments from the kwargs.
     vesicles = kwargs.pop("extra_segmentation")
-    threshold = kwargs.pop("threshold", 0.5)
-    n_slices_exclude = kwargs.pop("n_slices_exclude", 20)
-    n_ribbons = kwargs.pop("n_slices_exclude", 1)
     resolution = kwargs.pop("resolution", None)
-    min_membrane_size = kwargs.pop("min_membrane_size", 0)
 
     predictions = segment_ribbon_synapse_structures(
         image, model=model, tiling=tiling, scale=scale, verbose=verbose, threshold=threshold, **kwargs
@@ -227,6 +235,33 @@ def _segment_ribbon_AZ(image, model, tiling, scale, verbose, return_predictions=
     if return_predictions:
         return segmentations, predictions
     return segmentations
+
+
+def get_segmentation_function(model_type: str) -> Callable:
+    """Get the segmentation function associated with a model type.
+
+    Args:
+        model_type: The name of the pretrained model.
+
+    Returns:
+        The segmentation function used for the model type.
+
+    Raises:
+        ValueError: If the model type is unknown.
+    """
+    if model_type.startswith("vesicles"):
+        return segment_vesicles
+    if model_type in ("mitochondria", "mitochondria2"):
+        return segment_mitochondria
+    if model_type == "active_zone":
+        return segment_active_zone
+    if model_type == "compartments":
+        return segment_compartments
+    if model_type == "ribbon":
+        return _segment_ribbon_AZ
+    if "cristae" in model_type:
+        return segment_cristae
+    raise ValueError(f"Unknown model type: {model_type}")
 
 
 def run_segmentation(
@@ -253,21 +288,15 @@ def run_segmentation(
     Returns:
         The segmentation. For models that return multiple segmentations, this function returns a dictionary.
     """
-    if model_type.startswith("vesicles"):
-        segmentation = segment_vesicles(image, model=model, tiling=tiling, scale=scale, verbose=verbose, **kwargs)
-    elif model_type == "mitochondria" or model_type == "mitochondria2":
-        segmentation = segment_mitochondria(image, model=model, tiling=tiling, scale=scale, verbose=verbose, **kwargs)
-    elif model_type == "active_zone":
-        segmentation = segment_active_zone(image, model=model, tiling=tiling, scale=scale, verbose=verbose, **kwargs)
-    elif model_type == "compartments":
-        segmentation = segment_compartments(image, model=model, tiling=tiling, scale=scale, verbose=verbose, **kwargs)
-    elif model_type == "ribbon":
-        segmentation = _segment_ribbon_AZ(image, model=model, tiling=tiling, scale=scale, verbose=verbose, **kwargs)
-    elif "cristae" in model_type:
+    segmentation_function = get_segmentation_function(model_type)
+    if segmentation_function is segment_cristae:
         training_resolution = get_model_training_resolution(model_type)
         voxel_size = np.mean(list(training_resolution.values()))
-        segmentation = segment_cristae(image, model=model, tiling=tiling, scale=scale, verbose=verbose,
-                                       voxel_size=voxel_size, **kwargs)
+        segmentation = segmentation_function(
+            image, model=model, tiling=tiling, scale=scale, verbose=verbose, voxel_size=voxel_size, **kwargs
+        )
     else:
-        raise ValueError(f"Unknown model type: {model_type}")
+        segmentation = segmentation_function(
+            image, model=model, tiling=tiling, scale=scale, verbose=verbose, **kwargs
+        )
     return segmentation

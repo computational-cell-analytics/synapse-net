@@ -124,12 +124,14 @@ def _segment_compartments_3d(
     for z in range(seg_2d.shape[0]):
         if z < n_slices_exclude or z >= seg_2d.shape[0] - n_slices_exclude:
             continue
-        seg_z = _segment_compartments_2d(prediction[z], distances=distances[z])
+        seg_z = _segment_compartments_2d(
+            prediction[z], boundary_threshold=boundary_threshold, distances=distances[z]
+        )
         seg_z[seg_z != 0] += offset
         offset = max(int(seg_z.max()), offset)
         seg_2d[z] = seg_z
 
-    seg = _merge_segmentation_3d(seg_2d, min_z_extent)
+    seg = _merge_segmentation_3d(seg_2d, min_z_extent=min_z_extent)
     seg = _postprocess_seg_3d(seg)
 
     # import napari
@@ -153,7 +155,8 @@ def segment_compartments(
     scale: Optional[List[float]] = None,
     mask: Optional[np.ndarray] = None,
     n_slices_exclude: int = 0,
-    boundary_threshold: float=0.4,
+    boundary_threshold: float = 0.4,
+    min_z_extent: int = 10,
     **kwargs,
 ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
     """Segment synaptic compartments in an input volume.
@@ -166,8 +169,9 @@ def segment_compartments(
         verbose: Whether to print timing information.
         return_predictions: Whether to return the predictions (foreground, boundaries) alongside the segmentation.
         scale: The scale factor to use for rescaling the input volume before prediction.
-        n_slices_exclude:
-        boundary_threshold: Threshold that determines when the prediction of the network is foreground for the segmentation. Need higher threshold than default for TEM.
+        n_slices_exclude: The number of slices to exclude at the start and end of a 3D volume.
+        boundary_threshold: Threshold used to derive compartment seeds from the boundary prediction.
+        min_z_extent: The minimum number of slices a 3D compartment must span.
 
     Returns:
         The segmentation mask as a numpy array, or a tuple containing the segmentation mask
@@ -195,7 +199,12 @@ def segment_compartments(
     if input_volume.ndim == 2:
         seg = _segment_compartments_2d(pred, boundary_threshold=boundary_threshold)
     else:
-        seg = _segment_compartments_3d(pred, n_slices_exclude=n_slices_exclude, boundary_threshold=boundary_threshold)
+        seg = _segment_compartments_3d(
+            pred,
+            n_slices_exclude=n_slices_exclude,
+            boundary_threshold=boundary_threshold,
+            min_z_extent=min_z_extent,
+        )
     if verbose:
         print("Run segmentation in", time.time() - t0, "s")
 

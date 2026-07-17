@@ -50,6 +50,7 @@ def _run_segmentation(
     block_shape=(128, 256, 256),
     mito_seg=None,
     erode_voxels=3,
+    foreground_threshold=0.5,
 ):
     mito_seg = _erode_instances(mito_seg, erode_voxels, verbose)
 
@@ -69,7 +70,7 @@ def _run_segmentation(
 
     # Apply the threshold lazily
     def threshold_block(block):
-        return block > 0.5
+        return block > foreground_threshold
 
     binary_foreground = SimpleTransformationWrapper(
         foreground,
@@ -105,6 +106,8 @@ def segment_cristae(
     return_predictions: bool = False,
     scale: Optional[List[float]] = None,
     mask: Optional[np.ndarray] = None,
+    foreground_threshold: float = 0.5,
+    erosion_distance_nm: float = 10.0,
     **kwargs
 ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
     """Segment cristae in an input volume.
@@ -121,6 +124,9 @@ def segment_cristae(
         return_predictions: Whether to return the predictions (foreground, boundaries) alongside the segmentation.
         scale: The scale factor to use for rescaling the input volume before prediction.
         mask: An optional mask that is used to restrict the segmentation.
+        foreground_threshold: The threshold for binarizing the foreground prediction.
+        erosion_distance_nm: The distance in nanometers used to erode mitochondria instances before
+            restricting the cristae prediction.
 
     Returns:
         The segmentation mask as a numpy array, or a tuple containing the segmentation mask
@@ -144,9 +150,8 @@ def segment_cristae(
     volume = scaler.scale_input(input_volume)
     mito_seg = scaler.scale_input(mitochondria, is_segmentation=True)
 
-    # target 10nm erosion for mitochondria
-    # voxel_size is the model's training voxel size, which is the space we erode in
-    erode_voxels = max(1, round(10.0 / voxel_size))
+    # The voxel size is the model's training voxel size, which is the space we erode in.
+    erode_voxels = max(0, round(erosion_distance_nm / voxel_size))
 
     # Use the mitochondria segmentation as the prediction mask so that
     # predict_with_halo skips tiles with no mito voxels entirely.
@@ -163,8 +168,14 @@ def segment_cristae(
         tiling=tiling, with_channels=with_channels, channels_to_standardize=channels_to_standardize, verbose=verbose
     )
     foreground, boundaries = pred[:2]
-    seg = _run_segmentation(foreground, verbose=verbose, min_size=min_size, mito_seg=mito_seg,
-                            erode_voxels=erode_voxels)
+    seg = _run_segmentation(
+        foreground,
+        verbose=verbose,
+        min_size=min_size,
+        mito_seg=mito_seg,
+        erode_voxels=erode_voxels,
+        foreground_threshold=foreground_threshold,
+    )
     seg = scaler.rescale_output(seg, is_segmentation=True)
 
     if return_predictions:
