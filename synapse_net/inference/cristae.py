@@ -161,7 +161,7 @@ def segment_cristae(
     else:
         mask = scaler.scale_input(mask, is_segmentation=True)
 
-    input_volume = np.stack([volume, mito_seg], axis=0)
+    input_volume = np.stack([volume, mask], axis=0)
     # Run prediction and segmentation.
     pred = get_prediction(
         input_volume, model_path=model_path, model=model, mask=mask,

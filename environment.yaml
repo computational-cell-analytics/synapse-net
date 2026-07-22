@@ -3,6 +3,7 @@ channels:
 name:
     synapse-net
 dependencies:
+    - python=3.12
     - bioimageio.core
     - bioimage-cpp
     - kornia
