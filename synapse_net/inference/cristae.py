@@ -107,7 +107,7 @@ def segment_cristae(
     scale: Optional[List[float]] = None,
     mask: Optional[np.ndarray] = None,
     foreground_threshold: float = 0.5,
-    erosion_distance_nm: float = 10.0,
+    erosion_distance_nm: float = 0.0,
     **kwargs
 ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
     """Segment cristae in an input volume.
@@ -126,7 +126,8 @@ def segment_cristae(
         mask: An optional mask that is used to restrict the segmentation.
         foreground_threshold: The threshold for binarizing the foreground prediction.
         erosion_distance_nm: The distance in nanometers used to erode mitochondria instances before
-            restricting the cristae prediction.
+            restricting the cristae prediction. Set to 0 to disable erosion and rely on the
+            min_size filter to remove small cristae detached on the mitochondria membranes.
 
     Returns:
         The segmentation mask as a numpy array, or a tuple containing the segmentation mask

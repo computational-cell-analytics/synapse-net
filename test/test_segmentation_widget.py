@@ -138,7 +138,7 @@ class TestSegmentationWidget(unittest.TestCase):
             ("cristae", {
                 "min_size": (QSpinBox, 2_000, 1),
                 "foreground_threshold": (QDoubleSpinBox, 0.5, 0.01),
-                "erosion_distance_nm": (QDoubleSpinBox, 10.0, 0.1),
+                "erosion_distance_nm": (QDoubleSpinBox, 0.0, 0.1),
             }),
         )
         for model_type, expected_parameters in test_cases:
@@ -232,6 +232,47 @@ class TestSegmentationWidget(unittest.TestCase):
         self.assertEqual(run.call_args.kwargs["foreground_threshold"], 0.75)
         self.assertEqual(run.call_args.kwargs["model_type"], "active_zone")
         self.assertIs(run.call_args.kwargs["model"], model)
+
+    def test_run_segmentation_shows_busy_state(self):
+        self._select_model("active_zone")
+        image = np.zeros((4, 8, 8), dtype="float32")
+        captured = {}
+
+        def get_layer_data(selector_name, return_metadata=False):
+            return {} if return_metadata else image
+
+        def fake_run(*args, **kwargs):
+            # Capture the button state while the blocking segmentation is "running".
+            captured["enabled"] = self.widget.predict_button.isEnabled()
+            captured["text"] = self.widget.predict_button.text()
+            return np.zeros_like(image)
+
+        with (
+            mock.patch.object(self.widget, "_get_layer_selector_data", side_effect=get_layer_data),
+            mock.patch.object(self.widget, "_handle_resolution", return_value=None),
+            mock.patch.object(segmentation_widget, "get_device", return_value="cpu"),
+            mock.patch.object(segmentation_widget, "get_model", return_value=object()),
+            mock.patch.object(segmentation_widget, "_get_current_tiling", return_value={}),
+            mock.patch.object(segmentation_widget, "run_segmentation", side_effect=fake_run),
+            mock.patch.object(segmentation_widget, "show_info"),
+        ):
+            self.widget.on_predict()
+
+        # During the blocking call the button was disabled and relabeled to the busy text.
+        self.assertFalse(captured["enabled"])
+        self.assertEqual(captured["text"], "Computing…")
+        # After completion the button is restored.
+        self.assertTrue(self.widget.predict_button.isEnabled())
+        self.assertEqual(self.widget.predict_button.text(), "Run Segmentation")
+
+    def test_cristae_parameters_have_tooltips(self):
+        self._select_model("cristae")
+        spec = segmentation_widget._POSTPROCESSING_PARAMETER_SPECS[segmentation_widget.segment_cristae]
+        for name in ("min_size", "foreground_threshold", "erosion_distance_nm"):
+            with self.subTest(parameter=name):
+                expected = spec[name]["tooltip"]
+                self.assertTrue(expected)  # a non-empty description is configured
+                self.assertEqual(self.widget.postprocessing_parameter_widgets[name].toolTip(), expected)
 
 
 class TestSelectedPostprocessingParameters(unittest.TestCase):

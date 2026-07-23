@@ -56,9 +56,21 @@ _POSTPROCESSING_PARAMETER_SPECS = {
         "n_ribbons": {"type": "int", "min": 1, "max": 1_000, "step": 1},
     },
     segment_cristae: {
-        "min_size": {"type": "int", "min": 0, "max": _MAX_MIN_SIZE, "step": 1},
-        "foreground_threshold": {"type": "float", "min": 0.0, "max": 1.0, "step": 0.01, "decimals": 2},
-        "erosion_distance_nm": {"type": "float", "min": 0.0, "max": 1_000.0, "step": 0.1, "decimals": 1},
+        "min_size": {
+            "type": "int", "min": 0, "max": _MAX_MIN_SIZE, "step": 1,
+            "tooltip": "Minimum cristae size in voxels. Smaller connected components are removed — "
+                       "raise this to filter out small, detached cristae on the mitochondria membranes.",
+        },
+        "foreground_threshold": {
+            "type": "float", "min": 0.0, "max": 1.0, "step": 0.01, "decimals": 2,
+            "tooltip": "Probability cutoff for the cristae foreground. Higher values keep only more "
+                       "confident predictions (less foreground).",
+        },
+        "erosion_distance_nm": {
+            "type": "float", "min": 0.0, "max": 1_000.0, "step": 0.1, "decimals": 1,
+            "tooltip": "Distance in nm to shrink the mitochondria mask inward before restricting "
+                       "cristae to it. 0 disables erosion (rely on Minimum Size instead).",
+        },
     },
 }
 
@@ -194,9 +206,10 @@ class SegmentationWidget(BaseWidget):
                     f"of {segmentation_function.__name__}."
                 )
             default = spec.get("default", function_parameters[name].default)
+            tooltip = spec.get("tooltip")
             if spec["type"] == "int":
                 parameter_widget, parameter_layout = self._add_int_param(
-                    name, default, min_val=spec["min"], max_val=spec["max"], step=spec["step"]
+                    name, default, min_val=spec["min"], max_val=spec["max"], step=spec["step"], tooltip=tooltip
                 )
                 self.postprocessing_settings_layout.addLayout(parameter_layout)
             elif spec["type"] == "float":
@@ -207,13 +220,16 @@ class SegmentationWidget(BaseWidget):
                     max_val=spec["max"],
                     step=spec["step"],
                     decimals=spec["decimals"],
+                    tooltip=tooltip,
                 )
                 self.postprocessing_settings_layout.addLayout(parameter_layout)
             elif spec["type"] == "bool":
-                parameter_widget = self._add_boolean_param(name, default)
+                parameter_widget = self._add_boolean_param(name, default, tooltip=tooltip)
                 self.postprocessing_settings_layout.addWidget(parameter_widget)
             elif spec["type"] == "choice":
-                parameter_widget, parameter_layout = self._add_choice_param(name, default, spec["options"])
+                parameter_widget, parameter_layout = self._add_choice_param(
+                    name, default, spec["options"], tooltip=tooltip
+                )
                 self.postprocessing_settings_layout.addLayout(parameter_layout)
             else:
                 raise ValueError(f"Unsupported post-processing parameter type: {spec['type']}")
@@ -265,65 +281,69 @@ class SegmentationWidget(BaseWidget):
 
         device = get_device(self.device_dropdown.currentText())
 
-        # Load the model. Override if user chose custom model.
-        rescale_input = True
-        if custom_model_path:
-            model = _load_custom_model(custom_model_path, device)
-            rescale_input = False
-            if model:
-                show_info(f"INFO: Using custom model from path: {custom_model_path}")
-            else:
-                show_info(f"ERROR: Failed to load custom model from path: {custom_model_path}")
-                return
-        else:
-            model = get_model(model_type, device)
-
         # Get the image data.
         image = self._get_layer_selector_data(self.image_selector_name)
         if image is None:
             show_info("INFO: Please choose an image.")
             return
 
-        # Get the current tiling.
-        self.tiling = _get_current_tiling(self.tiling, self.default_tiling, model_type)
+        with self._computing(
+            self.predict_button, "Computing…", "Run Segmentation", "INFO: Running segmentation…"
+        ):
+            # Load the model. Override if user chose custom model.
+            rescale_input = True
+            if custom_model_path:
+                model = _load_custom_model(custom_model_path, device)
+                rescale_input = False
+                if model:
+                    show_info(f"INFO: Using custom model from path: {custom_model_path}")
+                else:
+                    show_info(f"ERROR: Failed to load custom model from path: {custom_model_path}")
+                    return
+            else:
+                model = get_model(model_type, device)
 
-        # Get the voxel size.
-        metadata = self._get_layer_selector_data(self.image_selector_name, return_metadata=True)
-        voxel_size = self._handle_resolution(metadata, self.voxel_size_param, image.ndim, return_as_list=False)
+            # Get the current tiling.
+            self.tiling = _get_current_tiling(self.tiling, self.default_tiling, model_type)
 
-        # Determine the scaling based on the voxel size.
-        scale = None
-        if voxel_size and rescale_input:
-            # Calculate scale so voxel_size is the same as in training.
-            scale = compute_scale_from_voxel_size(voxel_size, model_type)
-            scale_info = list(map(lambda x: np.round(x, 2), scale))
-            show_info(f"INFO: Rescaled the image by {scale_info} to optimize for the selected model.")
+            # Get the voxel size.
+            metadata = self._get_layer_selector_data(self.image_selector_name, return_metadata=True)
+            voxel_size = self._handle_resolution(metadata, self.voxel_size_param, image.ndim, return_as_list=False)
 
-        # Some models require an additional segmentation for inference or postprocessing.
-        # For these models we read out the 'Extra Segmentation' widget.
-        if model_type == "ribbon":  # Currently only the ribbon model needs the extra seg.
-            extra_seg = self._get_layer_selector_data(self.extra_seg_selector_name)
-            resolution = tuple(voxel_size[ax] for ax in "zyx")
-            kwargs = {"extra_segmentation": extra_seg, "resolution": resolution}
-        elif "cristae" in model_type:  # Cristae model expects 2 3D volumes
-            kwargs = {
-                "extra_segmentation": self._get_layer_selector_data(self.extra_seg_selector_name),
-                "with_channels": True,
-                "channels_to_standardize": [0]
-            }
-        else:
-            kwargs = {}
-        kwargs.update(self._get_postprocessing_kwargs())
-        segmentation = run_segmentation(
-            image, model=model, model_type=model_type, tiling=self.tiling, scale=scale, **kwargs
-        )
+            # Determine the scaling based on the voxel size.
+            scale = None
+            if voxel_size and rescale_input:
+                # Calculate scale so voxel_size is the same as in training.
+                scale = compute_scale_from_voxel_size(voxel_size, model_type)
+                scale_info = list(map(lambda x: np.round(x, 2), scale))
+                show_info(f"INFO: Rescaled the image by {scale_info} to optimize for the selected model.")
 
-        # Add the segmentation layer(s).
-        if isinstance(segmentation, dict):
-            for name, seg in segmentation.items():
-                self.viewer.add_labels(seg, name=name, metadata=metadata)
-        else:
-            self.viewer.add_labels(segmentation, name=f"{model_type}", metadata=metadata)
+            # Some models require an additional segmentation for inference or postprocessing.
+            # For these models we read out the 'Extra Segmentation' widget.
+            if model_type == "ribbon":  # Currently only the ribbon model needs the extra seg.
+                extra_seg = self._get_layer_selector_data(self.extra_seg_selector_name)
+                resolution = tuple(voxel_size[ax] for ax in "zyx")
+                kwargs = {"extra_segmentation": extra_seg, "resolution": resolution}
+            elif "cristae" in model_type:  # Cristae model expects 2 3D volumes
+                kwargs = {
+                    "extra_segmentation": self._get_layer_selector_data(self.extra_seg_selector_name),
+                    "with_channels": True,
+                    "channels_to_standardize": [0]
+                }
+            else:
+                kwargs = {}
+            kwargs.update(self._get_postprocessing_kwargs())
+            segmentation = run_segmentation(
+                image, model=model, model_type=model_type, tiling=self.tiling, scale=scale, **kwargs
+            )
+
+            # Add the segmentation layer(s).
+            if isinstance(segmentation, dict):
+                for name, seg in segmentation.items():
+                    self.viewer.add_labels(seg, name=name, metadata=metadata)
+            else:
+                self.viewer.add_labels(segmentation, name=f"{model_type}", metadata=metadata)
+
         show_info(f"INFO: Segmentation of {model_type} added to layers.")
 
     def _create_settings_widget(self):

@@ -1,5 +1,6 @@
 import os
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 import napari
@@ -7,8 +8,9 @@ import numpy as np
 import qtpy.QtWidgets as QtWidgets
 
 from napari.utils.notifications import show_info
+from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSpinBox, QComboBox, QCheckBox
+    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSpinBox, QComboBox, QCheckBox
 )
 from superqt import QCollapsible
 
@@ -42,7 +44,8 @@ class BaseWidget(QWidget):
             layer_type (str): The type of layer to filter for ("Image" or "Labels").
             prefer_substring (str, optional): If given, the selector auto-defaults to the first
                 layer whose name contains this substring (case-insensitive); falls back to the first
-                layer otherwise. Re-applied whenever layers are added/removed.
+                layer otherwise. Applied only when there is no valid current selection (initial
+                population or the selected layer was removed); a user's manual choice is preserved.
         """
         if not hasattr(self, "layer_selectors"):
             self.layer_selectors = {}
@@ -85,17 +88,49 @@ class BaseWidget(QWidget):
     def _update_selector(self, selector, layer_filter, prefer_substring=None):
         """Update a single selector with the current image layers in the viewer.
 
-        If ``prefer_substring`` is given, auto-select the first layer whose name contains it
-        (case-insensitive); otherwise the first layer stays selected (QComboBox default).
+        The user's current selection is preserved if that layer still exists. Only when there is
+        no valid current selection (initial population, or the selected layer was removed) does the
+        default apply: the first layer whose name contains ``prefer_substring`` (case-insensitive)
+        if given, otherwise the first layer (QComboBox default).
         """
+        previous = selector.currentText()
         selector.clear()
         image_layers = [layer.name for layer in self.viewer.layers if isinstance(layer, layer_filter)]
         selector.addItems(image_layers)
-        if prefer_substring:
+        if previous in image_layers:
+            selector.setCurrentText(previous)
+        elif prefer_substring:
             needle = prefer_substring.lower()
             match = next((name for name in image_layers if needle in name.lower()), None)
             if match is not None:
                 selector.setCurrentText(match)
+
+    @contextmanager
+    def _computing(self, button, busy_text, idle_text, message):
+        """Show a busy state around a synchronous, GUI-thread-blocking action, then restore it.
+
+        Disables and relabels ``button``, sets a wait cursor, shows ``message`` and forces one repaint
+        so the busy state is painted *before* the blocking call — otherwise none of it would render
+        until the call returned and the button would just look stuck. The cursor, button label and
+        enabled state are restored on exit (also on error). Disabling the button also blocks a
+        re-entrant second click while the action is in flight. All Qt calls are guarded so they no-op
+        without a running QApplication.
+        """
+        app = QApplication.instance()
+        button.setEnabled(False)
+        button.setText(busy_text)
+        if app is not None:
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+        show_info(message)
+        if app is not None:
+            app.processEvents()
+        try:
+            yield
+        finally:
+            if app is not None:
+                QApplication.restoreOverrideCursor()
+            button.setEnabled(True)
+            button.setText(idle_text)
 
     def _get_layer_selector_layer(self, selector_name):
         """Return the layer currently selected in a given selector."""
