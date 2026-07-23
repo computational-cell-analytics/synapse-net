@@ -227,9 +227,14 @@ synapse_net.run_domain_adaptation \
     --input_folder /path/to/tomograms  \  # The folder with the tomograms to train on.
     --file_pattern *.mrc \ # For mrc files, replace if you have a different file type.
     --source_model vesicles_3d \ # To adapt the model for 3D vesicle segmentation.
+    --source_checkpoint /path/to/custom-model.pt \ # Optional custom initialization checkpoint.
     --patch_shape 48 256 256 \ # The patch shape for training.
     --n_iterations 10000 \ # The number of iterations to train for.
 ```
+
+The `--source_model` argument selects the model metadata for the patch shape and optional data resizing.
+The `--source_checkpoint` argument overrides the pretrained weights.
+It accepts a torch-em checkpoint directory or a serialized PyTorch model file.
 
 Run
 ```bash
