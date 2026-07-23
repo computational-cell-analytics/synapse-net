@@ -1,10 +1,16 @@
 import os
+import sys
 import unittest
 from shutil import rmtree
 from subprocess import run
+from unittest import mock
 
+import torch
 from skimage.data import binary_blobs
 from skimage.measure import label
+
+from synapse_net.training.domain_adaptation import main as domain_adaptation_main, _resolve_source_checkpoint
+from synapse_net.training.supervised_training import get_3d_model
 
 
 class TestTrainingCLI(unittest.TestCase):
@@ -122,8 +128,60 @@ class TestTrainingCLI(unittest.TestCase):
             train_image_folder, train_label_folder, file_pattern="*.mrc", initial_model="vesicles_3d"
         )
 
+    def test_resolve_default_source_checkpoint(self):
+        expected_path = "/cache/vesicles_3d.pt"
+        with mock.patch(
+            "synapse_net.training.domain_adaptation.get_model_path", return_value=expected_path,
+        ) as get_model_path:
+            checkpoint_path = _resolve_source_checkpoint("vesicles_3d", None)
+
+        self.assertEqual(checkpoint_path, expected_path)
+        get_model_path.assert_called_once_with("vesicles_3d")
+
+    def test_resolve_custom_source_checkpoint(self):
+        checkpoint_path = os.path.join(self.tmp_folder, "custom-source.pt")
+        torch.save({}, checkpoint_path)
+        with mock.patch("synapse_net.training.domain_adaptation.get_model_path") as get_model_path:
+            resolved_path = _resolve_source_checkpoint("vesicles_3d", checkpoint_path)
+
+        self.assertEqual(resolved_path, checkpoint_path)
+        get_model_path.assert_not_called()
+
+    def test_resolve_missing_source_checkpoint(self):
+        checkpoint_path = os.path.join(self.tmp_folder, "missing-source.pt")
+        with self.assertRaisesRegex(ValueError, "The source checkpoint does not exist"):
+            _resolve_source_checkpoint("vesicles_3d", checkpoint_path)
+
+    def test_domain_adaptation_cli_uses_custom_checkpoint(self):
+        checkpoint_path = os.path.join(self.tmp_folder, "custom-source.pt")
+        torch.save({}, checkpoint_path)
+        args = [
+            "synapse_net.run_domain_adaptation",
+            "--name", "test-da-model",
+            "--input_folder", self.tmp_folder,
+            "--source_model", "vesicles_3d",
+            "--source_checkpoint", checkpoint_path,
+        ]
+        with (
+            mock.patch.object(sys, "argv", args),
+            mock.patch(
+                "synapse_net.training.domain_adaptation._get_paths",
+                return_value=(["train.mrc"], ["val.mrc"]),
+            ),
+            mock.patch(
+                "synapse_net.training.domain_adaptation._derive_key_from_files",
+                return_value=(["train.mrc"], "data"),
+            ),
+            mock.patch("synapse_net.training.domain_adaptation.mean_teacher_adaptation") as adaptation,
+        ):
+            domain_adaptation_main()
+
+        self.assertEqual(adaptation.call_args.kwargs["source_checkpoint"], checkpoint_path)
+
     def test_domain_adaptation(self):
         train_image_folder, _ = self._write_mrc_data(self.train_data, os.path.join(self.tmp_folder, "train"))
+        source_checkpoint = os.path.join(self.tmp_folder, "custom-source.pt")
+        torch.save(get_3d_model(out_channels=2, initial_features=4), source_checkpoint)
         name = "test-da-model"
         cmd = [
             "synapse_net.run_domain_adaptation",
@@ -131,6 +189,7 @@ class TestTrainingCLI(unittest.TestCase):
             "--input_folder", train_image_folder,
             "--file_pattern", "*.mrc",
             "--source_model", "vesicles_3d",
+            "--source_checkpoint", source_checkpoint,
             "--patch_shape", "64", "64", "64",
             "--batch_size", "1",
             "--n_samples_train", "5",
@@ -138,7 +197,7 @@ class TestTrainingCLI(unittest.TestCase):
             "--n_iterations", "6",
             "--save_root", self.tmp_folder,
         ]
-        run(cmd)
+        run(cmd, check=True)
 
         # Check that the checkpoint exists.
         ckpt_path = os.path.join(self.tmp_folder, "checkpoints", name, "latest.pt")

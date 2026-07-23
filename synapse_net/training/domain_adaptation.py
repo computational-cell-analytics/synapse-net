@@ -277,6 +277,14 @@ def _parse_patch_shape(patch_shape, model_name):
     return patch_shape
 
 
+def _resolve_source_checkpoint(source_model, source_checkpoint):
+    if source_checkpoint is None:
+        return get_model_path(source_model)
+    if not os.path.exists(source_checkpoint):
+        raise ValueError(f"The source checkpoint does not exist: {source_checkpoint}")
+    return source_checkpoint
+
+
 def main():
     """@private
     """
@@ -300,9 +308,15 @@ def main():
     parser.add_argument(
         "--source_model",
         default="vesicles_3d",
-        help="The source model used for weight initialization of teacher and student model. "
+        help="The source model sets the default checkpoint and the metadata for patch size and data resizing. "
         "By default the model 'vesicles_3d' for vesicle segmentation in volumetric data is used.\n"
+        "The --source_checkpoint argument overrides the default checkpoint.\n"
         f"The following source models are available: {available_models}"
+    )
+    parser.add_argument(
+        "--source_checkpoint",
+        help="Path to a custom source checkpoint directory or serialized PyTorch model. "
+        "If not given, the command downloads the checkpoint for --source_model."
     )
     parser.add_argument(
         "--resize_training_data", action="store_true",
@@ -324,7 +338,10 @@ def main():
 
     args = parser.parse_args()
 
-    source_checkpoint = get_model_path(args.source_model)
+    try:
+        source_checkpoint = _resolve_source_checkpoint(args.source_model, args.source_checkpoint)
+    except ValueError as error:
+        parser.error(str(error))
     patch_shape = _parse_patch_shape(args.patch_shape, args.source_model)
     with tempfile.TemporaryDirectory() as tmp_dir:
         unsupervised_train_paths, unsupervised_val_paths = _get_paths(
