@@ -227,6 +227,127 @@ labels layer.)
 
 ---
 
+## Volume measurement vs IMOD (voxel count vs contour volume)
+
+`mito_volume_nm3` and `crista_volume_nm3` are **voxel counts**. If you export the *same* masks to
+IMOD and read the volume back there, IMOD reports a **contour‑enclosed volume** that is
+systematically a little **smaller** — negligibly for mitochondria (~1–2 %), but noticeably for thin
+cristae (up to **~10–12 %**), which also shifts `crista_fraction` (e.g. 0.116 by voxel count vs
+0.106 from IMOD). **This is a definitional difference, not an error in either tool**, and it is
+expected. The two definitions are described below so results are comparable across tools.
+
+### What SynapseNet computes — discrete voxel volume
+`_single_mito_row` / `compute_mito_crista_statistics` in `synapse_net/cristae_analysis.py`:
+
+```python
+mito_local   = mito_crop == label          # this mitochondrion instance
+crista_local = crista_crop & mito_local     # cristae voxels inside this mito
+voxel_vol    = np.prod(sampling)            # voxel_z * voxel_y * voxel_x   (nm^3)
+mito_vol     = float(mito_local.sum())   * voxel_vol
+crista_vol   = float(crista_local.sum()) * voxel_vol
+```
+
+Every segmented voxel is counted as **one full rectangular box** (`voxel_x × voxel_y × voxel_z`). No
+surface or contour is involved — this is the exact discrete volume of the segmentation mask. It is the
+more accurate volume estimate for a voxel segmentation, and it does not under‑measure thin structures.
+
+### What IMOD computes — per‑slice contour ("Cylinder") volume
+The SynapseNet exporter `write_segmentation_to_imod` in `synapse_net/imod/to_imod.py` (CLI
+`synapse_net.export_to_imod_objects` → `imod_object_cli`) binarizes the mask and runs
+**`imodauto -E 1 -u`** to trace, on each Z‑slice, a **closed contour** around the thresholded pixels.
+**`imodinfo`** then reports:
+
+> **Cylinder Volume = Σ_slices (contour polygon area) × slice thickness**
+
+The traced contour runs approximately through the **centers of the outer boundary pixels**, so each
+per‑slice contour encloses roughly **half a voxel less** than the pixels it bounds — all the way around
+its perimeter. IMOD's volume is therefore a *surface/contour‑bounded* volume, not a voxel count.
+
+### Why the gap is much larger for cristae than mitochondria
+The fractional loss per slice ≈ **(contour perimeter ÷ 2) / contour area** — it scales with each
+contour's **perimeter‑to‑area ratio** and is essentially **independent of the object's Z‑extent**:
+
+- A **mitochondrion** is a compact blob → low perimeter/area → **~1–2 %** smaller in IMOD.
+- **Cristae** appear in each slice as **thin curved strips** (1–2 voxels wide) → very high
+  perimeter/area → up to **~10–12 %** smaller in IMOD.
+
+Because cristae lose a larger fraction than mitochondria, **`crista_fraction` is not tool‑invariant
+either**. Do **not** change SynapseNet to match IMOD — that would inherit IMOD's thin‑structure
+under‑measurement. For cross‑tool comparison, either compare voxel counts on both sides or expect the
+offset above.
+
+Verified on the test masks (0.8 nm isotropic voxels) and synthetic shapes driven through the real
+`imodauto`→`imodinfo` pipeline:
+
+| object | voxel count | IMOD Cylinder Volume | gap |
+|---|---|---|---|
+| mitochondrion (compact) | 634,555 | 633,402 | **0.18 %** |
+| cristae (this test crop) | 77,492 | 76,662 | **1.07 %** |
+| synthetic 20‑voxel‑wide strip (mito‑like) | 18,000 | 17,838 | **0.9 %** |
+| synthetic 1‑voxel‑thin strip (crista‑like) | 900 | 795 | **11.7 %** |
+
+(The gap on real cristae reaches the ~11 % seen in practice once the cristae are as thin/folded as
+they are in full tomograms; the small test crop above is chunkier.)
+
+### Reproduce it
+
+Analyze the masks in SynapseNet (voxel‑count volume):
+
+```bash
+synapse_net.run_cristae_analysis -c crista.tif -m mito.tif -o results/ --voxel_size 0.8
+# -> results/<stem>_cristae_analysis.csv has mito_volume_nm3 / crista_volume_nm3 (voxel counts)
+```
+
+Export the *same* mask to an IMOD `.mod` and read the contour volume back. Either via the CLI
+(needs a source `.mrc`/`.rec` for the voxel size, matched to the segmentation `.tif` by filename):
+
+```bash
+synapse_net.export_to_imod_objects -i tomo_dir/ -s seg_dir/ -o mod_dir/
+imodinfo -F mod_dir/<name>.mod        # read "Cylinder Volume"
+```
+
+…or directly in Python (this is exactly what was used to produce the table above):
+
+```python
+import re, subprocess, numpy as np, mrcfile, imageio.v3 as iio
+from synapse_net.imod.to_imod import write_segmentation_to_imod
+
+voxel_nm = 0.8
+mask = (iio.imread("mito.tif") > 0).astype("uint8")
+
+# write_segmentation_to_imod reads the voxel size from an .mrc; IMOD stores it in Angstrom (nm * 10)
+with mrcfile.new("ref.mrc", data=np.zeros(mask.shape, "uint8"), overwrite=True) as f:
+    f.voxel_size = voxel_nm * 10        # 8.0 Angstrom
+    f.update_header_from_data()
+
+write_segmentation_to_imod("ref.mrc", mask, "mito.mod", separate_instances=False)
+
+out = subprocess.run(["imodinfo", "-F", "mito.mod"], capture_output=True, text=True).stdout
+cyl = float(re.search(r"Cylinder Volume\s*=\s*([0-9.eE+-]+)", out).group(1))
+count = int(mask.sum())
+print("SynapseNet voxel volume (nm^3):", count * voxel_nm**3)
+print("IMOD contour volume    (nm^3):", cyl * voxel_nm**3)   # Cylinder Volume is in voxel^3 here
+print("gap: %.2f %%" % (100 * (count - cyl) / count))
+```
+
+> **Units note:** with this export IMOD leaves the model pixel size at 1 (`imodinfo` prints
+> `UNITS: pixels`, `PIX SIZE = 1`), so **"Cylinder Volume" is in voxel³** — multiply by `voxel_nm**3`
+> to compare to SynapseNet's nm³. The **percentage gap is unit‑independent**, so comparing gaps needs
+> no conversion. `separate_instances` does not affect the volume of a single, non‑touching object
+> (it only trims the interface between *touching* instances).
+
+**Function / command reference:**
+
+| Role | What | Where |
+|---|---|---|
+| SynapseNet voxel volume | `_single_mito_row`, `compute_mito_crista_statistics` | `synapse_net/cristae_analysis.py` |
+| SynapseNet → IMOD export | `write_segmentation_to_imod` (runs `imodauto -E 1 -u`) | `synapse_net/imod/to_imod.py` |
+| Export CLI | `synapse_net.export_to_imod_objects` → `imod_object_cli` | `synapse_net/tools/cli.py` |
+| IMOD contour tracing | `imodauto` | IMOD suite |
+| IMOD volume readout | `imodinfo -F` → "Cylinder Volume" | IMOD suite |
+
+---
+
 ## Libraries used
 - **NumPy** — arrays and numerics.
 - **SciPy** — `scipy.ndimage` (`binary_erosion`, `distance_transform_edt`, `label`,

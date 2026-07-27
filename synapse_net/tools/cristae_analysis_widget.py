@@ -1,12 +1,9 @@
 import napari
 import numpy as np
 
-from contextlib import contextmanager
-
 from napari.utils import progress
 from napari.utils.notifications import show_info
-from qtpy.QtCore import Qt
-from qtpy.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton
+from qtpy.QtWidgets import QWidget, QVBoxLayout, QPushButton
 
 from .base_widget import BaseWidget
 from ..cristae_analysis import (
@@ -193,33 +190,6 @@ class CristaeAnalysisWidget(BaseWidget):
             crista_mask.astype(bool), membrane_mask, voxel_size
         )
         return membrane_mask, lumen_mask, contact_labels, contact_summary
-
-    @contextmanager
-    def _computing(self, button, busy_text, idle_text, message):
-        """Show a busy state around a synchronous, GUI-thread-blocking action, then restore it.
-
-        Disables and relabels ``button``, sets a wait cursor, shows ``message`` and forces one repaint
-        so the busy state is painted *before* the blocking call — otherwise none of it would render
-        until the call returned and the button would just look stuck. The cursor, button label and
-        enabled state are restored on exit (also on error). Disabling the button also blocks a
-        re-entrant second click while the action is in flight. All Qt calls are guarded so they no-op
-        without a running QApplication.
-        """
-        app = QApplication.instance()
-        button.setEnabled(False)
-        button.setText(busy_text)
-        if app is not None:
-            QApplication.setOverrideCursor(Qt.WaitCursor)
-        show_info(message)
-        if app is not None:
-            app.processEvents()
-        try:
-            yield
-        finally:
-            if app is not None:
-                QApplication.restoreOverrideCursor()
-            button.setEnabled(True)
-            button.setText(idle_text)
 
     def on_preview(self):
         """Compute and show ONLY the membrane + junctions (seconds) — the front-end of the pipeline —
