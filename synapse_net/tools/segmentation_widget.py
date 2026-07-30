@@ -33,6 +33,12 @@ _POSTPROCESSING_PARAMETER_SPECS = {
         "min_size": {"type": "int", "min": 0, "max": _MAX_MIN_SIZE, "step": 1},
         "mode": {"type": "choice", "options": list(VESICLE_SEGMENTATION_MODES)},
         "threshold": {"type": "float", "min": 0.0, "max": 1.0, "step": 0.01, "decimals": 2},
+        "split_ldcvs": {
+            "type": "bool", "title": "split LDCVs", "requires_3d": True,
+            "tooltip": "Split touching dense-core vesicles that were segmented as one instance. "
+                       "The cut follows the 3D neck between them, so it curves around each vesicle "
+                       "instead of slicing straight through z. Requires a 3D volume.",
+        },
     },
     segment_mitochondria: {
         "min_size": {"type": "int", "min": 0, "max": _MAX_MIN_SIZE, "step": 1},
@@ -200,6 +206,8 @@ class SegmentationWidget(BaseWidget):
         function_parameters = inspect.signature(segmentation_function).parameters
 
         for name, spec in parameter_specs.items():
+            if spec.get("requires_3d") and "2d" in model_type:
+                continue
             if name not in function_parameters or function_parameters[name].default is inspect.Parameter.empty:
                 raise ValueError(
                     f"Configured post-processing parameter '{name}' is not an optional parameter "
@@ -207,6 +215,7 @@ class SegmentationWidget(BaseWidget):
                 )
             default = spec.get("default", function_parameters[name].default)
             tooltip = spec.get("tooltip")
+            title = spec.get("title")
             if spec["type"] == "int":
                 parameter_widget, parameter_layout = self._add_int_param(
                     name, default, min_val=spec["min"], max_val=spec["max"], step=spec["step"], tooltip=tooltip
@@ -224,7 +233,7 @@ class SegmentationWidget(BaseWidget):
                 )
                 self.postprocessing_settings_layout.addLayout(parameter_layout)
             elif spec["type"] == "bool":
-                parameter_widget = self._add_boolean_param(name, default, tooltip=tooltip)
+                parameter_widget = self._add_boolean_param(name, default, title=title, tooltip=tooltip)
                 self.postprocessing_settings_layout.addWidget(parameter_widget)
             elif spec["type"] == "choice":
                 parameter_widget, parameter_layout = self._add_choice_param(

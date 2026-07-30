@@ -8,7 +8,9 @@ import numpy as np
 import torch
 
 from synapse_net.inference.util import apply_size_filter, get_prediction, _Scaler
-from synapse_net.inference.postprocessing.vesicles import filter_border_objects, filter_border_vesicles
+from synapse_net.inference.postprocessing.vesicles import (
+    filter_border_objects, filter_border_vesicles, split_touching_vesicles
+)
 from skimage.segmentation import relabel_sequential
 
 
@@ -169,6 +171,7 @@ def segment_vesicles(
     verbose: bool = True,
     mode: str = "distance-watershed",
     threshold: float = 0.5,
+    split_ldcvs: bool = False,
     return_predictions: bool = False,
     scale: Optional[List[float]] = None,
     exclude_boundary: bool = False,
@@ -190,6 +193,8 @@ def segment_vesicles(
         threshold: The threshold for the mode-defining post-processing step. It is applied to the
             boundary predictions for ``distance-watershed``, foreground minus boundary predictions
             for ``simple-watershed``, and foreground predictions for ``label``.
+        split_ldcvs: Whether to split touching dense-core vesicles that were segmented as one
+            instance. The cut follows the 3D neck between them, see `split_touching_vesicles`.
         return_predictions: Whether to return the predictions (foreground, boundaries) alongside the segmentation.
         scale: The scale factor to use for rescaling the input volume before prediction.
         exclude_boundary: Whether to exclude vesicles that touch the upper / lower border in z.
@@ -242,6 +247,13 @@ def segment_vesicles(
         seg = label_vesicle_segmentation(
             foreground, verbose=verbose, min_size=min_size, threshold=threshold, **label_kwargs
         )
+
+    if split_ldcvs:
+        if seg.ndim != 3:
+            raise ValueError("Splitting touching vesicles requires a 3D segmentation.")
+        seg = split_touching_vesicles(seg, verbose=verbose)
+        # The split can leave fragments below min_size, which min_size promises to remove.
+        seg = apply_size_filter(seg, min_size, verbose)
 
     if exclude_boundary and exclude_boundary_vesicles:
         warnings.warn(
