@@ -15,6 +15,7 @@ setup(
         "bioimage-cpp",
         "python-elf>=0.9.0",
         "torch_em>=0.9.0",
+        "networkx",
         "numpy",
         "scipy",
         "scikit-image",

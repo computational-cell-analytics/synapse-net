@@ -21,6 +21,28 @@ _DEFAULT_VOXEL_NM = 0.8681
 _MAX_MITO_VOXELS = 60_000_000
 
 _REAL_DATA_AVAILABLE = bool(glob.glob(os.path.join(_H5_DIR, "*", "*.h5")))
+
+# Single-mitochondrion cutout used by the skeleton-junction regression below. It carries its own
+# voxel_size attribute (8.681 Angstrom -> 0.8681 nm), so no .mrc lookup is needed. Override with
+# SYNAPSE_NET_CRISTAE_CUTOUT.
+_CUTOUT_H5 = os.environ.get(
+    "SYNAPSE_NET_CRISTAE_CUTOUT",
+    os.path.join(_CRISTAE_DATA_ROOT, "cristae_cutout_test", "cutout_mito2.h5"),
+)
+_CUTOUT_REQUIRED = unittest.skipUnless(
+    os.path.exists(_CUTOUT_H5), f"cristae cutout not found at {_CUTOUT_H5}"
+)
+
+# A densely packed mitochondrion, where skeleton mode's proximity premise over-detects. Lives in the
+# same tree as the other real data; mito instance 1, cropped to its bounding box.
+_DENSE_H5 = os.path.join(
+    _H5_DIR, "2_20230817_TOMO_HOI_WT_36859_J1_STEM750",
+    "36859_J1_66K_TS_PS_01_rec_2kb1dawbp_crop.h5",
+)
+_DENSE_BBOX = (slice(0, 401), slice(285, 542), slice(162, 452))
+_DENSE_REQUIRED = unittest.skipUnless(
+    os.path.exists(_DENSE_H5), f"dense-cristae tomogram not found at {_DENSE_H5}"
+)
 _REAL_DATA_REQUIRED = unittest.skipUnless(
     _REAL_DATA_AVAILABLE, f"cristae real-data tree not found under {_H5_DIR}"
 )
@@ -120,6 +142,41 @@ def _mean_anisotropy(mask, voxel_size=1.0, neighborhood_size_nm=4.0):
     return float(np.mean(anisotropy[mask.astype(bool)]))
 
 
+# Fixture for the skeleton-extension junction mode (TestSkeletonJunctions). A box mito at 1.5 nm
+# voxels with an 8 nm shell leaves a lumen spanning z 11..28 and y 13..46, so a lamella's distance
+# to the membrane is set purely by how far its Y ends fall short of y 13 / y 46.
+_SHEET_SHAPE = (40, 60, 60)
+_SHEET_VOXEL_NM = 1.5
+_SHEET_MEMBRANE_NM = 8.0
+
+
+def _make_hollow_mito(shape=_SHEET_SHAPE, margin=(6, 8, 8),
+                      voxel_size=_SHEET_VOXEL_NM, membrane_thickness_nm=_SHEET_MEMBRANE_NM):
+    """A box mitochondrion with the membrane shell and lumen that approximate_membrane derives."""
+    from synapse_net.cristae_analysis import approximate_membrane
+    mito = np.zeros(shape, dtype=np.uint32)
+    mito[margin[0]:shape[0] - margin[0],
+         margin[1]:shape[1] - margin[1],
+         margin[2]:shape[2] - margin[2]] = 1
+    membrane, lumen = approximate_membrane(
+        mito, voxel_size, membrane_thickness_nm=membrane_thickness_nm, return_lumen=True
+    )
+    return mito, membrane, lumen
+
+
+def _make_crista_sheet(lumen, y_range, z_range=(18, 24), x_range=(29, 31), clip_to_lumen=True):
+    """A flat lamella, by default clipped to the lumen so it cannot overlap the membrane band.
+
+    ``z_range`` sits well inside the lumen in Z, so only the sheet's two Y ends can ever be in reach
+    of the membrane and the expected junction count is just the number of Y ends within range.
+    Clipping to the lumen is what makes these cases interesting: the overlap detector scores zero on
+    every one of them, because there is no overlap to find by construction.
+    """
+    crista = np.zeros(lumen.shape, dtype=bool)
+    crista[z_range[0]:z_range[1], y_range[0]:y_range[1], x_range[0]:x_range[1]] = True
+    return (crista & lumen) if clip_to_lumen else crista
+
+
 class TestSurfaceMesh(unittest.TestCase):
     """The marching-cubes helper: unpadded return frame and selective (open-face) padding."""
 
@@ -193,6 +250,50 @@ class TestSurfaceMesh(unittest.TestCase):
         v2, f2 = _open_trimmed_mesh(interior, np.ones(3), gap, np.zeros((3, 2), dtype=bool))
         self.assertFalse(self._has_boundary_edge(f2))                          # closed, watertight
         self.assertAlmostEqual(float(v2[:, 0].min()), 5.5, places=5)           # untrimmed (index frame)
+
+
+
+class TestBorderZone(unittest.TestCase):
+    """_border_zone's per-face gating — the piece that must not blank interior bbox faces."""
+
+    def test_all_faces_by_default(self):
+        from synapse_net.cristae_analysis import _border_zone
+        zone = _border_zone((10, 10, 10), 2)
+        self.assertTrue(zone[0].all() and zone[-1].all())
+        self.assertTrue(zone[:, 0].all() and zone[:, -1].all())
+        self.assertTrue(zone[:, :, 0].all() and zone[:, :, -1].all())
+        self.assertFalse(zone[5, 5, 5])
+
+    def test_no_faces_gives_empty_zone(self):
+        # A bbox crop entirely in the volume interior: nothing may be excluded, or real junctions in
+        # the middle of the volume would be deleted.
+        from synapse_net.cristae_analysis import _border_zone
+        zone = _border_zone((10, 10, 10), 3, boundary=np.zeros((3, 2), dtype=bool))
+        self.assertEqual(int(zone.sum()), 0)
+
+    def test_single_face_marks_only_that_face(self):
+        from synapse_net.cristae_analysis import _border_zone
+        boundary = np.zeros((3, 2), dtype=bool)
+        boundary[0, 0] = True  # low z only
+        zone = _border_zone((10, 8, 8), 2, boundary=boundary)
+        self.assertTrue(zone[:2].all())
+        self.assertEqual(int(zone[2:].sum()), 0)
+
+    def test_matches_open_trimmed_mesh_gating(self):
+        # The zone must be the complement of the region _open_trimmed_mesh keeps, for the same
+        # (radius, boundary) — they encode the same "certain region" and must not drift apart.
+        from synapse_net.cristae_analysis import _border_zone
+        radius = 3
+        for boundary in (np.ones((3, 2), dtype=bool), np.zeros((3, 2), dtype=bool),
+                         np.array([[True, False], [False, True], [True, True]])):
+            with self.subTest(boundary=boundary.tolist()):
+                shape = (14, 15, 16)
+                zone = _border_zone(shape, radius, boundary=boundary)
+                lo = [radius if boundary[a, 0] else 0 for a in range(3)]
+                hi = [shape[a] - (radius if boundary[a, 1] else 0) for a in range(3)]
+                kept = np.zeros(shape, dtype=bool)
+                kept[lo[0]:hi[0], lo[1]:hi[1], lo[2]:hi[2]] = True
+                np.testing.assert_array_equal(zone, ~kept)
 
 
 class TestApproximateMembrane(unittest.TestCase):
@@ -419,6 +520,758 @@ class TestDetectContactSites(unittest.TestCase):
         imm[20, 5, 5] = True  # second junction (overlap)
         labels, _ = detect_contact_sites(crista, imm, voxel_size=1.0)
         self.assertEqual(set(np.unique(labels).tolist()), {0, 1, 2})
+
+
+class TestSkeletonJunctions(unittest.TestCase):
+    """The skeleton junction mode: crista regions reaching close to the membrane near a terminus.
+
+    Every sheet here is clipped to the lumen, so it never overlaps the membrane band and the overlap
+    detector reports zero junctions throughout. That is the point of the mode: the junctions are real
+    but invisible to an intersection test.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.mito, cls.membrane, cls.lumen = _make_hollow_mito()
+        cls.voxel_size = _SHEET_VOXEL_NM
+        cls.max_extension = _SHEET_MEMBRANE_NM
+
+    def _detect(self, crista, **kwargs):
+        from synapse_net.cristae_analysis import detect_junctions_skeleton
+        kwargs.setdefault("max_extension_nm", self.max_extension)
+        return detect_junctions_skeleton(crista, self.membrane, self.voxel_size, **kwargs)
+
+    def _sheet_with_speck(self, length=4):
+        """Two real junctions plus one speck on the membrane, small in both volume and skeleton length.
+
+        ``length`` voxels is 13.5 nm^3 (below the 50 nm^3 volume default) and ~4.5 nm of skeleton
+        (below the 10 nm min_skeleton_nm default), so either filter alone removes it.
+        """
+        crista = _make_crista_sheet(self.lumen, y_range=(16, 44))
+        z, y, x = np.argwhere(self.membrane)[0]
+        crista[z, y, x:x + length] = True
+        return crista
+
+    def test_sheet_touching_membrane_gives_one_junction_per_end(self):
+        # Lumen-spanning sheet: both Y ends sit right against the membrane band. Being clipped to the
+        # lumen it does not overlap the band, so its closest approach is one voxel, not zero — the
+        # reported extension is the region's real distance to the membrane.
+        crista = _make_crista_sheet(self.lumen, y_range=(8, 52))
+        labels, summary = self._detect(crista)
+        self.assertEqual(summary["crista_junction_count"], 2)
+        self.assertLessEqual(summary["mean_junction_extension_nm"], self.voxel_size)
+        self.assertEqual(labels.shape, crista.shape)
+        self.assertEqual(set(np.unique(labels).tolist()), {0, 1, 2})
+
+    def test_overlapping_crista_reports_zero_extension(self):
+        # A crista that genuinely runs through the band has a closest approach of exactly zero, which
+        # is what distinguishes the extension metric from a mere proximity score.
+        crista = _make_crista_sheet(self.lumen, y_range=(8, 52), clip_to_lumen=False)
+        _, summary = self._detect(crista)
+        self.assertEqual(summary["crista_junction_count"], 2)
+        self.assertEqual(summary["mean_junction_extension_nm"], 0.0)
+
+    def test_sub_threshold_gap_detected_where_overlap_finds_nothing(self):
+        # The headline case for this mode. The sheet stops ~4.5 nm short of the membrane on both
+        # sides — a real junction that the overlap detector cannot see at all.
+        from synapse_net.cristae_analysis import detect_contact_sites
+        crista = _make_crista_sheet(self.lumen, y_range=(16, 44))
+        _, overlap_summary = detect_contact_sites(crista, self.membrane, self.voxel_size)
+        self.assertEqual(overlap_summary["crista_junction_count"], 0)
+        self.assertEqual(overlap_summary["contact_voxel_count"], 0)
+
+        _, summary = self._detect(crista)
+        self.assertEqual(summary["crista_junction_count"], 2)
+        extension = summary["mean_junction_extension_nm"]
+        self.assertGreater(extension, 0.0)
+        self.assertLessEqual(extension, self.max_extension)
+
+    def test_super_threshold_gap_rejected(self):
+        # Well beyond one membrane thickness the ends must not be credited as junctions.
+        for y_range in [(21, 39), (27, 33)]:
+            with self.subTest(y_range=y_range):
+                crista = _make_crista_sheet(self.lumen, y_range=y_range)
+                labels, summary = self._detect(crista)
+                self.assertEqual(summary["crista_junction_count"], 0)
+                self.assertEqual(labels.max(), 0)
+                self.assertTrue(np.isnan(summary["mean_junction_extension_nm"]))
+
+    def test_asymmetric_sheet_gives_one_junction(self):
+        # Reaches the membrane at low Y only; the high-Y end is far out of range.
+        crista = _make_crista_sheet(self.lumen, y_range=(8, 39))
+        _, summary = self._detect(crista)
+        self.assertEqual(summary["crista_junction_count"], 1)
+
+    def test_labels_confined_to_membrane_and_mitochondrion(self):
+        # An earlier implementation painted a ball(merge_radius) around each hit as the junction's
+        # extent, which put 39% of the labelled voxels outside the mitochondrion — up to merge_radius
+        # past it. A junction is now the contact region itself: on the membrane band where the crista
+        # overlaps it, on the crista where it falls short. Either way it stays inside the mito.
+        mito_binary = self.mito > 0
+        cases = [
+            # Runs through the band to the mito surface — the geometry that produced the spill.
+            ("through the band", _make_crista_sheet(self.lumen, (8, 52), clip_to_lumen=False), 2),
+            ("touching the band", _make_crista_sheet(self.lumen, (8, 52)), 2),
+            ("gap under threshold", _make_crista_sheet(self.lumen, (16, 44)), 2),
+            ("one end in reach", _make_crista_sheet(self.lumen, (8, 39)), 1),
+        ]
+        for case, crista, expected_count in cases:
+            with self.subTest(case=case):
+                labels, summary = self._detect(crista)
+                self.assertEqual(summary["crista_junction_count"], expected_count)
+                junction = labels > 0
+                self.assertTrue(junction.any())
+                self.assertEqual(int(np.count_nonzero(junction & ~(self.membrane | crista))), 0)
+                self.assertEqual(int(np.count_nonzero(junction & ~mito_binary)), 0)
+
+    def test_neighbouring_cristae_do_not_fuse(self):
+        # A junction is a connected component of the near-membrane crista mask, so it is a subset of
+        # one crista and two disconnected cristae can never be fused — no parameter governs this. An
+        # earlier radius-based merge did fuse them: 11 lamellae 15 nm apart reported 7 junctions,
+        # fewer than there were cristae. Two sheets a few nm apart must stay two junctions.
+        from scipy.ndimage import label as ndimage_label
+        for x_gap in (3, 5, 8):
+            with self.subTest(x_gap_voxels=x_gap):
+                crista = np.zeros(_SHEET_SHAPE, dtype=bool)
+                crista[18:24, 8:26, 29:31] = True
+                crista[18:24, 8:26, 29 + x_gap:31 + x_gap] = True
+                crista &= self.lumen
+                n_components = ndimage_label(crista, structure=np.ones((3, 3, 3), dtype=bool))[1]
+                self.assertEqual(n_components, 2)  # guard the fixture: two distinct cristae
+                _, summary = self._detect(crista)
+                self.assertEqual(summary["crista_junction_count"], 2)
+
+    def test_min_extension_excludes_touching_ends(self):
+        # min_extension_nm isolates junctions that genuinely span a gap: a sheet already against the
+        # membrane is dropped, while one stopping short of it survives.
+        touching = _make_crista_sheet(self.lumen, y_range=(8, 52))
+        _, summary = self._detect(touching, min_extension_nm=3.0)
+        self.assertEqual(summary["crista_junction_count"], 0)
+
+        with_gap = _make_crista_sheet(self.lumen, y_range=(16, 44))
+        _, summary = self._detect(with_gap, min_extension_nm=3.0)
+        self.assertEqual(summary["crista_junction_count"], 2)
+
+    def test_contact_voxel_columns_stay_overlap_based(self):
+        # crista_junction_count is the only mode-specific number: contact_voxel_count and
+        # contact_volume_nm3 must keep describing the true overlap so they mean the same thing in
+        # both modes and stay comparable across runs.
+        from synapse_net.cristae_analysis import detect_contact_sites
+        crista = _make_crista_sheet(self.lumen, y_range=(8, 52), clip_to_lumen=False)
+        _, overlap_summary = detect_contact_sites(crista, self.membrane, self.voxel_size)
+        _, summary = self._detect(crista)
+        self.assertGreater(overlap_summary["contact_voxel_count"], 0)
+        self.assertEqual(summary["contact_voxel_count"], overlap_summary["contact_voxel_count"])
+        self.assertAlmostEqual(summary["contact_volume_nm3"], overlap_summary["contact_volume_nm3"])
+
+    def test_empty_inputs_give_no_junctions(self):
+        empty = np.zeros(_SHEET_SHAPE, dtype=bool)
+        for crista, membrane, case in [
+            (empty, self.membrane, "empty crista"),
+            (_make_crista_sheet(self.lumen, y_range=(8, 52)), empty, "empty membrane"),
+        ]:
+            with self.subTest(case=case):
+                from synapse_net.cristae_analysis import detect_junctions_skeleton
+                labels, summary = detect_junctions_skeleton(
+                    crista, membrane, self.voxel_size, max_extension_nm=self.max_extension
+                )
+                self.assertEqual(summary["crista_junction_count"], 0)
+                self.assertEqual(summary["contact_voxel_count"], 0)
+                self.assertEqual(labels.max(), 0)
+                self.assertTrue(np.isnan(summary["mean_junction_extension_nm"]))
+
+    def test_terminus_filter_rejects_a_crista_running_alongside_the_membrane(self):
+        # The terminus filter is the one place the skeleton still matters: a crista that ENDS at the
+        # membrane is a junction, one that merely runs ALONGSIDE it is not. A sheet laid parallel to
+        # the membrane band has its long flank in range but its skeleton ends far away, so a tight
+        # terminus distance must reject it while a permissive one accepts it.
+        crista = np.zeros(_SHEET_SHAPE, dtype=bool)
+        crista[18:24, 15:45, 15:17] = True          # parallel to the low-x wall, along its length
+        crista &= self.lumen
+        self.assertTrue(crista.any())
+        _, permissive = self._detect(crista, terminus_nm=float("inf"))
+        _, strict = self._detect(crista, terminus_nm=1.0)
+        self.assertGreater(permissive["crista_junction_count"], 0)
+        self.assertLessEqual(strict["crista_junction_count"], permissive["crista_junction_count"])
+
+    def test_junction_footprint_is_a_small_patch_at_the_closest_approach(self):
+        # The complaint this fixes: the label used to be the whole candidate region, a slab of crista
+        # anywhere within max_extension of the membrane, so it was fat and its centre of mass sat in the
+        # middle of the crista rather than at the contact. The label must now be a small patch, and it
+        # must contain the region's closest-approach voxel.
+        from bioimage_cpp.distance import distance_transform
+        from synapse_net.cristae_analysis import _to_sampling
+        sampling = _to_sampling(self.voxel_size, 3)
+        reference = distance_transform(~self.membrane, sampling=sampling.tolist(), number_of_threads=1)
+
+        # A sheet meeting the membrane end-on and running well away from it: the candidate region spans
+        # the full max_extension reach while the contact itself is at one end of that span. A crista
+        # lying exactly parallel is deliberately not used here — being equidistant along its whole
+        # flank, its closest approach genuinely *is* the whole flank, so nothing should shrink.
+        crista = np.zeros(_SHEET_SHAPE, dtype=bool)
+        crista[18:24, 13:40, 29:31] = True
+        crista &= self.lumen
+        labels, summary = self._detect(crista, terminus_nm=float("inf"))
+        self.assertGreater(summary["crista_junction_count"], 0)
+
+        near = crista & (reference <= self.max_extension)
+        self.assertLess(int(np.count_nonzero(labels)), int(np.count_nonzero(near)))
+        # The region reaches much further from the membrane than the label does.
+        self.assertGreater(float(reference[near].max()), self.max_extension / 2)
+
+        tolerance = float(np.linalg.norm(sampling))
+        for junction in range(1, summary["crista_junction_count"] + 1):
+            mask = labels == junction
+            self.assertTrue(mask.any())
+            # Every labelled voxel sits at the closest approach, not spread along the crista.
+            self.assertLessEqual(float(reference[mask].max()) - float(reference[mask].min()),
+                                 tolerance + 1e-6)
+            self.assertAlmostEqual(float(reference[mask].min()), float(reference[near].min()), delta=2.0)
+
+    def test_lumen_reference_localises_inside_the_membrane_band(self):
+        # Why the lumen is passed at all. The membrane band's own distance transform is 0 on every voxel
+        # of the band, so it cannot say where within the band a crista sits and the closest approach
+        # collapses to 0. Measuring from the inner boundary membrane surface restores that information.
+        from bioimage_cpp.distance import distance_transform
+        from synapse_net.cristae_analysis import _inner_surface_distance, _to_sampling
+        sampling = _to_sampling(self.voxel_size, 3)
+        band = distance_transform(~self.membrane, sampling=sampling.tolist(), number_of_threads=1)
+        inner = _inner_surface_distance(self.lumen, sampling)
+
+        in_band = self.membrane
+        self.assertEqual(float(band[in_band].max()), 0.0)
+        self.assertGreater(float(inner[in_band].max()), self.voxel_size)
+
+    def test_infinite_terminus_disables_the_filter(self):
+        # inf must be a pure no-op relative to the generous default on ordinary geometry, so the
+        # filter cannot silently be dropping real junctions.
+        crista = _make_crista_sheet(self.lumen, y_range=(16, 44))
+        _, default = self._detect(crista)
+        _, disabled = self._detect(crista, terminus_nm=float("inf"))
+        self.assertEqual(default["crista_junction_count"], disabled["crista_junction_count"])
+
+    def test_min_junction_volume_drops_specks(self):
+        # Real data produces 1-, 3- and 12-voxel "junctions", which are not junctions on any reading.
+        # A speck placed right on the membrane must be dropped while the real junctions survive.
+        # min_skeleton_nm is disabled here so the assertion is about the volume knob alone. The speck is
+        # a short line rather than a single voxel because an isolated voxel has skeleton degree 0 and is
+        # therefore not a terminus at all — it would be rejected before the volume filter is reached.
+        crista = self._sheet_with_speck()
+        _, permissive = self._detect(crista, min_junction_volume_nm3=0.0, min_skeleton_nm=0.0)
+        _, default = self._detect(crista, min_skeleton_nm=0.0)
+        self.assertEqual(permissive["crista_junction_count"], 3)  # 2 real + the speck
+        self.assertEqual(default["crista_junction_count"], 2)     # speck filtered out
+
+    def test_speck_is_also_dropped_by_the_skeleton_length_filter(self):
+        # The second, independent route by which a speck is rejected: its skeleton is shorter than
+        # min_skeleton_nm, so the component is dropped, it contributes no terminus, and the region can
+        # never pass the terminus gate — with the volume filter switched off entirely.
+        crista = self._sheet_with_speck()
+        _, kept = self._detect(crista, min_junction_volume_nm3=0.0, min_skeleton_nm=0.0)
+        _, dropped = self._detect(crista, min_junction_volume_nm3=0.0)
+        self.assertEqual(kept["crista_junction_count"], 3)
+        self.assertEqual(dropped["crista_junction_count"], 2)
+
+    def test_min_junction_volume_is_measured_on_the_region_not_the_footprint(self):
+        # The painted label is only the closest-approach footprint, a small fraction of the candidate
+        # region. If the threshold were ever moved onto the footprint it would silently become far
+        # stricter; this pins it to the region. A threshold between the two sizes must keep the junction.
+        crista = _make_crista_sheet(self.lumen, y_range=(8, 52))
+        labels, summary = self._detect(crista)
+        self.assertEqual(summary["crista_junction_count"], 2)
+        footprint_voxels = int(np.count_nonzero(labels == 1))
+        voxel_vol = self.voxel_size ** 3
+        threshold = (footprint_voxels + 1) * voxel_vol  # above the footprint, below the region
+        _, still_there = self._detect(crista, min_junction_volume_nm3=threshold)
+        self.assertEqual(still_there["crista_junction_count"], 2)
+
+    def test_min_junction_volume_can_remove_everything(self):
+        # Monotonic in the threshold, and a large enough value leaves nothing — the knob is doing
+        # what it claims rather than silently capping.
+        crista = _make_crista_sheet(self.lumen, y_range=(16, 44))
+        _, summary = self._detect(crista, min_junction_volume_nm3=1e9)
+        self.assertEqual(summary["crista_junction_count"], 0)
+        self.assertTrue(np.isnan(summary["mean_junction_extension_nm"]))
+
+    def test_junction_in_the_border_zone_is_suppressed(self):
+        # The regression for the reported bug. approximate_membrane deletes the membrane within
+        # border_gap of a clipped volume face because its presence is unknown there. Overlap mode
+        # therefore cannot report a junction in that zone; skeleton mode must not either. Without the
+        # exclusion the distance transform measures straight across the deleted region to the nearest
+        # surviving membrane voxel and flags a junction against a membrane it was told nothing about.
+        from synapse_net.cristae_analysis import _border_zone, _gap_radius
+        border_radius = _gap_radius(self.voxel_size, _SHEET_MEMBRANE_NM, None, 3)
+        zone = _border_zone(_SHEET_SHAPE, border_radius)
+        # A crista sitting inside the border zone, hugging the low-x volume face.
+        crista = np.zeros(_SHEET_SHAPE, dtype=bool)
+        crista[18:24, 20:40, 0:border_radius] = True
+        self.assertEqual(int(np.count_nonzero(crista & ~zone)), 0)  # guard: wholly inside the zone
+        self.assertGreater(int(crista.sum()), 0)
+
+        _, unguarded = self._detect(crista, border_radius=0)
+        _, guarded = self._detect(crista, border_radius=border_radius)
+        self.assertGreater(unguarded["crista_junction_count"], 0)   # the bug
+        self.assertEqual(guarded["crista_junction_count"], 0)       # the fix
+
+    def test_border_exclusion_keeps_junctions_away_from_the_faces(self):
+        # The exclusion must be surgical: ordinary junctions well inside the volume are untouched.
+        from synapse_net.cristae_analysis import _gap_radius
+        border_radius = _gap_radius(self.voxel_size, _SHEET_MEMBRANE_NM, None, 3)
+        for name, y_range, expected in [("touching", (8, 52), 2), ("sub-threshold gap", (16, 44), 2)]:
+            with self.subTest(case=name):
+                crista = _make_crista_sheet(self.lumen, y_range=y_range)
+                _, summary = self._detect(crista, border_radius=border_radius)
+                self.assertEqual(summary["crista_junction_count"], expected)
+
+    def test_no_junction_voxel_lands_in_the_border_zone(self):
+        # The alignment invariant, stated positively: overlap mode has this property by construction
+        # (crista & membrane is empty where membrane is), and skeleton mode must match it.
+        from synapse_net.cristae_analysis import _border_zone, _gap_radius
+        border_radius = _gap_radius(self.voxel_size, _SHEET_MEMBRANE_NM, None, 3)
+        zone = _border_zone(_SHEET_SHAPE, border_radius)
+        crista = np.zeros(_SHEET_SHAPE, dtype=bool)
+        crista[18:24, 8:52, 29:31] = True            # spans the mito, unclipped to the lumen
+        crista[18:24, 20:40, 0:border_radius] = True  # plus a chunk inside the border zone
+        labels, _ = self._detect(crista, border_radius=border_radius)
+        self.assertEqual(int(np.count_nonzero((labels > 0) & zone)), 0)
+
+    def test_interior_crop_faces_are_not_excluded(self):
+        # The trap: in the per-mito path the arrays are bbox crops, so gating on `boundary` is what
+        # stops the exclusion from eating junctions at interior bbox faces. With every face marked
+        # interior, the exclusion must be a no-op even at a large radius.
+        crista = _make_crista_sheet(self.lumen, y_range=(8, 52))
+        _, unguarded = self._detect(crista, border_radius=0)
+        _, interior = self._detect(
+            crista, border_radius=12, boundary=np.zeros((3, 2), dtype=bool)
+        )
+        self.assertEqual(
+            interior["crista_junction_count"], unguarded["crista_junction_count"]
+        )
+
+    def test_two_dimensional_input_raises(self):
+        # TEASAR has no 2D implementation, and cristae_analysis otherwise accepts 2D — so this has
+        # to fail loudly rather than silently mis-handle a 2D volume.
+        from synapse_net.cristae_analysis import detect_junctions_skeleton
+        flat = np.zeros((20, 20), dtype=bool)
+        with self.assertRaises(ValueError):
+            detect_junctions_skeleton(flat, flat, voxel_size=1.0)
+
+    def test_non_positive_voxel_size_raises(self):
+        # Every physical threshold is scaled by the voxel size, so a zero silently makes the
+        # near-membrane test meaningless. Fail loudly instead.
+        from synapse_net.cristae_analysis import detect_junctions_skeleton
+        crista = _make_crista_sheet(self.lumen, y_range=(8, 52))
+        with self.assertRaises(ValueError):
+            detect_junctions_skeleton(crista, self.membrane, voxel_size=0.0)
+
+    def test_inverted_extension_range_raises(self):
+        from synapse_net.cristae_analysis import detect_junctions_skeleton
+        crista = _make_crista_sheet(self.lumen, y_range=(8, 52))
+        with self.assertRaises(ValueError):
+            detect_junctions_skeleton(
+                crista, self.membrane, self.voxel_size,
+                min_extension_nm=10.0, max_extension_nm=2.0,
+            )
+
+
+
+
+class TestCristaSkeleton(unittest.TestCase):
+    """compute_crista_skeleton — the centerline exposed for the widget's Show Crista Skeleton layers."""
+
+    def test_tube_has_two_termini(self):
+        from synapse_net.cristae_analysis import compute_crista_skeleton
+        tube = np.zeros((40, 40, 40), dtype=bool)
+        tube[18:22, 18:22, 5:35] = True
+        vertices, is_terminus = compute_crista_skeleton(tube, voxel_size=1.0)
+        self.assertGreater(len(vertices), 0)
+        self.assertEqual(len(vertices), len(is_terminus))
+        self.assertEqual(int(is_terminus.sum()), 2)
+
+    def test_sheet_termini_populate_the_rim(self):
+        # A lamella is a sheet, not a tube: TEASAR spans it with a forest whose ends line the rim.
+        # This is why the terminus filter is not simply "the two ends of a line".
+        from synapse_net.cristae_analysis import compute_crista_skeleton
+        sheet = np.zeros((40, 40, 40), dtype=bool)
+        sheet[5:35, 8:32, 19:21] = True
+        _, is_terminus = compute_crista_skeleton(sheet, voxel_size=1.0)
+        self.assertGreater(int(is_terminus.sum()), 2)
+
+    def test_terminus_merging_thins_the_rim_fan(self):
+        # The cleanup that makes the termini usable. Raw TEASAR puts a fan of free ends along a sheet's
+        # rim; merging collapses each fan to one representative, which is what takes a real tomogram
+        # from ~10000 termini to a few hundred.
+        from synapse_net.cristae_analysis import compute_crista_skeleton
+        sheet = np.zeros((40, 40, 40), dtype=bool)
+        sheet[5:35, 8:32, 19:21] = True
+        _, raw = compute_crista_skeleton(sheet, voxel_size=1.0, terminus_merge_nm=0.0)
+        _, merged = compute_crista_skeleton(sheet, voxel_size=1.0)
+        self.assertLess(int(merged.sum()), int(raw.sum()))
+
+    def test_termini_do_not_merge_across_separate_cristae(self):
+        # The hazard that makes per-component clustering mandatory: densely packed cristae sit a few nm
+        # apart, so plain single-linkage clustering chains their termini together and collapses the
+        # whole field. Two parallel lamellae must each keep their own termini.
+        #
+        # The radius is set explicitly to 8 nm rather than left at the 4 nm default because that is
+        # where the hazard bites for this 6 nm spacing: at 8 nm, clustering restricted to one component
+        # keeps one terminus per lamella, while unrestricted clustering fuses them and leaves one
+        # lamella with none at all.
+        from synapse_net.cristae_analysis import compute_crista_skeleton
+        pair = np.zeros((40, 40, 60), dtype=bool)
+        pair[10:30, 18:20, 5:55] = True
+        pair[10:30, 24:26, 5:55] = True
+        vertices, is_terminus = compute_crista_skeleton(pair, voxel_size=1.0, terminus_merge_nm=8.0)
+        y = vertices[is_terminus][:, 1]
+        self.assertTrue((y < 22).any(), "the first lamella lost all of its termini")
+        self.assertTrue((y > 22).any(), "the second lamella lost all of its termini")
+
+    def test_speck_components_are_dropped(self):
+        # Every segmentation speck contributes its own miniature skeleton and hence its own termini.
+        # Filtering whole components by length removes them at the root.
+        from synapse_net.cristae_analysis import compute_crista_skeleton
+        rng = np.random.default_rng(0)
+        specks = np.zeros((40, 60, 60), dtype=bool)
+        for _ in range(60):
+            z, y, x = rng.integers(2, 38), rng.integers(2, 58), rng.integers(2, 58)
+            specks[z:z + 2, y:y + 2, x:x + 2] = True
+        vertices, is_terminus = compute_crista_skeleton(specks, voxel_size=1.5)
+        self.assertEqual(len(vertices), 0)
+        self.assertEqual(int(is_terminus.sum()), 0)
+        kept, _ = compute_crista_skeleton(specks, voxel_size=1.5, min_skeleton_nm=0.0)
+        self.assertGreater(len(kept), 0)
+
+    def test_isolated_vertex_is_not_a_terminus(self):
+        # degree == 1, not <= 1. A lone vertex is not the free end of anything, and counting it was part
+        # of why the raw terminus set was unusable.
+        from synapse_net.cristae_analysis import compute_crista_skeleton
+        blob = np.zeros((16, 16, 16), dtype=bool)
+        blob[8, 8, 8] = True
+        vertices, is_terminus = compute_crista_skeleton(blob, voxel_size=1.0, min_skeleton_nm=0.0)
+        if len(vertices):
+            self.assertEqual(int(is_terminus.sum()), 0)
+
+    def test_edges_index_the_returned_vertices(self):
+        # The reindex after dropping components is the easiest thing here to get wrong: stale indices
+        # would silently draw the skeleton as garbage in the widget.
+        from synapse_net.cristae_analysis import compute_crista_skeleton
+        sheet = np.zeros((40, 40, 40), dtype=bool)
+        sheet[5:35, 8:32, 19:21] = True
+        vertices, is_terminus, edges = compute_crista_skeleton(sheet, voxel_size=1.0, return_edges=True)
+        self.assertEqual(edges.shape[1], 2)
+        self.assertGreater(len(edges), 0)
+        self.assertGreaterEqual(int(edges.min()), 0)
+        self.assertLess(int(edges.max()), len(vertices))
+        self.assertEqual(len(vertices), len(is_terminus))
+
+    def test_vertices_are_nm_and_land_inside_the_crista(self):
+        # The widget divides by the voxel size to get array indices; if the returned frame were voxels
+        # rather than nm that conversion would scatter the skeleton outside the mask.
+        from synapse_net.cristae_analysis import compute_crista_skeleton
+        voxel_size = 2.5
+        tube = np.zeros((40, 40, 40), dtype=bool)
+        tube[18:22, 18:22, 5:35] = True
+        vertices, _ = compute_crista_skeleton(tube, voxel_size=voxel_size)
+        indices = np.round(vertices / voxel_size).astype(int)
+        self.assertTrue((indices >= 0).all() and (indices < np.array(tube.shape)).all())
+        self.assertTrue(tube[tuple(indices.T)].all())
+
+    def test_empty_and_2d(self):
+        from synapse_net.cristae_analysis import compute_crista_skeleton
+        vertices, is_terminus = compute_crista_skeleton(np.zeros((8, 8, 8), dtype=bool), voxel_size=1.0)
+        self.assertEqual(vertices.shape, (0, 3))
+        self.assertEqual(is_terminus.shape, (0,))
+        _, _, edges = compute_crista_skeleton(
+            np.zeros((8, 8, 8), dtype=bool), voxel_size=1.0, return_edges=True
+        )
+        self.assertEqual(edges.shape, (0, 2))
+        with self.assertRaises(ValueError):
+            compute_crista_skeleton(np.zeros((8, 8), dtype=bool), voxel_size=1.0)
+
+
+@_DENSE_REQUIRED
+class TestSkeletonJunctionsDenseCristae(unittest.TestCase):
+    """The known over-detection, pinned as tested behaviour rather than left as a surprise.
+
+    On a mitochondrion with densely packed cristae, "crista within max_extension of the membrane" is a
+    common condition that mostly does not mean a junction is there. Skeleton mode therefore reports
+    far more junctions than have any literal membrane contact. That is a property of the premise, not
+    a defect these tests should hide: they assert the invariant that must hold (skeleton is a superset
+    of overlap) and a loose ceiling that would catch a runaway regression, without pinning the exact
+    count.
+    """
+
+    MEMBRANE_NM = 8.0
+    VOXEL_NM = 0.8681
+
+    @classmethod
+    def setUpClass(cls):
+        import h5py
+        from synapse_net.cristae_analysis import approximate_membrane
+        with h5py.File(_DENSE_H5, "r") as f:
+            mito = (f["labels/mitochondria"][_DENSE_BBOX] == 1).astype(np.uint8)
+            crista = f["labels/cristae"][_DENSE_BBOX].astype(bool)
+        cls.mito = mito
+        cls.crista = crista & (mito > 0)
+        cls.membrane, _ = approximate_membrane(
+            mito, cls.VOXEL_NM, membrane_thickness_nm=cls.MEMBRANE_NM, n_jobs=-1, return_lumen=True
+        )
+
+    def _skeleton(self, **kwargs):
+        from synapse_net.cristae_analysis import detect_junctions_skeleton
+        kwargs.setdefault("max_extension_nm", self.MEMBRANE_NM)
+        return detect_junctions_skeleton(self.crista, self.membrane, self.VOXEL_NM, **kwargs)[1]
+
+    def test_skeleton_is_a_superset_of_overlap(self):
+        # The invariant. A region overlapping the membrane has a closest approach of 0, so it is
+        # always within max_extension: skeleton mode can never report fewer junctions than overlap.
+        from synapse_net.cristae_analysis import detect_contact_sites
+        _, overlap = detect_contact_sites(self.crista, self.membrane, self.VOXEL_NM)
+        skeleton = self._skeleton()
+        self.assertGreater(overlap["crista_junction_count"], 0)
+        self.assertGreaterEqual(
+            skeleton["crista_junction_count"], overlap["crista_junction_count"]
+        )
+
+    def test_over_detection_is_real_but_bounded(self):
+        # Documents the limitation: on this mito the count is several times the number of literal
+        # contacts. The ceiling is deliberately loose — it catches a runaway regression, not a
+        # legitimate change in the count.
+        from synapse_net.cristae_analysis import detect_contact_sites
+        _, overlap = detect_contact_sites(self.crista, self.membrane, self.VOXEL_NM)
+        count = self._skeleton()["crista_junction_count"]
+        self.assertGreater(count, overlap["crista_junction_count"])
+        self.assertLess(count, 60)
+
+    def test_no_junction_lands_in_the_border_zone(self):
+        # The alignment invariant on real data. approximate_membrane has 0 voxels in the border zone,
+        # so overlap mode structurally cannot report a junction there; skeleton mode must match.
+        from synapse_net.cristae_analysis import _border_zone, _gap_radius, detect_junctions_skeleton
+        border_radius = _gap_radius(self.VOXEL_NM, self.MEMBRANE_NM, None, 3)
+        zone = _border_zone(self.crista.shape, border_radius)
+        self.assertEqual(int(np.count_nonzero(self.membrane & zone)), 0)  # premise
+        labels, _ = detect_junctions_skeleton(
+            self.crista, self.membrane, self.VOXEL_NM,
+            max_extension_nm=self.MEMBRANE_NM, border_radius=border_radius,
+        )
+        self.assertEqual(int(np.count_nonzero((labels > 0) & zone)), 0)
+
+    def test_min_junction_volume_is_monotonic(self):
+        counts = [
+            self._skeleton(min_junction_volume_nm3=v)["crista_junction_count"]
+            for v in (0.0, 50.0, 200.0, 500.0)
+        ]
+        self.assertEqual(counts, sorted(counts, reverse=True))
+        self.assertGreater(counts[0], counts[-1])
+
+
+class TestBorderZoneAlignmentEndToEnd(unittest.TestCase):
+    """The border exclusion through the full per-mito path, where the arrays are bbox CROPS.
+
+    This is the plumbing that matters: ``_single_mito_row`` must pass both ``border_radius`` and
+    ``boundary`` down. Passing neither reproduces the reported bug; passing ``border_radius`` without
+    ``boundary`` would over-correct and delete junctions at interior bbox faces instead.
+
+    The fixture is a mitochondrion spanning Z completely, so its Z faces are genuine volume faces
+    (``boundary = [[True, True], [False, False], [False, False]]``) while Y and X are interior. That
+    gives one fixture that exercises both directions at once.
+    """
+
+    VOXEL_NM = 1.5
+    MEMBRANE_NM = 8.0
+    SHAPE = (40, 60, 60)
+
+    @classmethod
+    def setUpClass(cls):
+        from synapse_net.cristae_analysis import _gap_radius, approximate_membrane
+        cls.gap = _gap_radius(cls.VOXEL_NM, cls.MEMBRANE_NM, None, 3)
+        mito = np.zeros(cls.SHAPE, dtype=np.uint32)
+        mito[:, 8:52, 8:52] = 1          # spans Z -> both Z faces are volume faces
+        cls.mito = mito
+        cls.membrane, cls.lumen = approximate_membrane(
+            mito, cls.VOXEL_NM, membrane_thickness_nm=cls.MEMBRANE_NM, return_lumen=True
+        )
+
+    def _crista_hugging_low_y_shell(self, z_start):
+        """A slab against the low-Y membrane shell, starting at ``z_start``."""
+        crista = np.zeros(self.SHAPE, dtype=bool)
+        crista[z_start:z_start + self.gap, 8:16, 20:40] = True
+        return crista & (self.mito > 0)
+
+    def _stats_count(self, crista):
+        from synapse_net.cristae_analysis import compute_mito_crista_statistics
+        table = compute_mito_crista_statistics(
+            crista, self.mito, self.VOXEL_NM,
+            membrane_mask=self.membrane, lumen_mask=self.lumen,
+            membrane_thickness_nm=self.MEMBRANE_NM, junction_mode="skeleton",
+        )
+        return int(table["crista_junction_count"][0])
+
+    def test_membrane_is_absent_from_the_border_zone(self):
+        # The premise of the whole fix, pinned: approximate_membrane leaves nothing in the zone.
+        from synapse_net.cristae_analysis import _border_zone
+        zone = _border_zone(self.SHAPE, self.gap)
+        self.assertEqual(int(np.count_nonzero(self.membrane & zone)), 0)
+        self.assertGreater(int(self.membrane.sum()), 0)
+
+    def test_junction_in_the_z_border_zone_is_not_counted(self):
+        # The reported bug, end to end. The crista lies wholly inside the low-Z border zone, where the
+        # membrane was removed as unknown. Overlap mode reports nothing there; skeleton mode must agree.
+        from synapse_net.cristae_analysis import _border_zone, detect_contact_sites, detect_junctions_skeleton
+        crista = self._crista_hugging_low_y_shell(z_start=0)
+        zone = _border_zone(self.SHAPE, self.gap)
+        self.assertEqual(int(np.count_nonzero(crista & ~zone)), 0)  # guard: wholly inside the zone
+
+        _, overlap = detect_contact_sites(crista, self.membrane, self.VOXEL_NM)
+        self.assertEqual(overlap["crista_junction_count"], 0)       # the alignment target
+
+        _, unguarded = detect_junctions_skeleton(
+            crista, self.membrane, self.VOXEL_NM,
+            max_extension_nm=self.MEMBRANE_NM, border_radius=0,
+        )
+        self.assertEqual(unguarded["crista_junction_count"], 1)     # the bug, without the exclusion
+        self.assertEqual(self._stats_count(crista), 0)              # fixed, through the stats path
+
+    def test_junction_away_from_the_z_faces_is_still_counted(self):
+        # The other half: Y and X bbox faces are interior, so the exclusion must not touch them. The
+        # same crista shape at mid-Z must survive — if `boundary` were dropped this would go to 0.
+        from synapse_net.cristae_analysis import _border_zone
+        crista = self._crista_hugging_low_y_shell(z_start=18)
+        zone = _border_zone(self.SHAPE, self.gap)
+        self.assertEqual(int(np.count_nonzero(crista & zone)), 0)   # guard: clear of the zone
+        self.assertEqual(self._stats_count(crista), 1)
+
+@_CUTOUT_REQUIRED
+class TestSkeletonJunctionsRealData(unittest.TestCase):
+    """Regression on a real mitochondrion — the case every synthetic fixture missed.
+
+    An earlier tangent-extension implementation reported 2 junctions here while the mitochondrion has
+    3, silently dropping a 36-voxel crista-membrane contact. Every synthetic test passed at the time,
+    which is why this one reads the real cutout: the failure mode only appears on real sheet-like
+    cristae, where a skeleton end's tangent points 142-146 degrees away from the nearby contact.
+    """
+
+    MEMBRANE_NM = 8.0
+
+    @classmethod
+    def setUpClass(cls):
+        import h5py
+        from synapse_net.cristae_analysis import approximate_membrane
+        with h5py.File(_CUTOUT_H5, "r") as f:
+            cls.mito = f["labels/mitochondria"][:]
+            cls.crista = f["labels/cristae"][:].astype(bool) & (f["labels/mitochondria"][:] > 0)
+        cls.voxel_size = 0.8681
+        cls.membrane, cls.lumen = approximate_membrane(
+            cls.mito, cls.voxel_size, membrane_thickness_nm=cls.MEMBRANE_NM,
+            n_jobs=-1, return_lumen=True,
+        )
+
+    def test_ground_truth_is_three_contacts(self):
+        # Pin the fixture itself: the mito has exactly 3 regions where the crista reaches the
+        # membrane, and the overlap detector agrees. If this changes the expectations below are stale.
+        from scipy.ndimage import label as ndimage_label
+        from synapse_net.cristae_analysis import detect_contact_sites
+        connectivity = np.ones((3, 3, 3), dtype=bool)
+        n_overlap = ndimage_label(self.crista & self.membrane, structure=connectivity)[1]
+        self.assertEqual(n_overlap, 3)
+        _, summary = detect_contact_sites(self.crista, self.membrane, self.voxel_size)
+        self.assertEqual(summary["crista_junction_count"], 3)
+
+    def test_skeleton_mode_finds_every_contact(self):
+        # The actual regression. Skeleton mode must not be worse than overlap mode: it has to label
+        # all three literal-overlap components and count three junctions.
+        from scipy.ndimage import label as ndimage_label
+        from synapse_net.cristae_analysis import detect_junctions_skeleton
+        connectivity = np.ones((3, 3, 3), dtype=bool)
+        overlap_labels, n_overlap = ndimage_label(self.crista & self.membrane, structure=connectivity)
+        labels, summary = detect_junctions_skeleton(
+            self.crista, self.membrane, self.voxel_size, max_extension_nm=self.MEMBRANE_NM,
+        )
+        for component in range(1, n_overlap + 1):
+            with self.subTest(overlap_component=component):
+                self.assertTrue((labels[overlap_labels == component] > 0).any())
+        self.assertEqual(summary["crista_junction_count"], 3)
+
+    def test_labels_stay_inside_the_mitochondrion(self):
+        from synapse_net.cristae_analysis import detect_junctions_skeleton
+        labels, _ = detect_junctions_skeleton(
+            self.crista, self.membrane, self.voxel_size, max_extension_nm=self.MEMBRANE_NM,
+        )
+        junction = labels > 0
+        self.assertTrue(junction.any())
+        self.assertEqual(int(np.count_nonzero(junction & ~(self.mito > 0))), 0)
+        self.assertEqual(int(np.count_nonzero(junction & ~(self.membrane | self.crista))), 0)
+
+
+class TestJunctionModeDispatch(unittest.TestCase):
+    """The detect_junctions dispatcher and the junction_mode wiring into the stats table."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.mito, cls.membrane, cls.lumen = _make_hollow_mito()
+        # Unclipped, so this sheet overlaps the membrane band and BOTH modes find junctions.
+        cls.crista = _make_crista_sheet(cls.lumen, y_range=(8, 52), clip_to_lumen=False)
+        cls.voxel_size = _SHEET_VOXEL_NM
+
+    def test_overlap_mode_matches_detect_contact_sites(self):
+        # The default path must be a pure pass-through, apart from the added extension key.
+        from synapse_net.cristae_analysis import detect_contact_sites, detect_junctions
+        expected_labels, expected = detect_contact_sites(self.crista, self.membrane, self.voxel_size)
+        labels, summary = detect_junctions(self.crista, self.membrane, self.voxel_size)
+        np.testing.assert_array_equal(labels, expected_labels)
+        for key, value in expected.items():
+            self.assertEqual(summary[key], value)
+        self.assertTrue(np.isnan(summary["mean_junction_extension_nm"]))
+
+    def test_invalid_junction_mode_raises(self):
+        from synapse_net.cristae_analysis import detect_junctions
+        with self.assertRaises(ValueError):
+            detect_junctions(self.crista, self.membrane, self.voxel_size, junction_mode="nope")
+
+    def test_stats_columns_identical_between_modes(self):
+        # The CSV schema must not depend on the mode — only the values may.
+        from synapse_net.cristae_analysis import compute_mito_crista_statistics
+        frames = {}
+        for mode in ("overlap", "skeleton"):
+            frames[mode] = compute_mito_crista_statistics(
+                self.crista, self.mito, self.voxel_size,
+                membrane_mask=self.membrane, lumen_mask=self.lumen,
+                membrane_thickness_nm=_SHEET_MEMBRANE_NM, junction_mode=mode,
+            )
+        self.assertEqual(list(frames["overlap"].columns), list(frames["skeleton"].columns))
+        self.assertIn("mean_junction_extension_nm", frames["overlap"].columns)
+        self.assertTrue(np.isnan(frames["overlap"]["mean_junction_extension_nm"][0]))
+        self.assertFalse(np.isnan(frames["skeleton"]["mean_junction_extension_nm"][0]))
+        for mode in ("overlap", "skeleton"):
+            self.assertGreater(int(frames[mode]["crista_junction_count"][0]), 0)
+
+    def test_max_extension_defaults_to_membrane_thickness(self):
+        # A None max_extension_nm must inherit membrane_thickness_nm, like border_gap_nm does.
+        from synapse_net.cristae_analysis import compute_mito_crista_statistics
+        crista = _make_crista_sheet(self.lumen, y_range=(16, 44))
+        kwargs = dict(
+            membrane_mask=self.membrane, lumen_mask=self.lumen,
+            membrane_thickness_nm=_SHEET_MEMBRANE_NM, junction_mode="skeleton",
+        )
+        default = compute_mito_crista_statistics(crista, self.mito, self.voxel_size, **kwargs)
+        explicit = compute_mito_crista_statistics(
+            crista, self.mito, self.voxel_size, max_extension_nm=_SHEET_MEMBRANE_NM, **kwargs
+        )
+        self.assertEqual(
+            int(default["crista_junction_count"][0]), int(explicit["crista_junction_count"][0])
+        )
+        # A tiny tolerance cannot bridge the ~4.5 nm gap, so the count must collapse.
+        tight = compute_mito_crista_statistics(
+            crista, self.mito, self.voxel_size, max_extension_nm=0.5, **kwargs
+        )
+        self.assertEqual(int(tight["crista_junction_count"][0]), 0)
+
+    def test_invalid_junction_mode_raises_in_stats(self):
+        from synapse_net.cristae_analysis import compute_mito_crista_statistics
+        with self.assertRaises(ValueError):
+            compute_mito_crista_statistics(
+                self.crista, self.mito, self.voxel_size, junction_mode="nope"
+            )
 
 
 class TestCristaMorphology(unittest.TestCase):
