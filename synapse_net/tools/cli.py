@@ -15,7 +15,6 @@ from ..imod.to_imod import (
 from ..inference.inference import _get_model_registry, get_model, get_model_training_resolution, run_segmentation
 from ..inference.scalable_segmentation import scalable_segmentation
 from ..inference.util import inference_helper, parse_tiling
-from .pool_visualization import _visualize_vesicle_pools
 
 
 def imod_point_cli():
@@ -128,6 +127,10 @@ def pool_visualization_cli():
         "--split_pools", action="store_true", help="Whether to split the pools into individual layers.",
     )
     args = parser.parse_args()
+
+    # Imported here because it needs napari, which is an optional dependency.
+    from .pool_visualization import _visualize_vesicle_pools
+
     _visualize_vesicle_pools(
         args.input_path, args.vesicle_paths, args.table_paths, args.segmentation_paths, args.split_pools
     )
