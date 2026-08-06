@@ -15,7 +15,6 @@ from ..imod.to_imod import (
 from ..inference.inference import _get_model_registry, get_model, get_model_training_resolution, run_segmentation
 from ..inference.scalable_segmentation import scalable_segmentation
 from ..inference.util import inference_helper, parse_tiling
-from .pool_visualization import _visualize_vesicle_pools
 
 
 def imod_point_cli():
@@ -128,6 +127,10 @@ def pool_visualization_cli():
         "--split_pools", action="store_true", help="Whether to split the pools into individual layers.",
     )
     args = parser.parse_args()
+
+    # Imported here because it needs napari, which is an optional dependency.
+    from .pool_visualization import _visualize_vesicle_pools
+
     _visualize_vesicle_pools(
         args.input_path, args.vesicle_paths, args.table_paths, args.segmentation_paths, args.split_pools
     )
@@ -258,6 +261,7 @@ def cristae_analysis_helper(
     voxel_size=None, tomogram_path=None,
     membrane_thickness_nm=8.0, border_gap_nm=None,
     method="skip", membrane_mode="slice_2d",
+    junction_mode="overlap", max_extension_nm=None, terminus_nm=None, min_junction_volume_nm3=None,
     n_jobs=-1, force=False, verbose=False,
 ):
     """Batch-compute per-mitochondrion cristae statistics and save one CSV per input pair.
@@ -284,6 +288,16 @@ def cristae_analysis_helper(
             Defaults to membrane_thickness_nm when None.
         method: How the crista orientation anisotropy is computed ("skip", "fast" or "exact").
         membrane_mode: How the membrane shell is built ("slice_2d" or "shell_3d").
+        junction_mode: Which junction detector fills crista_junction_count - "overlap" (the direct
+            crista-membrane intersection) or "skeleton" (crista regions reaching close to the inner
+            boundary membrane near a crista terminus).
+        max_extension_nm: How far in nm a crista may fall short of the inner boundary membrane surface
+            and still count ("skeleton" mode only). Defaults to membrane_thickness_nm when None.
+        terminus_nm: A near-membrane crista region counts only if it lies within this distance in nm
+            of a crista terminus - the free end of the cleaned-up crista skeleton ("skeleton" mode
+            only), which rejects a crista running alongside the membrane. Defaults to 20 nm when None.
+        min_junction_volume_nm3: Smallest junction volume in nm^3 that counts ("skeleton" mode only).
+            Defaults to 50 when None.
         n_jobs: Number of workers for the per-mitochondrion computation (-1 = all cores).
         force: Whether to over-write already present result tables.
         verbose: Whether to show a progress bar over the mitochondria of each file.
@@ -328,7 +342,10 @@ def cristae_analysis_helper(
         stats_df = compute_mito_crista_statistics(
             crista, mito, this_voxel_size,
             membrane_thickness_nm=membrane_thickness_nm, border_gap_nm=border_gap_nm,
-            method=method, membrane_mode=membrane_mode, n_jobs=n_jobs, verbose=verbose,
+            method=method, membrane_mode=membrane_mode,
+            junction_mode=junction_mode, max_extension_nm=max_extension_nm,
+            terminus_nm=terminus_nm, min_junction_volume_nm3=min_junction_volume_nm3,
+            n_jobs=n_jobs, verbose=verbose,
         )
 
         os.makedirs(os.path.split(output_path)[0], exist_ok=True)
@@ -392,6 +409,33 @@ def cristae_analysis_cli():
         help="How the membrane shell is built - 'slice_2d' (default, per-Z-slice) or 'shell_3d' (connected 3D shell)."
     )
     parser.add_argument(
+        "--junction_mode", default="overlap", choices=["overlap", "skeleton"],
+        help="Which junction detector fills crista_junction_count. 'overlap' (default) counts the "
+        "connected components of the direct crista-membrane intersection, so a crista that stops "
+        "short of the membrane scores no junction. 'skeleton' counts crista regions that come within "
+        "--max_extension of the membrane near a crista terminus, so it tolerates a crista segmented "
+        "short of the membrane. 'skeleton' requires 3D data."
+    )
+    parser.add_argument(
+        "--max_extension", type=float, default=None,
+        help="How far in nm a crista may fall short of the inner boundary membrane surface and still "
+        "count as a junction (--junction_mode skeleton only). By default the same as the membrane "
+        "thickness."
+    )
+    parser.add_argument(
+        "--terminus_distance", type=float, default=None,
+        help="How close in nm a near-membrane crista region must be to a crista terminus - a free end "
+        "of the cleaned-up crista skeleton - to count as a junction (--junction_mode skeleton only). "
+        "This is what separates a crista ending at the membrane from one running alongside it. By "
+        "default 20 nm."
+    )
+    parser.add_argument(
+        "--min_junction_volume", type=float, default=None,
+        help="The smallest junction volume in nm^3 that counts (--junction_mode skeleton only). This "
+        "only removes specks; it does not address the fact that skeleton mode over-counts on densely "
+        "packed cristae - see docs/cristae_analysis.md. By default 50."
+    )
+    parser.add_argument(
         "--n_jobs", type=int, default=-1,
         help="The number of workers for the per-mitochondrion computation. By default -1 (all cores)."
     )
@@ -411,5 +455,7 @@ def cristae_analysis_cli():
         voxel_size=args.voxel_size, tomogram_path=args.tomogram_path,
         membrane_thickness_nm=args.membrane_thickness, border_gap_nm=args.border_gap,
         method=args.method, membrane_mode=args.membrane_mode,
+        junction_mode=args.junction_mode, max_extension_nm=args.max_extension,
+        terminus_nm=args.terminus_distance, min_junction_volume_nm3=args.min_junction_volume,
         n_jobs=args.n_jobs, force=args.force, verbose=args.verbose,
     )
