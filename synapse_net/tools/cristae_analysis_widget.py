@@ -40,9 +40,10 @@ class CristaeAnalysisWidget(BaseWidget):
     }
 
     _JUNCTION_OVERLAP = "Overlap (crista ∩ membrane)"
+    _JUNCTION_SKELETON = "Skeleton (crista reaching the membrane)"
     _JUNCTION_TO_MODE = {
         _JUNCTION_OVERLAP: "overlap",
-        "Skeleton (crista reaching the membrane)": "skeleton",
+        _JUNCTION_SKELETON: "skeleton",
     }
 
     def __init__(self):
@@ -160,7 +161,7 @@ class CristaeAnalysisWidget(BaseWidget):
         setting_values.layout().addLayout(layout)
 
         self.junction_mode_param, layout = self._add_choice_param(
-            "junction_mode", self._JUNCTION_OVERLAP, list(self._JUNCTION_TO_MODE.keys()),
+            "junction_mode", self._JUNCTION_SKELETON, list(self._JUNCTION_TO_MODE.keys()),
             title="Junction detection",
             tooltip="How crista–membrane junctions are found.\n"
                     "- Overlap (crista ∩ membrane): counts the connected components where the crista "

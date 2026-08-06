@@ -19,8 +19,8 @@ physical units (nm / nm² / nm³) using the voxel size.
   - `border_gap` — distance from volume faces where membrane is suppressed (nm; `0` = use `mm_thickness`).
     Skeleton-mode junctions are suppressed in the same zone (§4b), so on a thin volume this knob can
     gate a large fraction of the data — the preview line reports the percentage.
-  - `junction_mode` (**Junction detection**) — `Overlap (crista ∩ membrane)` (default) or
-    `Skeleton (crista reaching the membrane)`. See §4.
+  - `junction_mode` (**Junction detection**) — `Overlap (crista ∩ membrane)` or
+    `Skeleton (crista reaching the membrane)` (default). See §4.
   - `max_extension` (**Max Extension**) — how far a crista may fall short of the membrane and still
     count (nm; `0` = use `mm_thickness`). Skeleton mode only.
   - `terminus_distance` (**Terminus Distance**) — how close a near‑membrane crista region must be to a
