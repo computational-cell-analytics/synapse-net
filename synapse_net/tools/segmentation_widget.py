@@ -19,6 +19,7 @@ from ..inference.inference import (
     _segment_ribbon_AZ,
     compute_scale_from_voxel_size,
     get_model,
+    get_model_training_resolution,
     get_segmentation_function,
     run_segmentation,
 )
@@ -28,6 +29,8 @@ from ..inference.vesicles import VESICLE_SEGMENTATION_MODES, segment_vesicles
 
 
 _MAX_MIN_SIZE = 100_000_000
+# Training voxel size (nm, isotropic) of the LDCV v4 checkpoint, used as the default for custom models.
+_DEFAULT_CUSTOM_MODEL_VOXEL_SIZE = 2.69
 _POSTPROCESSING_PARAMETER_SPECS = {
     segment_vesicles: {
         "min_size": {"type": "int", "min": 0, "max": _MAX_MIN_SIZE, "step": 1},
@@ -301,9 +304,13 @@ class SegmentationWidget(BaseWidget):
         ):
             # Load the model. Override if user chose custom model.
             rescale_input = True
+            custom_training_voxel_size = None
             if custom_model_path:
                 model = _load_custom_model(custom_model_path, device)
-                rescale_input = False
+                # Custom models are not in the training-resolution table, so the user supplies it.
+                # A value of 0 means "don't rescale".
+                custom_training_voxel_size = self.custom_model_voxel_size_param.value()
+                rescale_input = custom_training_voxel_size > 0.0
                 if model:
                     show_info(f"INFO: Using custom model from path: {custom_model_path}")
                 else:
@@ -323,9 +330,17 @@ class SegmentationWidget(BaseWidget):
             scale = None
             if voxel_size and rescale_input:
                 # Calculate scale so voxel_size is the same as in training.
-                scale = compute_scale_from_voxel_size(voxel_size, model_type)
-                scale_info = list(map(lambda x: np.round(x, 2), scale))
-                show_info(f"INFO: Rescaled the image by {scale_info} to optimize for the selected model.")
+                training_voxel_size = None if custom_training_voxel_size is None else \
+                    {ax: custom_training_voxel_size for ax in voxel_size}
+                scale = compute_scale_from_voxel_size(voxel_size, model_type, training_voxel_size)
+                target = training_voxel_size or get_model_training_resolution(model_type)
+                scale_info = [round(float(sc), 2) for sc in scale]
+                source_info = {ax: round(float(vs), 2) for ax, vs in voxel_size.items()}
+                target_info = {ax: round(float(vs), 2) for ax, vs in target.items()}
+                show_info(
+                    f"INFO: Rescaled the image by {scale_info} (xyz), from voxel size {source_info} "
+                    f"to the model's training voxel size {target_info}."
+                )
 
             # Some models require an additional segmentation for inference or postprocessing.
             # For these models we read out the 'Extra Segmentation' widget.
@@ -396,6 +411,18 @@ class SegmentationWidget(BaseWidget):
         self.checkpoint_param, layout = self._add_string_param(
             name="checkpoint", value="", title="Load Custom Model",
             placeholder="path/to/checkpoint.pt",
+        )
+        setting_values.layout().addLayout(layout)
+
+        # Training voxel size of the custom model, which cannot be looked up from the model name.
+        self.custom_model_voxel_size_param, layout = self._add_float_param(
+            "custom_model_voxel_size", _DEFAULT_CUSTOM_MODEL_VOXEL_SIZE,
+            title="custom model voxel size", min_val=0.0, max_val=100.0,
+            tooltip="Voxel size (nm) the custom model was trained on; only used together with "
+                    "'Load Custom Model'. The image is rescaled by voxel_size / this value, so the "
+                    "model sees the data at its training resolution. The default is the LDCV v4 "
+                    "value. Set to 0 to disable rescaling. Note that min_size is measured in voxels "
+                    "of the rescaled volume, so it needs adjusting when the scale changes.",
         )
         setting_values.layout().addLayout(layout)
 

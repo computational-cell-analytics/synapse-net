@@ -147,18 +147,22 @@ def get_model_training_resolution(model_type: str) -> Dict[str, float]:
 
 def compute_scale_from_voxel_size(
     voxel_size: Dict[str, float],
-    model_type: str
+    model_type: str,
+    training_voxel_size: Optional[Dict[str, float]] = None,
 ) -> List[float]:
     """Compute the appropriate scale factor for inference with a given pretrained model.
 
     Args:
         voxel_size: The voxel size of the data for inference.
         model_type: The name of the pretrained model.
+        training_voxel_size: The voxel size the model was trained on. Looked up from `model_type`
+            if not given; pass it for custom models, which are not in that table.
 
     Returns:
         The scale factor, as a list in zyx order.
     """
-    training_voxel_size = get_model_training_resolution(model_type)
+    if training_voxel_size is None:
+        training_voxel_size = get_model_training_resolution(model_type)
     scale = [
         voxel_size["x"] / training_voxel_size["x"],
         voxel_size["y"] / training_voxel_size["y"],
