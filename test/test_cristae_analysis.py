@@ -1346,10 +1346,29 @@ class TestComputeMitoCristaStatistics(unittest.TestCase):
             "median_nn_junction_distance_nm", "junction_clustering_index",
             "crista_orientation_anisotropy",
             "cristae_surface_area_nm2", "mito_surface_area_nm2",
-            "crista_to_mito_surface_ratio", "avg_thickness_nm",
+            "crista_to_mito_surface_ratio", "imm_surface_area_nm2",
+            "imm_surface_per_mito_volume", "imm_surface_per_crista_volume",
+            "avg_thickness_nm",
         ]
         for col in expected:
             self.assertIn(col, df.columns, msg=f"Missing column: {col}")
+
+    def test_imm_surface_area_equals_ibm_plus_crista(self):
+        # The lumen depends only on the mito segmentation, so the inner-boundary-membrane term is
+        # identical with and without cristae and cancels on subtraction.
+        from synapse_net.cristae_analysis import compute_mito_crista_statistics
+        mito_seg = _make_mito()
+        df0 = compute_mito_crista_statistics(np.zeros(mito_seg.shape, dtype=bool), mito_seg, voxel_size=1.0)
+        df1 = compute_mito_crista_statistics(_make_crista(), mito_seg, voxel_size=1.0)
+
+        imm0, imm1 = df0["imm_surface_area_nm2"].iloc[0], df1["imm_surface_area_nm2"].iloc[0]
+        self.assertTrue(np.isfinite(imm0) and imm0 > 0.0)  # a crista-less mito still has an IBM
+        self.assertLess(imm0, df0["mito_surface_area_nm2"].iloc[0])  # IBM is inside the OMM
+        self.assertAlmostEqual(imm1 - imm0, df1["cristae_surface_area_nm2"].iloc[0], places=5)
+        self.assertAlmostEqual(
+            df1["imm_surface_per_mito_volume"].iloc[0], imm1 / df1["mito_volume_nm3"].iloc[0], places=9
+        )
+        self.assertTrue(np.isnan(df0["imm_surface_per_crista_volume"].iloc[0]))  # zero crista volume
 
     def test_no_crista_gives_nan_metrics(self):
         # A mito with no crista inside it should produce NaN for orientation anisotropy
@@ -1820,7 +1839,9 @@ _EXPECTED_COLUMNS = [
     "median_nn_junction_distance_nm", "junction_clustering_index",
     "crista_orientation_anisotropy",
     "cristae_surface_area_nm2", "mito_surface_area_nm2",
-    "crista_to_mito_surface_ratio", "avg_thickness_nm",
+    "crista_to_mito_surface_ratio", "imm_surface_area_nm2",
+    "imm_surface_per_mito_volume", "imm_surface_per_crista_volume",
+    "avg_thickness_nm",
 ]
 
 

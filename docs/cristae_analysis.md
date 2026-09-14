@@ -439,6 +439,9 @@ correct if the voxel size is right (nm, not Å — see the units caveat above).
 | `cristae_surface_area_nm2` | nm² | Marching‑cubes surface area of the crista mask. | — |
 | `mito_surface_area_nm2` | nm² | Marching‑cubes surface area of the mito (outer‑membrane surface). | Also used as `A` in the clustering index. |
 | `crista_to_mito_surface_ratio` | — | `cristae_surface_area_nm2 / mito_surface_area_nm2`. | Size‑normalised "crista surface density"; **can exceed 1** for folded cristae. |
+| `imm_surface_area_nm2` | nm² | Marching‑cubes area of the **inner boundary membrane** (the lumen surface, border‑trimmed and left open at clipped faces) **plus** `cristae_surface_area_nm2`. | Total inner mitochondrial membrane. Normally **exceeds** `mito_surface_area_nm2` — that is what cristae are for. The IBM alone is `imm_surface_area_nm2 - cristae_surface_area_nm2`. A crista mask is a slab, so its closed mesh already wraps both leaflets; no halving is applied. `NaN` only when there is no lumen (a mito whose membrane band was entirely deleted by the border trim). |
+| `imm_surface_per_mito_volume` | nm⁻¹ | `imm_surface_area_nm2 / mito_volume_nm3`. | Cristae surface density, the standard cross‑condition number. `NaN` if the mito volume is 0. Reported for border‑touching mitos too — filter on `mito_touches_border`, since both area and volume are truncated there (the ratio only partly cancels it). |
+| `imm_surface_per_crista_volume` | nm⁻¹ | `imm_surface_area_nm2 / crista_volume_nm3`. | Roughly the inverse of the crista sheet thickness. `NaN` when the mito has no cristae. |
 | `avg_thickness_nm` | nm | `2 × mean(EDT)` at the crista medial axis (medial axis = local maxima of the crista distance transform). | Mean local thickness of the crista sheets. |
 
 Napari layers added: **Crista‑Membrane Junctions** (labels, unique ID per junction, rendered with

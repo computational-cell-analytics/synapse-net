@@ -1315,13 +1315,17 @@ def _single_mito_row(
     detector and the crista-proximity stage.
 
     ``lumen_crop`` is the (optional) bbox-cropped eroded lumen from :func:`approximate_membrane`
-    (``return_lumen=True``) used for the junction geodesic mesh; without it the mesh falls back to
+    (``return_lumen=True``) used for the junction geodesic mesh and for the inner boundary membrane
+    area in ``imm_surface_area_nm2``; without it the mesh falls back to
     ``mito_local & ~membrane_local`` (used only when a caller supplies their own membrane, and
     contaminated near clipped faces). That fallback is deliberately **not** handed to the junction
     detector as ``lumen_mask``: near a clipped face :func:`approximate_membrane` has deleted the
     membrane, so ``mito & ~membrane`` re-includes the mito's *outer* shell there, which would put the
     inner boundary membrane on the outside of the mitochondrion. Without a real lumen the detector is
-    given ``None`` and falls back to the membrane band, which is border-safe.
+    given ``None`` and falls back to the membrane band, which is border-safe. For the same reason the
+    fallback is only taken when a membrane band exists at all: with an empty band it would degenerate
+    to ``mito_local``, reporting the *outer* surface as the inner boundary membrane, so the lumen is
+    left ``None`` and ``imm_surface_area_nm2`` is NaN instead.
     Both the lumen geodesic mesh and the mito outer-surface-area mesh
     are trimmed/opened at faces where the mito is clipped by the volume boundary: the lumen via
     :func:`_open_trimmed_mesh` (trimmed to the certain region and left open, so geodesics do not
@@ -1350,9 +1354,23 @@ def _single_mito_row(
     has_membrane = membrane_local.any()
     mito_surface = _surface_area(mito_local, sampling, closed_faces=~boundary)
 
+    if lumen_crop is not None:
+        lumen_local = lumen_crop & mito_local
+    elif has_membrane:
+        lumen_local = mito_local & ~membrane_local
+    else:
+        lumen_local = None  # the fallback would be mito_local itself, i.e. the OUTER surface.
+    # ponytail: the lumen spans flat across each crista junction mouth (cristae are never subtracted
+    # from it), so the inner boundary membrane area is over-counted by ~one small disk per junction.
+    lumen_mesh = (
+        _open_trimmed_mesh(lumen_local, sampling, border_radius, boundary)
+        if lumen_local is not None else None
+    )
+    mesh_verts, mesh_faces = lumen_mesh if lumen_mesh is not None else (None, None)
+    ibm_surface = float(mesh_surface_area(*lumen_mesh)) if lumen_mesh is not None else np.nan
+
     if has_crista and has_membrane:
         membrane_distance = distance_transform(~membrane_local, sampling=sampling.tolist(), number_of_threads=1)
-        lumen_local = (lumen_crop & mito_local) if lumen_crop is not None else None
         contact_labels_local, contact_summary = detect_junctions(
             crista_local, membrane_local, voxel_size,
             junction_mode=junction_mode, max_extension_nm=max_extension_nm,
@@ -1365,11 +1383,6 @@ def _single_mito_row(
         _, proximity = compute_crista_proximity(
             crista_local, membrane_local, voxel_size, membrane_distance=membrane_distance
         )
-        lumen_mesh = _open_trimmed_mesh(
-            lumen_local if lumen_local is not None else (mito_local & ~membrane_local),
-            sampling, border_radius, boundary,
-        )
-        mesh_verts, mesh_faces = lumen_mesh if lumen_mesh is not None else (None, None)
         _, junction_dist = compute_junction_distances(
             contact_labels_local, membrane_local, voxel_size,
             surface_area_nm2=mito_surface, n_jobs=inner_n_jobs,
@@ -1407,6 +1420,13 @@ def _single_mito_row(
     else:
         crista_to_mito_surface_ratio = np.nan
 
+    # Inner mitochondrial membrane = inner boundary membrane + crista membrane. A crista mask is a
+    # slab, so its closed mesh already wraps both leaflets — that is the crista membrane area.
+    # ponytail: cristae contribute 0.0 when absent, not NaN — a crista-less mito still has an IBM.
+    # ponytail: crista area is meshed fully closed while the lumen is border-trimmed and left open;
+    # they only disagree when the mito is clipped AND cristae reach the clipped face.
+    imm_surface = ibm_surface + (crista_surface if np.isfinite(crista_surface) else 0.0)
+
     return {
         "mito_label_id": int(label),
         "mito_touches_border": touches_border,
@@ -1425,6 +1445,9 @@ def _single_mito_row(
         "cristae_surface_area_nm2": crista_surface,
         "mito_surface_area_nm2": mito_surface,
         "crista_to_mito_surface_ratio": crista_to_mito_surface_ratio,
+        "imm_surface_area_nm2": imm_surface,
+        "imm_surface_per_mito_volume": imm_surface / mito_vol if mito_vol > 0 else np.nan,
+        "imm_surface_per_crista_volume": imm_surface / crista_vol if crista_vol > 0 else np.nan,
         "avg_thickness_nm": avg_thickness_nm,
     }
 
@@ -1544,9 +1567,15 @@ def compute_mito_crista_statistics(
         mean_junction_extension_nm |
         avg_crista_to_membrane_nm | mean_nn_junction_distance_nm | median_nn_junction_distance_nm |
         junction_clustering_index | crista_orientation_anisotropy | cristae_surface_area_nm2 |
-        mito_surface_area_nm2 | crista_to_mito_surface_ratio | avg_thickness_nm.
+        mito_surface_area_nm2 | crista_to_mito_surface_ratio | imm_surface_area_nm2 |
+        imm_surface_per_mito_volume | imm_surface_per_crista_volume | avg_thickness_nm.
         cristae_surface_area_nm2 is the crista surface area; crista_to_mito_surface_ratio is
         crista surface / mitochondrial outer-membrane surface (can exceed 1 for folded cristae).
+        imm_surface_area_nm2 is the inner mitochondrial membrane area — the inner boundary membrane
+        (the lumen surface) plus cristae_surface_area_nm2 — and the imm_surface_per_*_volume columns
+        divide it by mito_volume_nm3 and crista_volume_nm3 respectively (nm^-1, "cristae surface
+        density"). The inner-boundary-membrane area alone is
+        imm_surface_area_nm2 - cristae_surface_area_nm2.
         The *_nn_junction_distance_nm columns are geodesic nearest-neighbour distances between
         crista-membrane junctions along the membrane; junction_clustering_index is a Clark-Evans
         index (< 1 clustered, ~ 1 random, > 1 dispersed). ``mean_junction_extension_nm`` is the mean
