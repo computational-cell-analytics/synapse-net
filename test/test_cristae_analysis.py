@@ -280,8 +280,11 @@ class TestBorderZone(unittest.TestCase):
         self.assertEqual(int(zone[2:].sum()), 0)
 
     def test_matches_open_trimmed_mesh_gating(self):
-        # The zone must be the complement of the region _open_trimmed_mesh keeps, for the same
-        # (radius, boundary) — they encode the same "certain region" and must not drift apart.
+        # For a SCALAR radius plus a boundary bool the two agree, which is the path _open_trimmed_mesh
+        # uses. They answer different questions, though, and are allowed to: the mesh asks "is the
+        # object clipped by the volume here?" (an exact-face test) while the border zone asks "where
+        # is the membrane unknown?" (a global fact, needing per-face radii on a crop). This pins the
+        # scalar path only — see test_per_face_radius_matches_the_global_zone_crop for the other one.
         from synapse_net.cristae_analysis import _border_zone
         radius = 3
         for boundary in (np.ones((3, 2), dtype=bool), np.zeros((3, 2), dtype=bool),
@@ -294,6 +297,35 @@ class TestBorderZone(unittest.TestCase):
                 kept = np.zeros(shape, dtype=bool)
                 kept[lo[0]:hi[0], lo[1]:hi[1], lo[2]:hi[2]] = True
                 np.testing.assert_array_equal(zone, ~kept)
+
+    def test_per_face_radius_matches_the_global_zone_crop(self):
+        # A bbox crop must reproduce the GLOBAL zone restricted to that crop. The per-face radii do;
+        # the old boundary-bool form does not, and is wrong for about a third of random crops —
+        # notably whenever a face sits just inside the volume, which is the reported bug.
+        from synapse_net.cristae_analysis import _border_zone
+        cases = [                       # (vol_shape, bbox_lo, bbox_hi, radius)
+            ((40, 60, 60), (1, 8, 8), (39, 52, 52), 5),    # the reported case: offset by one voxel
+            ((40, 60, 60), (0, 8, 8), (40, 52, 52), 5),    # spans an axis: the bool form agrees here
+            ((20,), (3,), (17,), 5),
+            ((12, 12), (2, 0), (12, 7), 4),
+        ]
+        for vol_shape, lo, hi, radius in cases:
+            with self.subTest(bbox=(lo, hi)):
+                truth = _border_zone(vol_shape, radius)[
+                    tuple(slice(a, b) for a, b in zip(lo, hi))]
+                radii = np.stack([
+                    np.maximum(0, radius - np.array(lo)),
+                    np.maximum(0, radius - (np.array(vol_shape) - np.array(hi))),
+                ], axis=1)
+                np.testing.assert_array_equal(_border_zone(tuple(np.array(hi) - np.array(lo)), radii),
+                                              truth)
+
+    def test_radius_larger_than_the_axis_covers_it(self):
+        # A negative slice start counts from the end, so a radius wider than the axis used to leave
+        # the low voxels OUTSIDE the zone. Reachable whenever a mito is thinner than the gap radius.
+        from synapse_net.cristae_analysis import _border_zone
+        self.assertTrue(_border_zone((3,), 5, boundary=np.array([[False, True]])).all())
+        self.assertTrue(_border_zone((3, 9), 5).all())
 
 
 class TestApproximateMembrane(unittest.TestCase):
@@ -875,6 +907,28 @@ class TestSkeletonJunctions(unittest.TestCase):
 
 
 
+    def test_a_crista_cannot_borrow_another_cristas_terminus(self):
+        # The terminus filter is keyed per crista. A blob too short to produce a skeleton of its own
+        # must stay rejected even when an unrelated lamella ends nearby: with one pooled terminus tree
+        # it borrowed the sheet's end and the pair scored 2 instead of 1.
+        from scipy.ndimage import label as ndimage_label
+        sheet = _make_crista_sheet(self.lumen, y_range=(8, 52))
+        blob = np.zeros(_SHEET_SHAPE, dtype=bool)
+        blob[19:22, 13:15, 33:36] = True
+        blob &= self.lumen
+
+        # Guards: genuinely disconnected, and above the volume floor, so neither the connectivity nor
+        # min_junction_volume_nm3 is what rejects the blob — only its missing terminus can.
+        self.assertEqual(
+            ndimage_label(sheet | blob, structure=np.ones((3, 3, 3), dtype=bool))[1], 2)
+        self.assertGreater(int(blob.sum()) * _SHEET_VOXEL_NM ** 3, 50.0)
+
+        self.assertEqual(
+            self._detect(blob, lumen_mask=self.lumen)[1]["crista_junction_count"], 0)
+        alone = self._detect(sheet, lumen_mask=self.lumen)[1]["crista_junction_count"]
+        both = self._detect(sheet | blob, lumen_mask=self.lumen)[1]["crista_junction_count"]
+        self.assertEqual(both, alone)          # before the fix: alone + 1
+
 
 class TestCristaSkeleton(unittest.TestCase):
     """compute_crista_skeleton — the centerline exposed for the widget's Show Crista Skeleton layers."""
@@ -1140,6 +1194,176 @@ class TestBorderZoneAlignmentEndToEnd(unittest.TestCase):
         zone = _border_zone(self.SHAPE, self.gap)
         self.assertEqual(int(np.count_nonzero(crista & zone)), 0)   # guard: clear of the zone
         self.assertEqual(self._stats_count(crista), 1)
+
+class TestCropOffsetBorderZone(unittest.TestCase):
+    """The border exclusion for a mito whose bbox starts just INSIDE the volume, not at the face.
+
+    `TestBorderZoneAlignmentEndToEnd` uses a mito spanning Z, so every exact-face test happens to be
+    right. Shift it one voxel and the two questions come apart: no bbox face is a volume face, yet the
+    crop still overlaps the global border zone where `approximate_membrane` deleted the membrane. The
+    old per-face boolean reported no volume face at all and suppressed nothing.
+    """
+
+    VOXEL_NM = 1.5
+    MEMBRANE_NM = 8.0
+    SHAPE = (40, 60, 60)
+
+    @classmethod
+    def setUpClass(cls):
+        from synapse_net.cristae_analysis import _gap_radius, approximate_membrane
+        cls.gap = _gap_radius(cls.VOXEL_NM, cls.MEMBRANE_NM, None, 3)
+        mito = np.zeros(cls.SHAPE, dtype=np.uint32)
+        mito[1:39, 8:52, 8:52] = 1       # starts at z=1: inside the border zone, off the volume face
+        cls.mito = mito
+        cls.membrane, cls.lumen = approximate_membrane(
+            mito, cls.VOXEL_NM, membrane_thickness_nm=cls.MEMBRANE_NM, return_lumen=True
+        )
+
+    def _slab(self, z_start, z_stop):
+        """A slab against the low-Y membrane shell, spanning the given Z range."""
+        crista = np.zeros(self.SHAPE, dtype=bool)
+        crista[z_start:z_stop, 8:16, 20:40] = True
+        return crista & (self.mito > 0)
+
+    def _stats_count(self, crista):
+        from synapse_net.cristae_analysis import compute_mito_crista_statistics
+        table = compute_mito_crista_statistics(
+            crista, self.mito, self.VOXEL_NM,
+            membrane_mask=self.membrane, lumen_mask=self.lumen,
+            membrane_thickness_nm=self.MEMBRANE_NM, junction_mode="skeleton",
+        )
+        return int(table["crista_junction_count"][0])
+
+    def test_no_bbox_face_is_a_volume_face(self):
+        # The premise: the exact-face test used for the meshes says "not clipped anywhere", while the
+        # global-aware test correctly says the mito reaches into the unknown zone. Both are right —
+        # they are different questions, and the border exclusion needs the second one.
+        from skimage.measure import regionprops
+        bbox = regionprops(self.mito)[0].bbox
+        boundary = np.array(
+            [[bbox[a] == 0, bbox[a + 3] == self.SHAPE[a]] for a in range(3)], dtype=bool)
+        self.assertFalse(boundary.any())
+        self.assertTrue(any(bbox[a] < self.gap or bbox[a + 3] > self.SHAPE[a] - self.gap
+                            for a in range(3)))
+
+    def test_membrane_and_lumen_are_absent_from_the_global_border_zone(self):
+        # Both halves of the premise. The membrane is deleted there (so a junction claimed there is
+        # measured against nothing) — but the LUMEN is absent too, because approximate_membrane's
+        # erosion sees the genuine background at z=0 and pulls it back. That second fact is why
+        # _open_trimmed_mesh keeps the exact-face test: at z=1 the surface is real, not a fabricated
+        # cap, so the mesh must close it rather than trim it.
+        from synapse_net.cristae_analysis import _border_zone
+        zone = _border_zone(self.SHAPE, self.gap)
+        self.assertEqual(int(np.count_nonzero(self.membrane & zone)), 0)
+        self.assertEqual(int(np.count_nonzero(self.lumen & zone)), 0)
+        self.assertGreater(int(self.membrane.sum()), 0)
+
+    def test_junction_in_the_global_border_zone_is_not_counted(self):
+        # The bug, end to end. The crista lies wholly inside the global border zone; overlap mode
+        # reports nothing there and skeleton mode must agree. Before the fix this returned 1.
+        from synapse_net.cristae_analysis import _border_zone, detect_contact_sites
+        crista = self._slab(1, self.gap)
+        zone = _border_zone(self.SHAPE, self.gap)
+        self.assertEqual(int(np.count_nonzero(crista & ~zone)), 0)   # guard: wholly inside the zone
+        self.assertGreater(int(crista.sum()), 0)
+
+        _, overlap = detect_contact_sites(crista, self.membrane, self.VOXEL_NM)
+        self.assertEqual(overlap["crista_junction_count"], 0)        # the alignment target
+        self.assertEqual(self._stats_count(crista), 0)
+
+    def test_junction_away_from_the_border_zone_is_still_counted(self):
+        # The other half: the exclusion must not eat junctions in the middle of the crop.
+        from synapse_net.cristae_analysis import _border_zone
+        crista = self._slab(18, 18 + self.gap - 1)
+        self.assertEqual(int(np.count_nonzero(crista & _border_zone(self.SHAPE, self.gap))), 0)
+        self.assertEqual(self._stats_count(crista), 1)
+
+
+class TestPerMitoJunctionAgreement(unittest.TestCase):
+    """The widget's junction display must report what its table reports.
+
+    Detecting junctions once over the whole volume and detecting them per mitochondrion are different
+    measurements in skeleton mode: restricting a crista to one mito clips it, and clipping moves its
+    skeleton endpoints. The fixture is a crista tube running through the mito and far out both ends —
+    globally its termini are nowhere near the membrane (1 junction), per instance the clipped tube
+    ends at the mitochondrial boundary (2).
+    """
+
+    VOXEL_NM = 1.5
+    MEMBRANE_NM = 8.0
+    SHAPE = (40, 80, 100)
+
+    @classmethod
+    def setUpClass(cls):
+        from synapse_net.cristae_analysis import _gap_radius, approximate_membrane
+        cls.gap = _gap_radius(cls.VOXEL_NM, cls.MEMBRANE_NM, None, 3)
+        mito = np.zeros(cls.SHAPE, dtype=np.uint32)
+        mito[6:34, 10:38, 10:50] = 1
+        mito[6:34, 10:38, 60:95] = 2          # a second instance, offset in X so the tube misses it
+        cls.mito = mito
+        cls.membrane, cls.lumen = approximate_membrane(
+            mito, cls.VOXEL_NM, membrane_thickness_nm=cls.MEMBRANE_NM, return_lumen=True
+        )
+        cls.crista = np.zeros(cls.SHAPE, dtype=bool)
+        cls.crista[18:22, 2:76, 28:32] = True  # through mito 1 and far out past BOTH its Y faces
+        cls.kwargs = dict(junction_mode="skeleton", max_extension_nm=cls.MEMBRANE_NM)
+
+    def _table(self, **kwargs):
+        from synapse_net.cristae_analysis import compute_mito_crista_statistics
+        return compute_mito_crista_statistics(
+            self.crista, self.mito, self.VOXEL_NM,
+            membrane_mask=self.membrane, lumen_mask=self.lumen,
+            membrane_thickness_nm=self.MEMBRANE_NM, **self.kwargs, **kwargs,
+        )
+
+    def test_per_mito_detector_matches_the_table(self):
+        # The pin that keeps the two bbox loops from drifting: the detector the widget's preview uses
+        # and the one inside the statistics table must agree, since they are separate implementations
+        # of the same per-instance masking.
+        from synapse_net.cristae_analysis import detect_junctions_per_mito
+        _, summary = detect_junctions_per_mito(
+            self.crista, self.mito, self.membrane, self.VOXEL_NM,
+            lumen_mask=self.lumen, border_radius=self.gap, **self.kwargs,
+        )
+        self.assertEqual(summary["crista_junction_count"],
+                         int(self._table()["crista_junction_count"].sum()))
+
+    def test_global_detection_disagrees_with_the_table(self):
+        # The bug being guarded against, made explicit: a single whole-volume pass — what the widget
+        # used to display — does not reproduce the table. If this ever stops failing to match, the
+        # fixture has lost its point.
+        from synapse_net.cristae_analysis import detect_junctions
+        _, global_summary = detect_junctions(
+            self.crista, self.membrane, self.VOXEL_NM,
+            border_radius=self.gap, lumen_mask=self.lumen, **self.kwargs,
+        )
+        table_total = int(self._table()["crista_junction_count"].sum())
+        self.assertGreater(table_total, 0)
+        self.assertNotEqual(global_summary["crista_junction_count"], table_total)
+
+    def test_returned_labels_match_the_table(self):
+        from scipy.ndimage import label as ndimage_label
+        table, labels = self._table(return_junction_labels=True)
+        self.assertGreater(int(labels.max()), 0)
+        for row in table.itertuples():
+            with self.subTest(mito=row.mito_label_id):
+                n_components = ndimage_label(
+                    labels * (self.mito == row.mito_label_id),
+                    structure=np.ones((3, 3, 3), dtype=bool),
+                )[1]
+                self.assertEqual(n_components, row.crista_junction_count)
+
+    def test_labels_stay_inside_their_mitochondrion(self):
+        # The part of the tube outside every mito is never labelled — the global-vs-per-mito
+        # difference, made visible.
+        _, labels = self._table(return_junction_labels=True)
+        self.assertEqual(int(np.count_nonzero((labels > 0) & (self.mito == 0))), 0)
+
+    def test_default_return_is_unchanged(self):
+        # Guards the CLI, which unpacks a bare DataFrame.
+        import pandas as pd
+        self.assertIsInstance(self._table(), pd.DataFrame)
+
 
 @_CUTOUT_REQUIRED
 class TestSkeletonJunctionsRealData(unittest.TestCase):

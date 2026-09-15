@@ -7,7 +7,8 @@ from qtpy.QtWidgets import QWidget, QVBoxLayout, QPushButton
 
 from .base_widget import BaseWidget
 from ..cristae_analysis import (
-    approximate_membrane, compute_crista_skeleton, compute_mito_crista_statistics, detect_junctions,
+    approximate_membrane, compute_crista_skeleton, compute_mito_crista_statistics,
+    detect_junctions_per_mito,
     _border_zone, _open_trimmed_mesh, _gap_radius, _to_sampling,
 )
 
@@ -252,16 +253,28 @@ class CristaeAnalysisWidget(BaseWidget):
 
     def _compute_membrane_and_contacts(self, mito_seg, crista_mask, voxel_size, mm_thickness,
                                        border_gap, membrane_mode, junction_mode, max_extension,
-                                       terminus, min_junction_volume):
+                                       terminus, min_junction_volume, with_junctions=True):
         """The cheap front-end shared by preview and run: membrane shell + crista-membrane junctions.
 
         Also returns the border-trimmed lumen (eroded-mito interior) so the run can both display it
         and feed it to the geodesic stage without recomputing the erosion, and the border-zone radius
         so callers can report how much of the volume it covers.
 
-        ``border_radius`` is passed to the junction detector so skeleton mode does not claim junctions
-        inside the zone where ``approximate_membrane`` removed the membrane as unknown. Here the arrays
-        are the whole volume, so every face is a volume face and ``boundary`` is left at its default.
+        Junctions come from :func:`~synapse_net.cristae_analysis.detect_junctions_per_mito`, i.e. the
+        same per-instance detection that fills the statistics table, **not** a single pass over the
+        whole volume. Detecting once globally is cheaper to write and gives different answers: a crista
+        restricted to one mitochondrion is clipped, and clipping moves its skeleton endpoints, so the
+        preview could show junctions the table did not report and vice versa. Per-instance is also the
+        faster of the two here (mito bounding boxes sum to a fraction of the volume, and the cost is
+        dominated by whole-volume distance transforms).
+
+        ``border_radius`` is passed on so skeleton mode does not claim junctions inside the zone where
+        ``approximate_membrane`` removed the membrane as unknown; the detector converts it to per-face
+        radii for each bounding box.
+
+        ``with_junctions=False`` skips the detection and returns ``(None, None)`` in its place, for the
+        run, which takes its junctions from the statistics table instead and would otherwise detect
+        them twice.
         """
         membrane_mask, lumen_mask = approximate_membrane(
             mito_seg, voxel_size,
@@ -271,12 +284,14 @@ class CristaeAnalysisWidget(BaseWidget):
             return_lumen=True,
         )
         border_radius = _gap_radius(voxel_size, mm_thickness, border_gap, mito_seg.ndim)
-        contact_labels, contact_summary = detect_junctions(
-            crista_mask.astype(bool), membrane_mask, voxel_size,
-            junction_mode=junction_mode, max_extension_nm=max_extension,
-            terminus_nm=terminus, min_junction_volume_nm3=min_junction_volume,
-            border_radius=border_radius, n_jobs=-1, lumen_mask=lumen_mask,
-        )
+        contact_labels = contact_summary = None
+        if with_junctions:
+            contact_labels, contact_summary = detect_junctions_per_mito(
+                crista_mask.astype(bool), mito_seg, membrane_mask, voxel_size,
+                junction_mode=junction_mode, max_extension_nm=max_extension,
+                terminus_nm=terminus, min_junction_volume_nm3=min_junction_volume,
+                border_radius=border_radius, n_jobs=-1, lumen_mask=lumen_mask,
+            )
         return membrane_mask, lumen_mask, contact_labels, contact_summary, border_radius
 
     def _add_skeleton_layers(self, crista_mask, mito_seg, voxel_size, layer_scale, layer_translate):
@@ -290,9 +305,13 @@ class CristaeAnalysisWidget(BaseWidget):
         restricted to ``mito_seg > 0``, because the analysis skeletonises each mitochondrion's own
         crista crop; without that the layer showed a skeleton over cristae the detector never looked at.
         (It is not an identity: the detector works per mito *instance*, so a crista spanning two touching
-        instances is split there and not here.) And the skeleton is drawn as a **Vectors** layer built
-        from the graph edges rather than one point per vertex, so a centerline reads as a curve instead
-        of as scattered dots.
+        instances is split there and not here. The junction layer *is* per instance, so a junction can
+        legitimately sit where this layer shows no terminus — clipping a crista to one mitochondrion
+        creates an end at the mitochondrial boundary that the whole-volume skeleton does not have. This
+        layer stays whole-volume because per-instance skeletons would mean concatenating vertex and
+        edge arrays with index offsets for what is a qualitative inspection aid.) And the skeleton is
+        drawn as a **Vectors** layer built from the graph edges rather than one point per vertex, so a
+        centerline reads as a curve instead of as scattered dots.
 
         ``compute_crista_skeleton`` returns nm coordinates, so they are divided by the voxel size to
         get array indices: every layer here is added in voxel coordinates with the physical placement
@@ -380,6 +399,11 @@ class CristaeAnalysisWidget(BaseWidget):
     def on_run(self):
         """Run the full per-mitochondrion cristae analysis and add the result layers + stats table.
 
+        The junction layer and the reported total come from ``compute_mito_crista_statistics``'s own
+        ``return_junction_labels``, i.e. the very array its counts were computed from, so the picture
+        and the table cannot disagree. The front-end call below therefore asks only for the membrane
+        and lumen: detecting junctions there too would repeat work the table already does.
+
         Runs synchronously; :meth:`_computing` provides the busy feedback while it blocks.
         """
         inputs = self._read_inputs()
@@ -393,10 +417,11 @@ class CristaeAnalysisWidget(BaseWidget):
             self.run_button, "Computing analysis…", "Run Cristae Analysis",
             "INFO: Approximating mitochondrial membrane & junctions...",
         ):
-            (membrane_mask, lumen_mask, contact_labels, contact_summary,
+            (membrane_mask, lumen_mask, _, _,
              border_radius) = self._compute_membrane_and_contacts(
                 mito_seg, crista_mask, voxel_size, mm_thickness, border_gap, membrane_mode,
                 junction_mode, max_extension, terminus, min_junction_volume,
+                with_junctions=False,   # they come from the statistics table below
             )
 
             method = self._ORIENTATION_TO_METHOD[self.orientation_param.currentText()]
@@ -412,7 +437,7 @@ class CristaeAnalysisWidget(BaseWidget):
                 pbar["bar"].update(1)
 
             try:
-                stats_df = compute_mito_crista_statistics(
+                stats_df, contact_labels = compute_mito_crista_statistics(
                     crista_mask, mito_seg, voxel_size,
                     membrane_mask=membrane_mask,
                     lumen_mask=lumen_mask,
@@ -427,6 +452,7 @@ class CristaeAnalysisWidget(BaseWidget):
                     n_jobs=-1,
                     verbose=True,
                     progress_callback=_on_progress,
+                    return_junction_labels=True,
                 )
             finally:
                 if pbar["bar"] is not None:
@@ -463,7 +489,7 @@ class CristaeAnalysisWidget(BaseWidget):
             self._add_properties_and_table(mito_layer, stats_df, save_path=self.save_path.text())
 
             n_mito = len(stats_df)
-            n_contacts = contact_summary["crista_junction_count"]
+            n_contacts = int(stats_df["crista_junction_count"].sum())
             show_info(
                 f"INFO: Cristae analysis complete — {n_mito} mitochondria, "
                 f"{n_contacts} crista junction sites detected."

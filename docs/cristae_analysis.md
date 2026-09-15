@@ -210,7 +210,12 @@ the tolerance is doing the work rather than the geometry.
 
 Because a junction is a subset of the crista mask, **two disconnected cristae can never be fused into
 one junction**, and no parameter governs that. The footprint is a subset of the crista, hence always
-inside the mitochondrion.
+inside the mitochondrion. The dual holds too: the terminus filter keeps **one KD‑tree per crista**, so
+a region is validated only by an end of its *own* 26‑connected crista. With a single pooled tree an
+unrelated crista ending nearby could accept a region whose own skeleton had been dropped by
+`min_skeleton_nm` — on the test lamella a sheet alone gave 1 junction, an 18‑voxel blob alone 0, and
+the two together 2. On real data it changes nothing (4 → 4 on `cutout_mito2`, whose crista mask merges
+into just 5 connected components), which is precisely why it is documented rather than left implicit.
 
 - **The volume‑border zone is excluded, to match overlap mode.** `approximate_membrane` deletes the
   membrane within `border_gap` of any volume face because the segmentation is cut off there and
@@ -221,6 +226,22 @@ inside the mitochondrion.
   removed. Measured on real exports, junction voxels inside the zone went 2505 → 0 and 991 → 0.
   Regions are **trimmed, not discarded**: a crista entering the unknown zone still counts wherever
   else it genuinely reaches the membrane, exactly as under overlap.
+  >
+  > **The zone is a *global* fact, so the per‑mito path reconstructs it with per‑face radii.** Each
+  > mitochondrion is processed on its bounding box, and a crop cannot say where the zone is with a
+  > per‑face boolean: a bbox starting one voxel inside the volume has no face *at* a volume face, yet
+  > its first `border_gap − 1` voxels still lie in the zone. `_single_mito_row` therefore passes
+  > `_border_zone` per‑face radii, `max(0, r − bbox_lo)` and `max(0, r − (vol_shape − bbox_hi))`, which
+  > reproduce the full radius at a genuine volume face and 0 at a face clear of the zone. Checked
+  > against the global zone restricted to the crop over 4000 random `(vol_shape, bbox, radius)`
+  > combinations: per‑face radii disagree in 0, the boolean form in 1250 (31%).
+  >
+  > Note this is *not* the question `_open_trimmed_mesh` asks. That one asks whether the object is
+  > **clipped** by the volume here, for which the exact‑face test is right: at a bbox starting one
+  > voxel in, `approximate_membrane`'s erosion sees the genuine background outside and pulls the lumen
+  > back, so the surface there is real geometry to be closed, not a fabricated cap to be trimmed
+  > (measured: lumen voxels inside the global border zone = 0). Same for `mito_touches_border`, which
+  > already uses the global‑aware form.
   > **Watch this on thin slabs.** The zone is `border_gap` deep on *every* face, so on a 39‑slice
   > tomogram at 0.87 nm voxels the default 8 nm gap declares **48% of the volume unknown**, and the
   > junction count there fell from 12 to 10 once the zone was respected. The widget's preview line
@@ -345,7 +366,9 @@ ragged fan at one end, not of the crista.
 
 Because a crista shorter than `min_skeleton_nm` has no skeleton, it contributes no terminus and
 therefore **cannot score a skeleton-mode junction** at all. That is the second, independent route by
-which a speck is rejected, alongside `min_junction_volume`.
+which a speck is rejected, alongside `min_junction_volume`. This holds only because the terminus trees
+are kept **per crista** (§4b): with one pooled tree the speck simply borrowed a neighbouring crista's
+end and passed anyway.
 
 > `max_extension` is the tolerance for the crista stopping short of the membrane, so set it to about
 > one membrane thickness. Pushed well above that it starts counting cristae that merely *pass near*
@@ -396,6 +419,22 @@ Iterates mitochondria (`skimage.measure.regionprops` for labels + bounding boxes
 bbox, and runs the steps above. Rows are ordered by label; results are independent of the parallelism
 settings.
 
+Pass `return_junction_labels=True` to get `(DataFrame, junction_labels)` — the very label array the
+counts were computed from, so a caller can *display* what the table reports instead of re-detecting
+junctions and getting a different answer. Each worker writes its own instance's labels into a view of
+the output volume, so this costs one int32 volume and no extra computation. Ids are per‑instance
+(`1..crista_junction_count`) and so repeat between mitochondria; the painted voxels never do, since
+each lies inside its own mito.
+
+**Per‑instance detection is not the same measurement as one whole‑volume pass**, and in `skeleton`
+mode the two routinely disagree: clipping a crista to one mitochondrion moves its skeleton endpoints.
+A crista tube running through a mito and far out both ends has its *global* termini nowhere near the
+membrane (1 junction), while the *clipped* tube ends at the mitochondrial boundary (2). Anything
+displaying junctions beside these numbers must therefore use `detect_junctions_per_mito`, or the
+table's own labels. Per‑instance is also the **cheaper** of the two — the cost is dominated by
+whole‑volume distance transforms and mito bboxes sum to a fraction of a tomogram (measured 0.06 s
+against 0.33 s, a 0.19× ratio, on 4 box mitos covering 14 % of an 80×160×160 volume).
+
 ### Code map
 
 | Step | Function | File |
@@ -444,11 +483,18 @@ correct if the voxel size is right (nm, not Å — see the units caveat above).
 | `imm_surface_per_crista_volume` | nm⁻¹ | `imm_surface_area_nm2 / crista_volume_nm3`. | Roughly the inverse of the crista sheet thickness. `NaN` when the mito has no cristae. |
 | `avg_thickness_nm` | nm | `2 × mean(EDT)` at the crista medial axis (medial axis = local maxima of the crista distance transform). | Mean local thickness of the crista sheets. |
 
-Napari layers added: **Crista‑Membrane Junctions** (labels, unique ID per junction, rendered with
-`translucent_no_depth` blending), and — when **Show Membrane Mesh** is enabled — a **Membrane Mesh**
-surface layer (the eroded‑mito lumen inner surface; see §5). Layers inherit the source layer's
-`scale`/`translate`. (The **Preview** button additionally shows the membrane as a **Membrane Mask**
-labels layer.)
+Napari layers added: **Crista‑Membrane Junctions** (labels, rendered with `translucent_no_depth`
+blending), and — when **Show Membrane Mesh** is enabled — a **Membrane Mesh** surface layer (the
+eroded‑mito lumen inner surface; see §5). Layers inherit the source layer's `scale`/`translate`. (The
+**Preview** button additionally shows the membrane as a **Membrane Mask** labels layer.)
+
+Both buttons detect junctions **per mitochondrion**, the same way the table does, so the layer, the
+info line and the CSV agree at the same settings: **Run** displays the label array
+`compute_mito_crista_statistics` itself produced, and **Preview** calls `detect_junctions_per_mito`.
+Ids are per‑instance, so the same colour can appear in two mitochondria — a junction's identity is
+(mito, id), not id alone. One thing is *not* per‑instance: the **Show Crista Skeleton** layers are
+skeletonised over the whole volume, so a junction can legitimately sit where that layer shows no
+terminus, namely at a crista clipped by the mitochondrial boundary.
 
 ---
 

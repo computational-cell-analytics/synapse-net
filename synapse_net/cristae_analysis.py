@@ -52,39 +52,58 @@ def _gap_radius(
     return _voxel_radius(gap_nm, voxel_size, ndim)
 
 
-def _border_zone(shape: tuple, radius: int, boundary: Optional[np.ndarray] = None) -> np.ndarray:
+def _border_zone(
+    shape: tuple, radius: Union[int, np.ndarray], boundary: Optional[np.ndarray] = None
+) -> np.ndarray:
     """Boolean mask that is True within ``radius`` voxels of a volume face.
 
     This is the region where the segmentation is cut off by the field of view, so membrane presence is
     *unknown* rather than absent — see the trim in :func:`approximate_membrane`.
 
+    **The zone is a global fact about the volume**, which is why a caller working on a bounding-box
+    crop cannot describe it with a per-face boolean. A crop whose low face sits one voxel inside the
+    volume still overlaps the zone across its first ``radius - 1`` voxels, yet an exact-face test
+    ("is this bbox face at the volume face?") reports no overlap at all and suppresses nothing. Pass
+    **per-face radii** instead. Measured over 4000 random ``(vol_shape, bbox, radius)`` combinations
+    against the ground truth ``_border_zone(vol_shape, radius)[crop_slices]``, per-face radii disagree
+    in 0 cases and the boolean form in 1250 (31%).
+
     Args:
         shape: Shape of the array to build the mask for.
-        radius: Width of the zone in voxels.
-        boundary: Optional ``(ndim, 2)`` bool selecting which faces are genuine volume faces;
-            ``boundary[a, s]`` marks side ``s`` (0 = low, 1 = high) of axis ``a``. Defaults to all
-            faces, which is correct when ``shape`` *is* the volume. **Pass it whenever ``shape`` is a
-            bounding-box crop**: an interior bbox face has known data beyond it, and marking it would
-            blank out a perfectly good region in the middle of the volume. Same per-face gating as
-            :func:`_open_trimmed_mesh`.
+        radius: Width of the zone in voxels — either a scalar, applied to every face, or an
+            ``(ndim, 2)`` array of per-face widths where ``radius[a, s]`` is side ``s`` (0 = low,
+            1 = high) of axis ``a``. **Pass per-face radii whenever ``shape`` is a bounding-box
+            crop**: for a crop at ``bbox`` in a volume of shape ``vol_shape`` they are
+            ``max(0, radius - bbox[a])`` and ``max(0, radius - (vol_shape[a] - bbox_hi[a]))``, which
+            give back the full radius at a genuine volume face and 0 at a face clear of the zone —
+            so the boolean behaviour below falls out of them for free.
+        boundary: Optional ``(ndim, 2)`` bool zeroing the radius on faces that are not genuine volume
+            faces; defaults to all True. This answers the *mesh* question ("is the object clipped by
+            the volume here?", see :func:`_open_trimmed_mesh`), not the border-zone one, and it is
+            redundant once per-face radii are given — an interior face already gets radius 0. **Do
+            not pass both**: the radii are multiplied by it, so a per-face radius on a face this
+            marks False is silently zeroed.
 
     Returns:
         Boolean mask of the border zone.
     """
-    if boundary is None:
-        boundary = np.ones((len(shape), 2), dtype=bool)
-    else:
-        boundary = np.asarray(boundary, dtype=bool)
+    ndim = len(shape)
+    radii = np.broadcast_to(np.asarray(radius, dtype=int), (ndim, 2))
+    if boundary is not None:
+        radii = radii * np.asarray(boundary, dtype=bool)
 
     mask = np.zeros(shape, dtype=bool)
-    for ax in range(len(shape)):
-        if boundary[ax, 0]:
-            idx_lo = [slice(None)] * len(shape)
-            idx_lo[ax] = slice(0, radius)
+    for ax in range(ndim):
+        lo, hi = int(radii[ax, 0]), int(radii[ax, 1])
+        if lo:
+            idx_lo = [slice(None)] * ndim
+            idx_lo[ax] = slice(0, lo)
             mask[tuple(idx_lo)] = True
-        if boundary[ax, 1]:
-            idx_hi = [slice(None)] * len(shape)
-            idx_hi[ax] = slice(shape[ax] - radius, None)
+        if hi:
+            idx_hi = [slice(None)] * ndim
+            # max(0, ...): a radius wider than the axis would give a negative start, which counts
+            # from the end and leaves the low voxels outside the zone.
+            idx_hi[ax] = slice(max(0, shape[ax] - hi), None)
             mask[tuple(idx_hi)] = True
     return mask
 
@@ -837,7 +856,9 @@ def detect_junctions_skeleton(
       function.
 
     Because a component of the near-membrane mask is a subset of the crista mask, two disconnected
-    cristae can never be merged into one junction, and no tuning parameter governs that.
+    cristae can never be merged into one junction, and no tuning parameter governs that. The dual also
+    holds: the terminus filter is keyed per crista, so one crista can never be validated by another
+    one's end (see ``terminus_nm``).
 
     **Known limitation — this mode over-detects on densely packed cristae.** Proximity is not the same
     as junction: on a real mitochondrion with many cristae (TS_PS_01 mito 1, 0.8681 nm voxels, 8 nm
@@ -877,8 +898,15 @@ def detect_junctions_skeleton(
         min_extension_nm: Smallest gap (nm) that counts, measured as a region's *closest* approach.
             0 (the default) accepts regions already overlapping the membrane; raise it to isolate
             non-overlapping junctions only.
-        terminus_nm: A region is kept only if it lies within this distance (nm) of a skeleton end, so a
-            crista running alongside the membrane is rejected. The 20 nm default is generous by design:
+        terminus_nm: A region is kept only if it lies within this distance (nm) of a skeleton end **of
+            its own 26-connected crista**, so a crista running alongside the membrane is rejected.
+            Keying on the region's own crista is what stops a neighbouring crista's end from validating
+            it; with a single pooled terminus tree a region whose own skeleton was dropped by
+            ``min_skeleton_nm`` could still pass. On real data this changes nothing — measured 4 -> 4
+            on ``cutout_mito2``, whose crista mask merges into just 5 connected components — so do not
+            "simplify" it back out on the grounds that it makes no difference there. The leak needs a
+            genuinely isolated crista, which sparse and synthetic masks readily produce; see
+            ``test_a_crista_cannot_borrow_another_cristas_terminus``. The 20 nm default is generous by design:
             the measured terminus distances of real junctions were 0.0, 0.0 and 8.6 nm, so it rejects
             only cristae running well clear of any end, such as one sliding along the membrane. Pass
             ``inf`` to disable the filter and skip TEASAR entirely.
@@ -888,16 +916,19 @@ def detect_junctions_skeleton(
             over-detection described above, whose false positives are full-sized.
         border_radius: Width in voxels of the volume-border zone to exclude, matching the membrane's
             own border-gap trim (``_gap_radius``). 0 (the default) disables the exclusion and
-            reproduces the misaligned behaviour, so **both production callers pass it**: a crista within
-            this distance of a clipped face would otherwise be matched against membrane that
+            reproduces the misaligned behaviour, so **every production caller passes it**: a crista
+            within this distance of a clipped face would otherwise be matched against membrane that
             :func:`approximate_membrane` deliberately removed as unknown — the distance transform would
             measure straight across the deleted region to the nearest surviving membrane voxel and
             assert a junction against a membrane it was told nothing about. Regions are trimmed rather
             than discarded, so a crista entering the unknown zone still counts wherever else it
-            genuinely reaches the membrane. See :func:`_border_zone`.
-        boundary: Optional ``(ndim, 2)`` bool marking which faces are genuine volume faces, forwarded
-            to :func:`_border_zone`. Required when the inputs are a bounding-box crop rather than the
-            whole volume; None means all faces.
+            genuinely reaches the membrane. May also be an ``(ndim, 2)`` array of **per-face** radii,
+            which is what a caller passing a bounding-box crop must do — the zone is a global fact and
+            a crop starting one voxel inside the volume still overlaps it. See :func:`_border_zone`.
+        boundary: Optional ``(ndim, 2)`` bool forwarded to :func:`_border_zone`, zeroing the radius on
+            faces that are not genuine volume faces; None means all faces. It is the *mesh* question,
+            and per-face ``border_radius`` already encodes it, so **pass one or the other, never
+            both** — the radii are multiplied by this mask.
         n_jobs: Forwarded to TEASAR's ``number_of_threads`` (-1/0 = all cores).
         membrane_distance: Optional precomputed ``distance_transform(~membrane_mask)`` in nm, to avoid
             recomputing it when the caller already has one (see :func:`_single_mito_row`). Must match
@@ -916,7 +947,8 @@ def detect_junctions_skeleton(
             at 6% of the candidate region, where 4 nm would already take 56% of it.
         min_skeleton_nm: Forwarded to :func:`compute_crista_skeleton` — skeleton components shorter
             than this are dropped, so a crista smaller than this contributes no terminus and cannot
-            score a junction. None leaves that function's own default in force.
+            score a junction (which holds only because the terminus trees are per-crista; see
+            ``terminus_nm``). None leaves that function's own default in force.
         terminus_merge_nm: Forwarded to :func:`compute_crista_skeleton` — the radius within which
             termini on one component collapse to a single representative. None leaves that function's
             own default in force.
@@ -982,14 +1014,18 @@ def detect_junctions_skeleton(
         footprint_nm = float(np.linalg.norm(sampling))
 
     near = crista & (reference_distance <= max_extension_nm)
-    if border_radius >= 1:
+    if np.any(np.asarray(border_radius) >= 1):
         near &= ~_border_zone(crista.shape, border_radius, boundary)
     if not near.any():
         return labels, summary
 
     region_labels, n_regions = ndimage_label(near, structure=np.ones(3 * (3,), dtype=bool))
 
-    terminus_tree = None
+    # One KD-tree PER CRISTA, not one for all of them: a region is validated only by a terminus of
+    # its own 26-connected crista. A single pooled tree let an unrelated crista ending nearby accept a
+    # region whose own skeleton was dropped by ``min_skeleton_nm`` — measured on the test lamella, a
+    # sheet alone gave 1 junction, an 18-voxel blob alone 0, and the two together 2.
+    terminus_trees = None
     if np.isfinite(terminus_nm):
         vertices, is_terminus = compute_crista_skeleton(
             crista, voxel_size, n_jobs=n_jobs,
@@ -1000,7 +1036,21 @@ def detect_junctions_skeleton(
             return labels, summary
         from scipy.spatial import cKDTree
 
-        terminus_tree = cKDTree(endpoints)
+        crista_components, _ = ndimage_label(crista, structure=np.ones(3 * (3,), dtype=bool))
+        # TEASAR returns physical coordinates, i.e. index * spacing exactly (measured residual 0.0 at
+        # isotropic and 3.6e-15 at anisotropic spacing), so rounding recovers the index and always
+        # lands on a foreground voxel — a terminus can never be attributed to component 0.
+        endpoint_component = crista_components[tuple(np.rint(endpoints / sampling).astype(int).T)]
+        terminus_trees = {
+            int(component): cKDTree(endpoints[endpoint_component == component])
+            for component in np.unique(endpoint_component)
+        }
+        # ``near`` is a subset of ``crista`` under the same connectivity, so each region lies in
+        # exactly one component. Collapse the lookup to one entry per region and free the int32
+        # volume (120 MB on a 401x257x290 tomogram) before the loop.
+        region_component = np.zeros(n_regions + 1, dtype=np.int32)
+        region_component[region_labels[near]] = crista_components[near]
+        del crista_components
 
     assigned = 0
     gaps = []
@@ -1012,10 +1062,13 @@ def detect_junctions_skeleton(
         gap = float(region_distance.min())
         if not (min_extension_nm <= gap <= max_extension_nm):
             continue
-        if terminus_tree is not None:
+        if terminus_trees is not None:
+            tree = terminus_trees.get(int(region_component[region]))
+            if tree is None:  # this crista contributed no terminus of its own
+                continue
             # Capped query: past terminus_nm the KD-tree returns inf rather than a real distance.
             points = np.argwhere(region_mask) * sampling
-            hit = terminus_tree.query(points, distance_upper_bound=terminus_nm)[0]
+            hit = tree.query(points, distance_upper_bound=terminus_nm)[0]
             if not np.isfinite(hit).any():
                 continue
         assigned += 1
@@ -1076,6 +1129,100 @@ def detect_junctions(
             max_extension_nm=max_extension_nm, n_jobs=n_jobs, **_given(**kwargs),
         )
     raise ValueError(f"junction_mode must be 'overlap' or 'skeleton', got {junction_mode!r}")
+
+
+
+def detect_junctions_per_mito(
+    crista_mask: np.ndarray,
+    mito_segmentation: np.ndarray,
+    membrane_mask: np.ndarray,
+    voxel_size: Union[float, Dict[str, float]],
+    lumen_mask: Optional[np.ndarray] = None,
+    border_radius: int = 0,
+    n_jobs: int = 1,
+    **kwargs,
+) -> Tuple[np.ndarray, Dict[str, float]]:
+    """Detect junctions the way the statistics table does: **per mitochondrial instance**.
+
+    :func:`detect_junctions` run once over a whole volume and the same function run per instance are
+    not the same measurement, and in ``"skeleton"`` mode they routinely disagree. Restricting a crista
+    to one mitochondrion clips it, and clipping moves its skeleton endpoints: a crista tube running
+    through a mitochondrion and out the other side has its global endpoints far away from the membrane
+    (no junction), while the clipped tube ends *at* the mitochondrial boundary (two junctions). Any
+    caller that displays junctions next to numbers from
+    :func:`compute_mito_crista_statistics` must therefore detect them this way, or the picture and the
+    table disagree at the same settings.
+
+    It is also **cheaper** than the global pass, not more expensive, which is unintuitive enough to be
+    worth recording: the cost is dominated by two whole-volume distance transforms, and mitochondrial
+    bounding boxes sum to a fraction of a tomogram (measured 0.06 s against 0.33 s, a 0.19x ratio, on
+    4 box mitos whose bboxes covered 14% of an 80x160x160 volume — same 30 junctions either way).
+    TEASAR is per connected component either way, so splitting the mask by instance multiplies no
+    skeletonisation work.
+
+    The per-instance masking and the crop-aware border radii here mirror :func:`_single_mito_row`
+    exactly; ``test_per_mito_detector_matches_the_table`` pins the two together.
+
+    Args:
+        crista_mask: Binary crista segmentation (global volume).
+        mito_segmentation: Instance label array (background = 0).
+        membrane_mask: Binary mitochondrial membrane mask, e.g. from :func:`approximate_membrane`.
+        voxel_size: Voxel size in nm — scalar or dict with "z"/"y"/"x" keys.
+        lumen_mask: Optional eroded-mito interior matching ``membrane_mask``; restricted to each
+            instance, as in :func:`_single_mito_row`.
+        border_radius: Volume-border zone width in voxels (``_gap_radius``). Converted to crop-aware
+            per-face radii for each bounding box — see :func:`_border_zone`.
+        n_jobs: Thread budget forwarded to the detector.
+        **kwargs: Further :func:`detect_junctions` options (``junction_mode``, ``max_extension_nm``,
+            ``terminus_nm``, ...).
+
+    Returns:
+        (junction_labels, summary) with the same keys as :func:`detect_junctions`. Ids are
+        per-instance and therefore repeat between mitochondria; the painted voxels do not, since each
+        lies inside its own mito. ``mean_junction_extension_nm`` is averaged over the instances that
+        reported one.
+    """
+    ndim = mito_segmentation.ndim
+    crista_binary = crista_mask.astype(bool)
+    membrane_binary = membrane_mask.astype(bool)
+    vol_shape = mito_segmentation.shape
+
+    labels = np.zeros(vol_shape, dtype=np.int32)
+    summary = {
+        "contact_voxel_count": 0, "crista_junction_count": 0, "contact_volume_nm3": 0.0,
+        "mean_junction_extension_nm": np.nan,
+    }
+    extensions = []
+
+    for prop in regionprops(mito_segmentation):
+        bbox = prop.bbox
+        slices = tuple(slice(bbox[i], bbox[i + ndim]) for i in range(ndim))
+        mito_local = mito_segmentation[slices] == prop.label
+        crista_local = crista_binary[slices] & mito_local
+        membrane_local = membrane_binary[slices] & mito_local
+        if not crista_local.any() or not membrane_local.any():
+            continue
+        border_radii = np.array(
+            [[max(0, border_radius - bbox[a]),
+              max(0, border_radius - (vol_shape[a] - bbox[a + ndim]))] for a in range(ndim)], dtype=int
+        )
+        local_labels, local_summary = detect_junctions(
+            crista_local, membrane_local, voxel_size, n_jobs=n_jobs,
+            border_radius=border_radii,
+            lumen_mask=None if lumen_mask is None else lumen_mask[slices] & mito_local,
+            **kwargs,
+        )
+        written = local_labels > 0
+        labels[slices][written] = local_labels[written]  # masked: bounding boxes overlap
+        summary["contact_voxel_count"] += local_summary["contact_voxel_count"]
+        summary["contact_volume_nm3"] += local_summary["contact_volume_nm3"]
+        summary["crista_junction_count"] += local_summary["crista_junction_count"]
+        if np.isfinite(local_summary["mean_junction_extension_nm"]):
+            extensions.append(local_summary["mean_junction_extension_nm"])
+
+    if extensions:
+        summary["mean_junction_extension_nm"] = float(np.mean(extensions))
+    return labels, summary
 
 
 _JUNCTION_DISTANCE_NAN = {
@@ -1292,6 +1439,7 @@ def _single_mito_row(
     footprint_nm: Optional[float] = None,
     min_skeleton_nm: Optional[float] = None,
     terminus_merge_nm: Optional[float] = None,
+    junction_out: Optional[np.ndarray] = None,
 ) -> Dict[str, float]:
     """Compute the statistics row for a single mitochondrion instance.
 
@@ -1346,8 +1494,21 @@ def _single_mito_row(
     mito_vol = float(mito_local.sum()) * voxel_vol
     crista_vol = float(crista_local.sum()) * voxel_vol
 
+    # Three DIFFERENT border questions are asked below; they need three different answers, and
+    # conflating the last two is what made the junction exclusion silently inert on an offset crop.
+    #   1. Does this mito enter the unknown zone at all?  -> `touches_border` above, global-aware.
+    #   2. Is this bbox face a genuine volume face?       -> `boundary`, an exact-face test. Right for
+    #      the meshes: it asks whether the object is CLIPPED here, and a mito whose bbox starts one
+    #      voxel in genuinely ends there, so its surface is real and must be closed, not trimmed.
+    #   3. Where INSIDE this crop is the membrane unknown? -> `border_radii`. The zone is a global
+    #      fact (`approximate_membrane` trims it on the whole volume), so a crop starting one voxel
+    #      inside the volume still overlaps it while `boundary` reports no volume face at all.
     boundary = np.array(
         [[bbox[a] == 0, bbox[a + ndim] == vol_shape[a]] for a in range(ndim)], dtype=bool
+    )
+    border_radii = np.array(
+        [[max(0, border_radius - bbox[a]),
+          max(0, border_radius - (vol_shape[a] - bbox[a + ndim]))] for a in range(ndim)], dtype=int
     )
 
     has_crista = crista_local.any()
@@ -1375,7 +1536,8 @@ def _single_mito_row(
             crista_local, membrane_local, voxel_size,
             junction_mode=junction_mode, max_extension_nm=max_extension_nm,
             terminus_nm=terminus_nm, min_junction_volume_nm3=min_junction_volume_nm3,
-            border_radius=border_radius, boundary=boundary,
+            # per-face radii already encode `boundary`; passing both would zero them where they matter
+            border_radius=border_radii,
             n_jobs=inner_n_jobs, membrane_distance=membrane_distance, lumen_mask=lumen_local,
             footprint_nm=footprint_nm,
             min_skeleton_nm=min_skeleton_nm, terminus_merge_nm=terminus_merge_nm,
@@ -1388,6 +1550,14 @@ def _single_mito_row(
             surface_area_nm2=mito_surface, n_jobs=inner_n_jobs,
             mesh_vertices=mesh_verts, mesh_faces=mesh_faces,
         )
+        if junction_out is not None:
+            # A basic-slicing VIEW of the caller's volume, so this writes through with no copy. The
+            # write is masked rather than a plain assignment because bounding boxes overlap: a plain
+            # one would zero a neighbour's junctions. Ids are per-instance (1..n) and so repeat across
+            # mitochondria, but the painted voxels cannot: they lie inside crista_local, hence inside
+            # mito_local, which is disjoint between instances — which also makes this thread-safe.
+            written = contact_labels_local > 0
+            junction_out[written] = contact_labels_local[written]
         del membrane_distance, contact_labels_local
     else:
         contact_summary = {
@@ -1472,7 +1642,8 @@ def compute_mito_crista_statistics(
     footprint_nm: Optional[float] = None,
     min_skeleton_nm: Optional[float] = None,
     terminus_merge_nm: Optional[float] = None,
-) -> pd.DataFrame:
+    return_junction_labels: bool = False,
+) -> Union[pd.DataFrame, Tuple[pd.DataFrame, np.ndarray]]:
     """Compute all crista metrics organised by mitochondrial instance.
 
     Args:
@@ -1540,6 +1711,12 @@ def compute_mito_crista_statistics(
             shorter than this has no termini and so cannot score a junction.
         terminus_merge_nm: Termini within this distance (nm) on the same skeleton component collapse to
             one (``junction_mode="skeleton"`` only). See :func:`compute_crista_skeleton`.
+        return_junction_labels: If True, also return the junction label array these counts were
+            computed from, so a caller can *display* exactly what the table reports instead of
+            re-detecting junctions itself and getting a different answer. Each worker writes its own
+            instance's labels into a view of the output volume, so this costs one int32 volume and no
+            extra computation. Ids are per-instance (``1..crista_junction_count``) and therefore repeat
+            between mitochondria; the painted voxels never do, since each lies inside its own mito.
 
     Every ``junction_mode="skeleton"`` tuning parameter above is ``None`` by default, meaning "leave the
     detector's own default in force" — the concrete values live in :func:`detect_junctions_skeleton` and
@@ -1576,6 +1753,9 @@ def compute_mito_crista_statistics(
         divide it by mito_volume_nm3 and crista_volume_nm3 respectively (nm^-1, "cristae surface
         density"). The inner-boundary-membrane area alone is
         imm_surface_area_nm2 - cristae_surface_area_nm2.
+        When ``return_junction_labels`` is True the return value is instead
+        ``(DataFrame, junction_labels)``, the second an int32 array of the input shape.
+
         The *_nn_junction_distance_nm columns are geodesic nearest-neighbour distances between
         crista-membrane junctions along the membrane; junction_clustering_index is a Clark-Evans
         index (< 1 clustered, ~ 1 random, > 1 dispersed). ``mean_junction_extension_nm`` is the mean
@@ -1603,6 +1783,8 @@ def compute_mito_crista_statistics(
     vol_shape = mito_segmentation.shape
     border_radius = _gap_radius(voxel_size, membrane_thickness_nm, border_gap_nm, ndim)
 
+    junction_labels = np.zeros(vol_shape, dtype=np.int32) if return_junction_labels else None
+
     tasks = []
     for prop in regionprops(mito_segmentation):
         bbox = prop.bbox
@@ -1612,11 +1794,13 @@ def compute_mito_crista_statistics(
             int(prop.label), bbox,
             mito_segmentation[slices], crista_binary[slices], membrane_mask[slices],
             lumen_crop,
+            # a basic-slicing view, so each worker writes its junctions straight into the output
+            None if junction_labels is None else junction_labels[slices],
         ))
     total = len(tasks)
 
     def _run(task, inner_n_jobs):
-        label, bbox, mito_crop, crista_crop, membrane_crop, lumen_crop = task
+        label, bbox, mito_crop, crista_crop, membrane_crop, lumen_crop, junction_out = task
         return _single_mito_row(
             label, bbox, mito_crop, crista_crop, membrane_crop,
             voxel_size, sampling, voxel_vol, vol_shape, border_radius,
@@ -1625,6 +1809,7 @@ def compute_mito_crista_statistics(
             terminus_nm=terminus_nm, min_junction_volume_nm3=min_junction_volume_nm3,
             footprint_nm=footprint_nm,
             min_skeleton_nm=min_skeleton_nm, terminus_merge_nm=terminus_merge_nm,
+            junction_out=junction_out,
         )
 
     n_workers = os.cpu_count() if n_jobs == -1 else max(1, n_jobs)
@@ -1655,4 +1840,5 @@ def compute_mito_crista_statistics(
         _consume(_run(task, n_workers) for task in tasks)
 
     rows.sort(key=lambda row: row["mito_label_id"])
-    return pd.DataFrame(rows)
+    table = pd.DataFrame(rows)
+    return (table, junction_labels) if return_junction_labels else table
