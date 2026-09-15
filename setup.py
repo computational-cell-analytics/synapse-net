@@ -15,6 +15,7 @@ setup(
         "bioimage-cpp",
         "python-elf>=0.9.0",
         "torch_em>=0.9.0",
+        "networkx",
         "numpy",
         "scipy",
         "scikit-image",
@@ -45,6 +46,7 @@ setup(
             "synapse_net.run_supervised_training = synapse_net.training.supervised_training:main",
             "synapse_net.run_domain_adaptation = synapse_net.training.domain_adaptation:main",
             "synapse_net.visualize_vesicle_pools = synapse_net.tools.cli:pool_visualization_cli",
+            "synapse_net.run_cristae_analysis = synapse_net.tools.cli:cristae_analysis_cli",
         ],
         "napari.manifest": [
             "synapse_net = synapse_net:napari.yaml",
