@@ -29,8 +29,9 @@ from ..inference.vesicles import VESICLE_SEGMENTATION_MODES, segment_vesicles
 
 
 _MAX_MIN_SIZE = 100_000_000
-# Training voxel size (nm, isotropic) of the LDCV v4 checkpoint, used as the default for custom models.
-_DEFAULT_CUSTOM_MODEL_VOXEL_SIZE = 2.69
+# Training voxel size (nm, isotropic) of the LDCV v4 checkpoint, from the mrc headers of its
+# training data (49.2 A). Used as the default for custom models.
+_DEFAULT_CUSTOM_MODEL_VOXEL_SIZE = 4.92
 _POSTPROCESSING_PARAMETER_SPECS = {
     segment_vesicles: {
         "min_size": {"type": "int", "min": 0, "max": _MAX_MIN_SIZE, "step": 1},
