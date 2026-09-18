@@ -16,6 +16,7 @@ def get_3d_model(
     scale_factors: Tuple[Tuple[int, int, int]] = [[1, 2, 2], [2, 2, 2], [2, 2, 2], [2, 2, 2]],
     initial_features: int = 32,
     final_activation: str = "Sigmoid",
+    norm: Optional[str] = "InstanceNorm",
 ) -> torch.nn.Module:
     """Get the U-Net model for 3D segmentation tasks.
 
@@ -25,6 +26,8 @@ def get_3d_model(
         initial_features: The number of features in the first level of the U-Net.
             The number of features increases by a factor of two in each level.
         final_activation: The activation applied to the last output layer.
+        norm: The normalization layer used in the convolutional blocks.
+            Pass None to build the network without normalization layers.
 
     Returns:
         The U-Net.
@@ -36,6 +39,7 @@ def get_3d_model(
         initial_features=initial_features,
         gain=2,
         final_activation=final_activation,
+        norm=norm,
     )
     return model
 
@@ -101,6 +105,7 @@ def get_supervised_loader(
     ignore_label: Optional[int] = None,
     label_transform: Optional[callable] = None,
     label_paths: Optional[Tuple[str]] = None,
+    transform: Optional[callable] = None,
     **loader_kwargs,
 ) -> torch.utils.data.DataLoader:
     """Get a dataloader for supervised segmentation training.
@@ -126,6 +131,8 @@ def get_supervised_loader(
             If no label transform is passed (the default) a boundary transform is used.
         label_paths: Optional paths containing the labels / annotations for training.
             If not given, the labels are expected to be contained in the `data_paths`.
+        transform: Joint transformation applied to the raw data and the labels, after the
+            `label_transform`. By default padding and the standard augmentations are applied.
         loader_kwargs: Additional keyword arguments for the dataloader.
 
     Returns:
@@ -147,7 +154,9 @@ def get_supervised_loader(
             raise NotImplementedError
         label_transform = torch_em.transform.label.connected_components
 
-    if ndim == 2:
+    if transform is not None:  # A specific joint transform was passed, do nothing.
+        pass
+    elif ndim == 2:
         adjusted_patch_shape = _adjust_patch_shape(ndim, patch_shape)
         transform = torch_em.transform.Compose(
             torch_em.transform.PadIfNecessary(adjusted_patch_shape), torch_em.transform.get_augmentations(2)
@@ -181,6 +190,25 @@ def get_supervised_loader(
     return loader
 
 
+def _resolve_resume_checkpoint(save_root, name, checkpoint_path, verbose=True):
+    # An explicitly passed checkpoint always wins, so that a new run can be started from a
+    # specific model without being silently redirected to a previous run with the same name.
+    if checkpoint_path:
+        if verbose:
+            print("Initializing the model from the checkpoint", checkpoint_path)
+        return checkpoint_path
+
+    if save_root is None:
+        return None
+
+    previous_run = os.path.join(save_root, "checkpoints", name)
+    if os.path.exists(os.path.join(previous_run, "best.pt")):
+        if verbose:
+            print("Initializing the model from the previous training run in", previous_run)
+        return previous_run
+
+    return None
+
 def supervised_training(
     name: str,
     train_paths: Tuple[str],
@@ -206,6 +234,8 @@ def supervised_training(
     in_channels: int = 1,
     out_channels: int = 2,
     initial_features: int = 32,
+    norm: Optional[str] = "InstanceNorm",
+    transform: Optional[callable] = None,
     mask_channel: bool = False,
     checkpoint_path: Optional[str] = None,
     save_every_kth_epoch: Optional[int] = None,
@@ -252,9 +282,15 @@ def supervised_training(
         label_transform: Label transform that is applied to the segmentation to compute the targets.
             If no label transform is passed (the default) a boundary transform is used.
         loss_fn: Custom loss function. If None, will default to `torch_em.loss.DiceLoss`.
+        in_channels: The number of input channels of the UNet. Use a value larger than one to train
+            on data with multiple channels, and pass `with_channels=True` so that the loader reads them.
         out_channels: The number of output channels of the UNet.
         initial_features: The number of features in the first level of the UNet.
             The number of features increases by a factor of two in each level.
+        norm: The normalization layer used in the convolutional blocks of the UNet.
+            Pass None to train a network without normalization layers.
+        transform: Joint transformation applied to the raw data and the labels.
+            By default padding and the standard augmentations are applied.
         mask_channel: Whether the last channels in the labels should be used for masking the loss.
             This can be used to implement more complex masking operations and is not compatible with `ignore_label`.
         checkpoint_path: Path to the directory where 'best.pt' resides; continue training this model.
@@ -269,11 +305,11 @@ def supervised_training(
     train_loader = get_supervised_loader(train_paths, raw_key, label_key, patch_shape, batch_size,
                                          n_samples=n_samples_train, rois=train_rois, sampler=sampler,
                                          ignore_label=ignore_label, label_transform=label_transform,
-                                         label_paths=train_label_paths, **loader_kwargs)
+                                         label_paths=train_label_paths, transform=transform, **loader_kwargs)
     val_loader = get_supervised_loader(val_paths, raw_key, label_key, patch_shape, batch_size,
                                        n_samples=n_samples_val, rois=val_rois, sampler=sampler,
                                        ignore_label=ignore_label, label_transform=label_transform,
-                                       label_paths=val_label_paths, **loader_kwargs)
+                                       label_paths=val_label_paths, transform=transform, **loader_kwargs)
 
     if check:
         from torch_em.util.debug import check_loader
@@ -287,7 +323,9 @@ def supervised_training(
     elif is_2d:
         model = get_2d_model(out_channels=out_channels, in_channels=in_channels, initial_features=initial_features)
     else:
-        model = get_3d_model(out_channels=out_channels, in_channels=in_channels, initial_features=initial_features)
+        model = get_3d_model(
+            out_channels=out_channels, in_channels=in_channels, initial_features=initial_features, norm=norm
+        )
 
     base_loss = loss_fn if loss_fn is not None else torch_em.loss.DiceLoss()
     metric = base_loss

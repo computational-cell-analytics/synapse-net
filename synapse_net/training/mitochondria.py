@@ -19,7 +19,7 @@ from typing import List, Optional, Sequence, Tuple, Union
 import torch_em
 from torch_em.data import MinInstanceSampler
 
-from .supervised_training import supervised_training
+from .supervised_training import _resolve_resume_checkpoint, supervised_training
 
 
 def get_mitochondria_paths(
@@ -73,26 +73,6 @@ def get_mitochondria_paths(
         n_val = 1
     n_train = len(paths) - n_val
     return paths[:n_train], paths[n_train:]
-
-
-def _resolve_resume_checkpoint(save_root, name, checkpoint_path, verbose=True):
-    # An explicitly passed checkpoint always wins, so that a new run can be started from a
-    # specific model without being silently redirected to a previous run with the same name.
-    if checkpoint_path:
-        if verbose:
-            print("Initializing the model from the checkpoint", checkpoint_path)
-        return checkpoint_path
-
-    if save_root is None:
-        return None
-
-    previous_run = os.path.join(save_root, "checkpoints", name)
-    if os.path.exists(os.path.join(previous_run, "best.pt")):
-        if verbose:
-            print("Initializing the model from the previous training run in", previous_run)
-        return previous_run
-
-    return None
 
 
 def mitochondria_training(
