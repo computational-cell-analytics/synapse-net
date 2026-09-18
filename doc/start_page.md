@@ -162,7 +162,7 @@ For more options supported by the IMOD exports, please run `synapse_net.export_t
 
 > Note: to use these commands you have to install IMOD.
 
-SynapseNet also provides two CLI comamnds for training models, one for supervised network training (see [Supervised Training](#supervised-training) for details) and one for domain adaptation (see [Domain Adaptation](#domain-adaptation) for details).
+SynapseNet also provides three CLI comamnds for training models: one for supervised network training (see [Supervised Training](#supervised-training) for details), one for training a mitochondria model for electron tomography (see [Mitochondria Training](#mitochondria-training) for details) and one for domain adaptation (see [Domain Adaptation](#domain-adaptation) for details).
 
 
 ## Python Library
@@ -207,6 +207,40 @@ In this case, the model is initialized with the weight's of the 3d vesicle segme
 Run
 ```bash
 synapse_net.run_supervised_training -h
+```
+for more information and instructions on how to use the command.
+
+
+### Mitochondria Training
+
+SynapseNet provides a dedicated function for training a model for mitochondria segmentation in electron tomograms.
+It reproduces the recipe that was used for our `mitochondria2` model and is implemented in
+`synapse_net.training.mitochondria`. Compared to the generic supervised training it fixes the hyperparameters of that
+model, expects the tomograms and annotations in the same hdf5 file, and normalizes the tomograms with the 1st and 99th
+percentile instead of standardizing them.
+
+We also provide a command line function to run it: `synapse_net.run_mitochondria_training`.
+It expects one hdf5 file per tomogram, which contains the tomogram and the mitochondria annotations:
+```bash
+synapse_net.run_mitochondria_training \
+    -n my-mito-model \  # The name of the model checkpoint.
+    -i /path/to/tomograms \ # The folder with the hdf5 files, which is searched recursively.
+    --raw_key raw \ # The internal path of the tomogram, 'raw' by default.
+    --label_key labels/mitochondria \ # The internal path of the annotations, 'labels/mitochondria' by default.
+    --patch_shape 32 256 256 \ # The patch shape in ZYX.
+    --batch_size 8 \ # The batch size for training.
+    --n_iterations 150000 \ # The maximal number of iterations to train for.
+```
+The data is split into training and validation data randomly, with a fixed seed. Pass `--split_file` to use an explicit
+split instead. The default batch size and patch shape require a GPU with a lot of memory; reduce them and pass
+`--mixed_precision` to train on a smaller GPU.
+
+Note that the normalization is part of the model: to segment with the resulting model you have to pass
+`preprocess=torch_em.transform.raw.normalize_percentile` to `synapse_net.inference.mitochondria.segment_mitochondria`.
+
+Run
+```bash
+synapse_net.run_mitochondria_training -h
 ```
 for more information and instructions on how to use the command.
 
