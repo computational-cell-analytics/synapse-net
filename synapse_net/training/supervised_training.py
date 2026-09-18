@@ -205,9 +205,13 @@ def supervised_training(
     loss_fn: Optional[torch.nn.Module] = None,
     in_channels: int = 1,
     out_channels: int = 2,
+    initial_features: int = 32,
     mask_channel: bool = False,
     checkpoint_path: Optional[str] = None,
     save_every_kth_epoch: Optional[int] = None,
+    mixed_precision: bool = True,
+    early_stopping: Optional[int] = None,
+    log_image_interval: int = 100,
     **loader_kwargs,
 ):
     """Run supervised segmentation training.
@@ -249,11 +253,17 @@ def supervised_training(
             If no label transform is passed (the default) a boundary transform is used.
         loss_fn: Custom loss function. If None, will default to `torch_em.loss.DiceLoss`.
         out_channels: The number of output channels of the UNet.
+        initial_features: The number of features in the first level of the UNet.
+            The number of features increases by a factor of two in each level.
         mask_channel: Whether the last channels in the labels should be used for masking the loss.
             This can be used to implement more complex masking operations and is not compatible with `ignore_label`.
         checkpoint_path: Path to the directory where 'best.pt' resides; continue training this model.
         save_every_kth_epoch: Save checkpoints after every kth epoch in a separate file.
             The corresponding checkpoints will be saved with the naming scheme 'epoch-{epoch}.pt'.
+        mixed_precision: Whether to train with mixed precision.
+        early_stopping: The number of epochs without improvement after which training is stopped.
+            By default training runs for the full number of iterations.
+        log_image_interval: The interval (in iterations) at which images are written to the training log.
         loader_kwargs: Additional keyword arguments for the dataloader.
     """
     train_loader = get_supervised_loader(train_paths, raw_key, label_key, patch_shape, batch_size,
@@ -275,9 +285,9 @@ def supervised_training(
     if checkpoint_path is not None:
         model = torch_em.util.load_model(checkpoint=checkpoint_path)
     elif is_2d:
-        model = get_2d_model(out_channels=out_channels, in_channels=in_channels)
+        model = get_2d_model(out_channels=out_channels, in_channels=in_channels, initial_features=initial_features)
     else:
-        model = get_3d_model(out_channels=out_channels, in_channels=in_channels)
+        model = get_3d_model(out_channels=out_channels, in_channels=in_channels, initial_features=initial_features)
 
     base_loss = loss_fn if loss_fn is not None else torch_em.loss.DiceLoss()
     metric = base_loss
@@ -315,8 +325,9 @@ def supervised_training(
         train_loader=train_loader,
         val_loader=val_loader,
         learning_rate=lr,
-        mixed_precision=True,
-        log_image_interval=100,
+        mixed_precision=mixed_precision,
+        log_image_interval=log_image_interval,
+        early_stopping=early_stopping,
         compile_model=False,
         save_root=save_root,
         loss=loss,
