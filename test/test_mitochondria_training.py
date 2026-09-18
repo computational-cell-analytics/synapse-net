@@ -1,5 +1,6 @@
 import json
 import os
+import platform
 import unittest
 from shutil import rmtree
 from subprocess import run
@@ -108,6 +109,7 @@ class TestMitochondriaTraining(unittest.TestCase):
         self.assertIs(kwargs["raw_transform"], torch_em.transform.raw.normalize_percentile)
         self.assertEqual(kwargs["sampler"].p_reject, 0.95)
 
+    @unittest.skipIf(platform.system() == "Windows", "CLI does not work on Windows")
     def test_mitochondria_training_cli(self):
         name = "test-mito-model"
         cmd = [
