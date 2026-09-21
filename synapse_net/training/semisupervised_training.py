@@ -1,3 +1,4 @@
+import os
 from typing import Optional, Tuple
 
 import torch
@@ -133,26 +134,49 @@ def semisupervised_learning(
     n_samples_val: Optional[int] = None,
     source_checkpoint=None,
     check: bool = False,
-)
-    """Run semi-supervised segmentation training.
+):
+    """Run semisupervised segmentation training: supervised teacher warmup followed by
+    mean teacher training with invertible augmentations.
+
+    This proceeds in two steps:
+
+    1. If no `source_checkpoint` is given, run supervised training for as a warmup for the 
+        teacher model.
+    2. Run semisupervised training with the mean teacher setup, using the warmup checkpoint to 
+        initialize the teacher model. 
 
     Args:
-        name: The name for the checkpoint to be trained.
-        train_paths: Filepaths to the hdf5 files for the training data.
-        val_paths: Filepaths to the df5 files for the validation data.
-        label_key: The key that holds the labels inside of the hdf5.
+        name: The name for the checkpoint to be trained. The warmup checkpoint is saved
+            under the name "{name}-warmup".
+        unsupervised_train_paths: Filepaths to the hdf5 files for the unsupervised
+            training data. This data does not require labels.
+        unsupervised_val_paths: Filepaths to the hdf5 files for the unsupervised
+            validation data. This data does not require labels.
+        supervised_train_paths: Filepaths to the hdf5 files for the supervised training
+            data, requires labels. Used for both the teacher warmup and the semi-supervised loss.
+        supervised_val_paths: Filepaths to the hdf5 files for the supervised validation data,
+            requires labels.
         patch_shape: The patch shape used for a training example.
             In order to run 2d training pass a patch shape with a singleton in the z-axis,
             e.g. 'patch_shape = [1, 512, 512]'.
-        save_root: Folder where the checkpoint will be saved.
-        raw_key: The key that holds the raw data inside of the hdf5.
+        label_key: The key that holds the labels inside of the hdf5 files.
+        save_root: Folder where the checkpoints will be saved.
+        raw_key: The key that holds the raw data inside of the hdf5 files.
+        confidence_threshold: The threshold for filtering data in the unsupervised loss.
+            The label filtering is done based on the uncertainty of network predictions, and only
+            the data with higher certainty than this threshold is used for training.
         batch_size: The batch size for training.
         lr: The initial learning rate.
-        n_iterations: The number of iterations to train for.
+        n_iterations: The number of mean-teacher training iterations.
+        teacher_warmup_iterations: The number of iterations for the supervised teacher warmup,
+            only used if no warmup checkpoint exists yet and no `source_checkpoint` is given.
         n_samples_train: The number of train samples per epoch. By default this will be estimated
             based on the patch_shape and size of the volumes used for training.
         n_samples_val: The number of val samples per epoch. By default this will be estimated
             based on the patch_shape and size of the volumes used for validation.
+        source_checkpoint: Checkpoint to the initial model trained on the source domain.
+            This is used to initialize the teacher model. If not given, the warmup checkpoint
+            for `name` is used if it exists, otherwise a supervised teacher warmup is run first.
         check: Whether to check the training and validation loaders instead of running training.
     """
     # check both sets of loaders before teacher warmup
@@ -211,7 +235,7 @@ def semisupervised_learning(
         supervised_train_paths=supervised_train_paths,
         supervised_val_paths=supervised_val_paths,
         raw_key=raw_key,
-        raw_key_supervised=raw_key
+        raw_key_supervised=raw_key,
         label_key=label_key,
         patch_shape=patch_shape,
         save_root=save_root,
@@ -221,7 +245,7 @@ def semisupervised_learning(
         lr=lr,
         n_iterations=n_iterations,
         n_samples_train=n_samples_train,
-        n_samples_val=n_samples_val
+        n_samples_val=n_samples_val,
         check=False,
     )
 
