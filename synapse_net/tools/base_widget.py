@@ -398,7 +398,15 @@ class BaseWidget(QWidget):
         keeps its original transform, which may be stale if the source layer / voxel size changed
         between runs; any ``layer_kwargs`` (e.g. ``opacity``, ``blending``, ``colormap``) are reapplied
         too. On first add these go through the layer constructor. Returns the (new or existing) layer.
+
+        A layer of a *different* type carrying this name is replaced rather than refreshed: assigning
+        e.g. an (n, 2, ndim) vectors array to a Points layer left over from an earlier run would raise
+        deep inside napari.
         """
+        if name in self.viewer.layers:
+            expected = f"add_{type(self.viewer.layers[name]).__name__.lower()}"
+            if getattr(add_fn, "__name__", expected) != expected:
+                del self.viewer.layers[name]
         if name in self.viewer.layers:
             layer = self.viewer.layers[name]
             layer.data = data
@@ -439,4 +447,33 @@ class BaseWidget(QWidget):
             values = np.ones(len(vertices), dtype="float32")
         return self._add_or_update_layer(
             self.viewer.add_surface, name, (vertices, faces, values), scale, translate, layer_kwargs
+        )
+
+    def add_or_update_points(self, name, points, *, scale=None, translate=None, **layer_kwargs):
+        """Add a Points layer, or refresh it in place if one with this name already exists.
+
+        ``points`` is an (n, ndim) array in the same coordinate frame as the other layers — i.e. voxel
+        indices, with the physical placement left to ``scale``/``translate``. See
+        :meth:`_add_or_update_layer` for the refresh/transform semantics. Returns the layer.
+
+        For line-like data such as a skeleton, use :meth:`add_or_update_vectors` rather than Shapes: a
+        Shapes layer needs ``shape_type``, which is a constructor-only argument and so cannot be
+        reapplied on the refresh path, and thousands of individual line shapes render slowly.
+        """
+        return self._add_or_update_layer(
+            self.viewer.add_points, name, points, scale, translate, layer_kwargs
+        )
+
+    def add_or_update_vectors(self, name, vectors, *, scale=None, translate=None, **layer_kwargs):
+        """Add a Vectors layer, or refresh it in place if one with this name already exists.
+
+        ``vectors`` is an (n, 2, ndim) array of ``[start, direction]`` pairs, in the same coordinate
+        frame as the other layers — i.e. voxel indices, with the physical placement left to
+        ``scale``/``translate``. This is the layer to use for the edges of a graph such as a skeleton:
+        one instanced segment per edge, no constructor-only ``shape_type`` to reapply, and it stays
+        responsive at edge counts where a Shapes layer does not. See :meth:`_add_or_update_layer` for
+        the refresh/transform semantics. Returns the layer.
+        """
+        return self._add_or_update_layer(
+            self.viewer.add_vectors, name, vectors, scale, translate, layer_kwargs
         )
