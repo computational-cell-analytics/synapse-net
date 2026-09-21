@@ -6,8 +6,7 @@ import torch_em.self_training as self_training
 from torchvision import transforms
 from torch_em.data import RawDatasetWithMasks
 
-from .supervised_training import get_2d_model, get_3d_model, get_supervised_loader, _determine_ndim
-
+from .supervised_training import get_2d_model, get_3d_model, get_supervised_loader, _determine_ndim, supervised_training
 
 def weak_augmentations(p: float = 0.75) -> callable:
     """The weak augmentations used in the unsupervised data loader.
@@ -115,7 +114,118 @@ def get_unsupervised_loader(
 
 # TODO: use different paths for supervised and unsupervised training
 # (We are currently not using this functionality directly, so this is not a high priority)
-def semisupervised_training(
+def semisupervised_learning(
+    name: str,
+    unsupervised_train_paths: Tuple[str],
+    unsupervised_val_paths: Tuple[str],
+    supervised_train_paths: Tuple[str],
+    supervised_val_paths: Tuple[str],
+    patch_shape: Tuple[int, int, int],
+    label_key: str, 
+    save_root: str,
+    raw_key: str = "raw",
+    confidence_threshold: float = 0.9,
+    batch_size: int = 1,
+    lr: float = 1e-4,
+    n_iterations: int = int(1e5),
+    teacher_warmup_iterations: int = int(1e4),
+    n_samples_train: Optional[int] = None,
+    n_samples_val: Optional[int] = None,
+    source_checkpoint=None,
+    check: bool = False,
+)
+    """Run semi-supervised segmentation training.
+
+    Args:
+        name: The name for the checkpoint to be trained.
+        train_paths: Filepaths to the hdf5 files for the training data.
+        val_paths: Filepaths to the df5 files for the validation data.
+        label_key: The key that holds the labels inside of the hdf5.
+        patch_shape: The patch shape used for a training example.
+            In order to run 2d training pass a patch shape with a singleton in the z-axis,
+            e.g. 'patch_shape = [1, 512, 512]'.
+        save_root: Folder where the checkpoint will be saved.
+        raw_key: The key that holds the raw data inside of the hdf5.
+        batch_size: The batch size for training.
+        lr: The initial learning rate.
+        n_iterations: The number of iterations to train for.
+        n_samples_train: The number of train samples per epoch. By default this will be estimated
+            based on the patch_shape and size of the volumes used for training.
+        n_samples_val: The number of val samples per epoch. By default this will be estimated
+            based on the patch_shape and size of the volumes used for validation.
+        check: Whether to check the training and validation loaders instead of running training.
+    """
+    # check both sets of loaders before teacher warmup
+    if check:
+        from torch_em.util.debug import check_loader
+
+        unsupervised_train_loader = get_unsupervised_loader(
+            unsupervised_train_paths, raw_key,
+            patch_shape, batch_size, n_samples_train,
+        )
+        unsupervised_val_loader = get_unsupervised_loader(
+            unsupervised_val_paths, raw_key, 
+            patch_shape, batch_size, n_samples_val,
+        )
+        supervised_train_loader = get_supervised_loader(
+            supervised_train_paths, raw_key, label_key,
+            patch_shape, batch_size, n_samples_train,
+        )
+        supervised_val_loader = get_supervised_loader(
+            supervised_val_paths, raw_key, label_key,
+            patch_shape, batch_size, n_samples_val,
+        )
+        check_loader(unsupervised_train_loader, n_samples=2)
+        check_loader(unsupervised_val_loader, n_samples=2)
+        check_loader(supervised_train_loader, n_samples=2)
+        check_loader(supervised_val_loader, n_samples=2)
+        
+        return
+
+    warmup_name = f"{name}-warmup"
+    if source_checkpoint is None:
+        warmup_checkpoint = os.path.join(save_root, "checkpoints", warmup_name, "best.pt")
+
+        if not os.path.exists(warmup_checkpoint):
+            print(f"No warmup checkpoint was found, initiating supervised warmup for teacher model with {teacher_warmup_iterations} iterations.")
+
+            supervised_training(
+                name=warmup_name,
+                train_paths=supervised_train_paths,
+                val_paths=supervised_val_paths,
+                label_key=label_key,
+                patch_shape=patch_shape,
+                save_root=save_root,
+                batch_size=batch_size,
+                lr=lr,
+                n_iterations=teacher_warmup_iterations,
+                check=False,
+            )
+        source_checkpoint = warmup_checkpoint
+    
+    from .domain_adaptation import mean_teacher_adaptation
+    mean_teacher_adaptation(
+        name=name,
+        unsupervised_train_paths=unsupervised_train_paths,
+        unsupervised_val_paths=unsupervised_val_paths,
+        supervised_train_paths=supervised_train_paths,
+        supervised_val_paths=supervised_val_paths,
+        raw_key=raw_key,
+        raw_key_supervised=raw_key
+        label_key=label_key,
+        patch_shape=patch_shape,
+        save_root=save_root,
+        source_checkpoint=source_checkpoint,
+        confidence_threshold=confidence_threshold,
+        batch_size=batch_size,
+        lr=lr,
+        n_iterations=n_iterations,
+        n_samples_train=n_samples_train,
+        n_samples_val=n_samples_val
+        check=False,
+    )
+
+def semisupervised_training_v0(
     name: str,
     train_paths: Tuple[str],
     val_paths: Tuple[str],
