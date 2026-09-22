@@ -1,3 +1,4 @@
+import importlib
 import os
 import unittest
 from shutil import rmtree
@@ -159,7 +160,7 @@ class TestSeeding(unittest.TestCase):
 
 
 class TestTrainingArgumentsArePassedOn(unittest.TestCase):
-    """The new arguments have to reach 'supervised_training' from both task modules."""
+    """The new arguments have to reach 'supervised_training' from every task module."""
 
     def test_mitochondria_passes_the_new_arguments(self):
         from synapse_net.training.mitochondria import mitochondria_training
@@ -185,6 +186,18 @@ class TestTrainingArgumentsArePassedOn(unittest.TestCase):
         self.assertEqual(kwargs["seed"], 7)
         self.assertIs(kwargs["deterministic"], True)
 
+    def test_vol_em_mitochondria_passes_the_new_arguments(self):
+        from synapse_net.training.mitochondria_vol_em import vol_em_mitochondria_training
+
+        with mock.patch("synapse_net.training.mitochondria_vol_em.supervised_training") as training:
+            vol_em_mitochondria_training(name="v", train_paths=["a.h5"], val_paths=["b.h5"],
+                                         resume=True, overwrite=True, seed=7, deterministic=True)
+        kwargs = training.call_args.kwargs
+        self.assertIs(kwargs["resume"], True)
+        self.assertIs(kwargs["overwrite"], True)
+        self.assertEqual(kwargs["seed"], 7)
+        self.assertIs(kwargs["deterministic"], True)
+
     def test_defaults_are_unchanged(self):
         # The published recipes must not become seeded or overwriting by default.
         from synapse_net.training.mitochondria import mitochondria_training
@@ -195,6 +208,43 @@ class TestTrainingArgumentsArePassedOn(unittest.TestCase):
         self.assertIs(kwargs["resume"], False)
         self.assertIs(kwargs["overwrite"], False)
         self.assertIsNone(kwargs["seed"])
+
+
+class TestScaleFactorsReachTheModel(unittest.TestCase):
+    """'supervised_training' used to build the model without the scale factors it was given."""
+
+    def _build_model(self, **kwargs):
+        # 'synapse_net.training' re-exports the function 'supervised_training' under the name of its
+        # own module, which shadows it, so the module has to be looked up explicitly.
+        st = importlib.import_module("synapse_net.training.supervised_training")
+
+        with mock.patch.object(st, "get_supervised_loader"), \
+             mock.patch.object(st, "get_3d_model") as get_model, \
+             mock.patch.object(st.torch_em, "default_segmentation_trainer"):
+            st.supervised_training(
+                name="m", train_paths=("a.h5",), val_paths=("b.h5",), label_key="labels",
+                patch_shape=(32, 512, 512), **kwargs,
+            )
+        return get_model.call_args.kwargs
+
+    def test_supervised_training_passes_scale_factors_to_the_model(self):
+        scale_factors = [[1, 2, 2], [1, 2, 2], [2, 2, 2], [2, 2, 2]]
+        kwargs = self._build_model(scale_factors=scale_factors, norm=None)
+        self.assertEqual(kwargs["scale_factors"], scale_factors)
+        self.assertIsNone(kwargs["norm"])
+
+    def test_supervised_training_keeps_the_default_scale_factors(self):
+        # Not passing them must not change the model that the other recipes build.
+        self.assertNotIn("scale_factors", self._build_model())
+
+    def test_two_anisotropic_levels_build_a_usable_model(self):
+        from synapse_net.training.supervised_training import get_3d_model
+
+        model = get_3d_model(out_channels=2, initial_features=4, norm=None,
+                             scale_factors=[[1, 2, 2], [1, 2, 2], [2, 2, 2], [2, 2, 2]])
+        self.assertEqual(sum(1 for module in model.modules() if "Norm" in type(module).__name__), 0)
+        with torch.no_grad():
+            self.assertEqual(tuple(model(torch.rand(1, 1, 8, 64, 64)).shape), (1, 2, 8, 64, 64))
 
 
 if __name__ == "__main__":
