@@ -41,6 +41,14 @@ SPLIT_FILE = os.path.join(os.path.dirname(__file__), "split-mito_vol_em_aniso2lv
 
 # These differ by construction and carry no information about the recipe.
 IGNORED_FIELDS = ("name", "id_", "save_root", "device", "rank", "logger_kwargs")
+# Fields that a newer torch-em adds to the trainer, together with why they cannot change this recipe.
+# A field that a newer torch-em adds and that is not listed here is reported as a difference, because
+# it may well change what is trained.
+TOLERATED_ADDITIONS = {
+    "mixed_precision_dtype":
+        "only read by the mixed-precision train and validate loops, and this recipe sets "
+        "mixed_precision to False",
+}
 # These hold live objects and are compared structurally further down instead.
 STRUCTURAL_FIELDS = ("train_dataset", "val_dataset")
 
@@ -150,22 +158,38 @@ def _pads_of(transform):
 
 
 def compare_fields(reference, ours):
-    """Compare the flat fields of the two setups. Returns the list of differences."""
-    differences = []
+    """Compare the flat fields of the two setups.
+
+    Returns the unexpected differences, and separately the fields that only the version of torch-em
+    running here produces, which are tolerated only if they are known to be inert for this recipe.
+    """
+    differences, additions = [], []
     fields = sorted(set(reference) | set(ours))
-    print(f"{'field':<22} {'match':<7} value")
+    print(f"{'field':<24} {'match':<7} value")
     print("-" * 100)
     for field in fields:
         if field in IGNORED_FIELDS or field in STRUCTURAL_FIELDS:
             continue
-        ref_value, our_value = reference.get(field, "<missing>"), ours.get(field, "<missing>")
+
+        # A field that the published checkpoint does not have at all was added by a newer torch-em,
+        # rather than being a difference in how the recipe is built.
+        if field not in reference:
+            if field in TOLERATED_ADDITIONS:
+                additions.append((field, ours[field], TOLERATED_ADDITIONS[field]))
+                print(f"{field:<24} {'added':<7} {ours[field]} (not in the published setup)")
+            else:
+                differences.append((field, "<not in the published setup>", ours[field]))
+                print(f"{field:<24} {'NEW':<7} {ours[field]} (not in the published setup)")
+            continue
+
+        ref_value, our_value = reference[field], ours.get(field, "<missing>")
         match = ref_value == our_value
         if not match:
             differences.append((field, ref_value, our_value))
-        print(f"{field:<22} {'ok' if match else 'DIFFERS':<7} {ref_value}")
+        print(f"{field:<24} {'ok' if match else 'DIFFERS':<7} {ref_value}")
         if not match:
-            print(f"{'':<22} {'':<7} ours: {our_value}")
-    return differences
+            print(f"{'':<24} {'':<7} ours: {our_value}")
+    return differences, additions
 
 
 def compare_datasets(reference, ours):
@@ -249,7 +273,7 @@ def main():
     reference = load_reference_init(args.checkpoint)
     ours = build_our_init(train_paths, val_paths)
 
-    differences = compare_fields(reference, ours)
+    differences, additions = compare_fields(reference, ours)
     differences += compare_datasets(reference, ours)
 
     max_difference, n_with_filler = check_raw_transform(train_paths)
@@ -264,6 +288,10 @@ def main():
             print(f"  {field}: published {ref_value!r} vs ours {our_value!r}")
     else:
         print("The training setup matches the published model in every compared field.")
+
+    for field, value, reason in additions:
+        print(f"This torch-em adds '{field}' = {value!r}, which the published run did not have. "
+              f"It is inert here: {reason}.")
 
     if max_difference > 1e-6:
         failed = True

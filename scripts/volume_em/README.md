@@ -67,6 +67,12 @@ is confirmed never to fire.
 - **Run-to-run spread.** Three comparable trainings on this split reached 0.292714, 0.296378 and
   0.298842, so a spread of about 0.006 is normal and a reproduction inside that band is
   indistinguishable from noise.
+- **torch-em version.** The reproduction runs against the torch-em checkout that produced the
+  published model (`f247988b`, 0.8.3), so the library is not a variable. The setup check also passes
+  under a clean environment built from `environment.yaml` (Python 3.14, torch 2.13, torch_em 0.10.6):
+  every recipe field is identical there too, and the only difference is a `mixed_precision_dtype`
+  field that newer torch-em adds and that this recipe never reads, since it trains in single
+  precision. The check reports such additions explicitly rather than ignoring unknown fields.
 - **Seeding.** `--seed` makes runs repeatable in every way that matters — two runs with the same seed
   agree to ~1e-7 in the validation metric — but not bit-identically, because cudnn picks kernels
   adaptively. `--deterministic` does *not* fix that here (torch-em sets `warn_only=True`, so
