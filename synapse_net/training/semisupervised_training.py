@@ -113,16 +113,14 @@ def get_unsupervised_loader(
     return loader
 
 
-# TODO: use different paths for supervised and unsupervised training
-# (We are currently not using this functionality directly, so this is not a high priority)
-def semisupervised_learning(
+def semisupervised_training(
     name: str,
     unsupervised_train_paths: Tuple[str],
     unsupervised_val_paths: Tuple[str],
     supervised_train_paths: Tuple[str],
     supervised_val_paths: Tuple[str],
     patch_shape: Tuple[int, int, int],
-    label_key: str, 
+    label_key: str,
     save_root: str,
     raw_key: str = "raw",
     confidence_threshold: float = 0.9,
