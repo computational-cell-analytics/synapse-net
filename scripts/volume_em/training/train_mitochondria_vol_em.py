@@ -4,8 +4,19 @@ This reproduces the published model, which was trained on the FIB-SEM datasets 4
 voxel size of 25 nm in z and 5 nm in xy. The split is pinned in 'split-mito_vol_em_aniso2lvl_final.json',
 which also carries the data roots, so the script runs unchanged after the data has been moved.
 
-The published run stopped at iteration 14,500 of 50,000 (epoch 115, best metric 0.2927) because the
-job ran out of wall time, not because it converged. Pass '--resume' to continue it.
+How the published checkpoint came about is worth knowing, because its counters do not mean what they
+look like. Two jobs for it were submitted 24 minutes apart and ran concurrently for about 23 hours,
+both writing the same checkpoint folder. The second one picked up the first one's 'best.pt' as it
+stood after 15 epochs and warm-started from it, weights only, so its optimizer, scheduler and
+counters all restarted. Both then stopped on early stopping, neither on the 50,000 iterations or on
+the wall clock. The surviving 'best.pt' is the second job's: 14,500 of its own iterations on top of
+the 2,000 it inherited, about 16,500 gradient steps in total, with an optimizer reset in the middle.
+The first job's remaining 14,125 steps, including its own best of 0.296378, were overwritten.
+
+That is an accident, not a recipe, and it gained little: 0.292714 against the 0.296378 the first job
+had reached on its own, and 0.298842 for the sibling 'finalv2' run. This script therefore trains a
+single clean run, which is what the recipe describes. Note that running it twice with the same name
+and save_root is now refused outright rather than silently racing.
 
 To deviate from the recipe, use the CLI instead, which exposes all hyperparameters:
 synapse_net.run_vol_em_mitochondria_training -h
