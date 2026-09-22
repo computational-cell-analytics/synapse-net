@@ -131,6 +131,7 @@ def semisupervised_training(
     n_samples_train: Optional[int] = None,
     n_samples_val: Optional[int] = None,
     source_checkpoint=None,
+    supervised_sampler: Optional[callable] = None,
     check: bool = False,
 ):
     """Run semisupervised segmentation training.
@@ -171,9 +172,9 @@ def semisupervised_training(
             based on the patch_shape and size of the volumes used for training.
         n_samples_val: The number of val samples per epoch. By default this will be estimated
             based on the patch_shape and size of the volumes used for validation.
-        source_checkpoint: Checkpoint to the initial model trained on the source domain.
-            This is used to initialize the teacher model. If not given, the warmup checkpoint
-            for `name` is used if it exists, otherwise a supervised teacher warmup is run first.
+        source_checkpoint: Warmup checkpoint used to initialize the teacher model. If not provided,
+            run supervised training `teacher_warmup_iterations`.
+        supervised_sampler: Optional sampler for selecting patches from the labelled data.
         check: Whether to check the training and validation loaders instead of running training.
     """
     # check both sets of loaders before teacher warmup
@@ -191,10 +192,12 @@ def semisupervised_training(
         supervised_train_loader = get_supervised_loader(
             supervised_train_paths, raw_key, label_key,
             patch_shape, batch_size, n_samples_train,
+            sampler=supervised_sampler,
         )
         supervised_val_loader = get_supervised_loader(
             supervised_val_paths, raw_key, label_key,
             patch_shape, batch_size, n_samples_val,
+            sampler=supervised_sampler,
         )
         check_loader(unsupervised_train_loader, n_samples=2)
         check_loader(unsupervised_val_loader, n_samples=2)
@@ -220,9 +223,10 @@ def semisupervised_training(
                 batch_size=batch_size,
                 lr=lr,
                 n_iterations=teacher_warmup_iterations,
+                sampler=supervised_sampler,
                 check=False,
             )
-        source_checkpoint = warmup_checkpoint
+        source_checkpoint = os.path.dirname(warmup_checkpoint)
     
     from .domain_adaptation import mean_teacher_adaptation
     mean_teacher_adaptation(
@@ -243,6 +247,7 @@ def semisupervised_training(
         n_iterations=n_iterations,
         n_samples_train=n_samples_train,
         n_samples_val=n_samples_val,
+        supervised_sampler=supervised_sampler,
         check=False,
     )
 
