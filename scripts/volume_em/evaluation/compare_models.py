@@ -115,6 +115,47 @@ def evaluate_block(segmentation_path, block_path):
     }
 
 
+def apply_size_filter(seg, min_size):
+    """Drop instances below a size, on a finished segmentation."""
+    ids, counts = np.unique(seg, return_counts=True)
+    too_small = ids[(counts < min_size) & (ids != 0)]
+    if too_small.size == 0:
+        return seg
+    seg = seg.copy()
+    seg[np.isin(seg, too_small)] = 0
+    return seg
+
+
+def sweep_size_filter(segmentation_path, block_path, thresholds):
+    """Re-score a segmentation under several size filters.
+
+    This filters the finished segmentation, which is not the same as running the watershed with that
+    'min_size' -- the size filter inside 'segment_mitochondria' runs before the hole filling.
+
+    Read it as a diagnostic for how much of the error is sub-threshold fragments, not as a tuning run.
+    Picking a threshold off these numbers would be tuning on the test data, and it would generalize
+    badly: the two test blocks happen to hold only large mitochondria, while 18% of the mitochondria
+    annotated in the training blocks are smaller than 20,000 voxels.
+    """
+    with h5py.File(segmentation_path, "r") as f:
+        seg0 = f["seg"][:]
+    with h5py.File(block_path, "r") as f:
+        gt = f["labels/mitochondria"][:]
+
+    rows = []
+    for min_size in thresholds:
+        seg = apply_size_filter(seg0, min_size)
+        stats = matching(segmentation=seg, groundtruth=gt, threshold=0.5, criterion="iou", ignore_label=0)
+        rows.append({
+            "min_size": min_size,
+            "f1": stats["f1"], "precision": stats["precision"], "recall": stats["recall"],
+            "msa": mean_segmentation_accuracy(seg, gt),
+            "n_pred": int(len(np.unique(seg)) - (1 if 0 in seg else 0)),
+            "n_true": int(len(np.unique(gt)) - (1 if 0 in gt else 0)),
+        })
+    return rows
+
+
 def read_val_metric(model_path):
     """Read the best validation metric of a run out of its checkpoint."""
     checkpoint = model_path if os.path.isdir(model_path) else os.path.dirname(model_path)
@@ -157,6 +198,9 @@ def main():
     parser.add_argument("--tile_shape", type=int, nargs=3, help="The tile shape for prediction, in ZYX.")
     parser.add_argument("--halo", type=int, nargs=3, help="The halo for prediction, in ZYX.")
     parser.add_argument("--force", action="store_true", help="Recompute segmentations that are already cached.")
+    parser.add_argument("--size_filter_sweep", type=int, nargs="*", metavar="MIN_SIZE",
+                        help="Also re-score the segmentations under these size filters, as a diagnostic "
+                             "for how much of the error is sub-threshold fragments.")
     args = parser.parse_args()
 
     models = {}
@@ -213,6 +257,27 @@ def main():
         _markdown_table(per_block),
         "",
     ]
+    if args.size_filter_sweep:
+        sweep_rows = []
+        for name, _ in models.items():
+            for dataset, block_path in blocks.items():
+                path = os.path.join(args.segmentation_root, name, f"{dataset}.h5")
+                for row in sweep_size_filter(path, block_path, args.size_filter_sweep):
+                    row.update(model=name, dataset=dataset)
+                    sweep_rows.append(row)
+        sweep = pd.DataFrame(sweep_rows)[
+            ["model", "dataset", "min_size", "f1", "precision", "recall", "msa", "n_pred", "n_true"]
+        ]
+        report += [
+            "## Size filter sweep",
+            "",
+            "Applied to the finished segmentations, which is not the same as running the watershed with",
+            "that `min_size`, so read it as a diagnostic rather than as a tuning result.",
+            "",
+            _markdown_table(sweep),
+            "",
+        ]
+
     report = "\n".join(report)
     print("\n" + report)
 

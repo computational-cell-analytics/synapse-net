@@ -93,6 +93,35 @@ post-processing per model would fold a post-processing difference into what is m
 comparison of the trained networks. Segmentations are cached, so a model can be added later without
 redoing the others.
 
+### Post-processing, and why `min_size` is not tuned here
+
+The published post-processing parameters come from a grid search against a different, out-of-core
+watershed, and under this one they over-segment: on the test blocks the model predicts 48 and 57
+instances against 30 and 43 annotated ones, so precision (0.585) is far below recall (0.847) while the
+semantic dice is a healthy 0.849. The extra objects are small fragments.
+
+Raising `min_size` from 1,000 to 20,000 looks like a free fix — F1 goes from 0.69 to 0.85, the counts
+become exactly 30/30 and 43/43, and recall does not move at all, so only false positives are removed.
+**It is not a fix, and the default is deliberately left alone.** That threshold was read off the two
+test blocks, whose mitochondria happen to be large (5th percentile 21,100 and 35,263 voxels). In the
+14 training blocks, of 717 annotated mitochondria:
+
+| below | objects | share |
+|---|---|---|
+| 1,000 voxels | 2 | 0.3 % |
+| 5,000 voxels | 18 | 2.5 % |
+| 10,000 voxels | 45 | 6.3 % |
+| 20,000 voxels | 129 | **18.0 %** |
+
+So a 20,000-voxel filter would throw away nearly a fifth of the objects the annotators marked. It
+scores well on these two blocks and would generalize badly. The inherited `min_size=1000` is instead
+consistent with the annotation: 99.7 % of annotated mitochondria are larger than it.
+
+The real lever is the seed and boundary parameters, which is where the fragmentation comes from, and
+re-tuning those needs a validation set that is not these two blocks. `compare_models.py
+--size_filter_sweep` reproduces the table above as a diagnostic; read it as a measure of how much of
+the error is fragments, not as a tuning result.
+
 ### Test data
 
 The only held-out ground truth is two blocks under
