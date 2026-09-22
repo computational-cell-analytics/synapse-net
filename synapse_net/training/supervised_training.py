@@ -326,6 +326,7 @@ def supervised_training(
     in_channels: int = 1,
     out_channels: int = 2,
     initial_features: int = 32,
+    scale_factors: Optional[Tuple[Tuple[int, int, int]]] = None,
     norm: Optional[str] = "InstanceNorm",
     transform: Optional[callable] = None,
     mask_channel: bool = False,
@@ -383,6 +384,10 @@ def supervised_training(
         out_channels: The number of output channels of the UNet.
         initial_features: The number of features in the first level of the UNet.
             The number of features increases by a factor of two in each level.
+        scale_factors: The downscaling factors for each level of the UNet encoder, in ZYX. By default
+            a single anisotropic level is used, which matches data with an anisotropy of about two.
+            Pass more anisotropic levels for data with a stronger anisotropy. This has no effect for
+            2d training, or if the model is initialized from `checkpoint_path`.
         norm: The normalization layer used in the convolutional blocks of the UNet.
             Pass None to train a network without normalization layers.
         transform: Joint transformation applied to the raw data and the labels.
@@ -442,8 +447,11 @@ def supervised_training(
     elif is_2d:
         model = get_2d_model(out_channels=out_channels, in_channels=in_channels, initial_features=initial_features)
     else:
+        # Leave the default to 'get_3d_model', so that it stays the single source of truth.
+        scale_factor_kwargs = {} if scale_factors is None else {"scale_factors": scale_factors}
         model = get_3d_model(
-            out_channels=out_channels, in_channels=in_channels, initial_features=initial_features, norm=norm
+            out_channels=out_channels, in_channels=in_channels, initial_features=initial_features, norm=norm,
+            **scale_factor_kwargs,
         )
 
     base_loss = loss_fn if loss_fn is not None else torch_em.loss.DiceLoss()
