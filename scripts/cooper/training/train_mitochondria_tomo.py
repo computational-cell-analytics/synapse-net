@@ -11,9 +11,7 @@ Delete the '--split_file' argument below to split the data randomly instead.
 import argparse
 import os
 
-from synapse_net.training.mitochondria import (
-    _resolve_resume_checkpoint, get_mitochondria_paths, mitochondria_training
-)
+from synapse_net.training.mitochondria import get_mitochondria_paths, mitochondria_training
 
 TRAIN_ROOT = "/mnt/lustre-grete/usr/u12103/mitochondria/mito-tomo-all"
 OUTPUT_ROOT = "/mnt/lustre-grete/usr/u12103/mitochondria/tomo"
@@ -35,7 +33,8 @@ def main():
     parser.add_argument("--random_split", action="store_true",
                         help="Split the data randomly instead of using the split of the published run.")
     parser.add_argument("--resume", action="store_true",
-                        help="Initialize the model from the best checkpoint of a previous run with the same name.")
+                        help="Continue the previous run with the same name, restoring its optimizer and "
+                             "iteration count.")
     parser.add_argument("--check", action="store_true", help="Check the dataloaders instead of running training.")
     args = parser.parse_args()
 
@@ -43,10 +42,6 @@ def main():
         args.train_root, split_file=None if args.random_split else SPLIT_FILE,
     )
     print("Training on", len(train_paths), "tomograms and validating on", len(val_paths), "tomograms.")
-
-    checkpoint_path = None
-    if args.resume:
-        checkpoint_path = _resolve_resume_checkpoint(args.output_root, args.name, None)
 
     mitochondria_training(
         name=args.name,
@@ -58,7 +53,7 @@ def main():
         lr=LEARNING_RATE,
         n_iterations=N_ITERATIONS,
         early_stopping=EARLY_STOPPING,
-        checkpoint_path=checkpoint_path,
+        resume=args.resume,
         check=args.check,
     )
 

@@ -248,7 +248,7 @@ for more information and instructions on how to use the command.
 ### Cristae Training
 
 SynapseNet provides a dedicated function for training a model for cristae segmentation in electron tomograms.
-It reproduces the recipe that was used for our `cristae4` model and is implemented in `synapse_net.training.cristae`.
+It reproduces the recipe that was used for our `cristae5` model and is implemented in `synapse_net.training.cristae`.
 
 Cristae training differs from the other training functions in two ways.
 First, the network takes **two input channels**: the tomogram and a semantic mitochondria state, where 0 is background,

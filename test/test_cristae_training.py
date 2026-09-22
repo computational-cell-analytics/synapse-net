@@ -122,6 +122,34 @@ class TestCristaeTraining(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Did not find any files"):
             get_cristae_paths(self.roots, file_pattern="*.mrc")
 
+    def test_get_cristae_test_paths(self):
+        from synapse_net.training.cristae import get_cristae_paths, get_cristae_test_paths
+
+        split = {"train": ["ds0/sub/tomo-0_combined.h5"], "val": ["ds1/sub/tomo-1_combined.h5"],
+                 "test": ["ds0/sub/tomo-2_combined.h5", "ds1/sub/tomo-3_combined.h5"]}
+        split_file = os.path.join(self.tmp_folder, "split.json")
+        with open(split_file, "w") as f:
+            json.dump(split, f)
+
+        test_paths = get_cristae_test_paths(split_file, self.roots)
+        self.assertEqual(test_paths, [os.path.join(self.roots[e.split("/")[0]], e.split("/", 1)[1])
+                                      for e in split["test"]])
+
+        # A random split must be able to keep those volumes out, otherwise it trains on them.
+        train_paths, val_paths = get_cristae_paths(self.roots)
+        self.assertTrue(set(test_paths) & set(train_paths + val_paths))
+
+        train_paths, val_paths = get_cristae_paths(self.roots, exclude=test_paths)
+        self.assertFalse(set(test_paths) & set(train_paths + val_paths))
+
+    def test_get_cristae_test_paths_without_test_key(self):
+        from synapse_net.training.cristae import get_cristae_test_paths
+
+        split_file = os.path.join(self.tmp_folder, "split.json")
+        with open(split_file, "w") as f:
+            json.dump({"train": ["ds0/sub/tomo-0_combined.h5"], "val": ["ds1/sub/tomo-1_combined.h5"]}, f)
+        self.assertEqual(get_cristae_test_paths(split_file, self.roots), [])
+
     # The masked losses.
 
     def test_masked_dice_loss_per_sample(self):

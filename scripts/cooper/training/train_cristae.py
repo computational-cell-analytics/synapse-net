@@ -1,21 +1,23 @@
 """Train the cristae model for electron tomography.
 
-This reproduces the training of SynapseNet's 'cristae4' model. The training data consists of the
+This reproduces the training of SynapseNet's 'cristae5' model. The training data consists of the
 cooper and wichmann tomograms at a resolution of roughly 1.74 nm, with cristae annotations and a
 semantic mitochondria state that marks which mitochondria carry those annotations.
 
 The split file next to this script holds the exact train / val split of the published run. Pass
 '--random_split' to split the data randomly instead; the three volumes in EXCLUDE are then left out,
-because their raw data or their annotations are unreliable.
+because their raw data or their annotations are unreliable, and so are the volumes that the split
+file holds out for testing, which the run would otherwise train on.
 
 Note that the published checkpoint did not converge: it stopped at iteration 39,406 of 100,000 after
-running into the job time limit twice. Rerun this script with '--resume' to continue it.
+running into the job time limit twice. Rerun this script with '--resume' to continue it; N_ITERATIONS
+is the total number of iterations, so it will train the remaining ones.
 """
 
 import argparse
 import os
 
-from synapse_net.training.cristae import _resolve_resume_checkpoint, cristae_training, get_cristae_paths
+from synapse_net.training.cristae import cristae_training, get_cristae_paths, get_cristae_test_paths
 
 TRAIN_ROOTS = {
     "cooper_s2": "/scratch-grete/projects/nim00007/data/mitochondria/cooper/raw_mito_combined_s2",
@@ -54,18 +56,16 @@ def main():
     parser.add_argument("--random_split", action="store_true",
                         help="Split the data randomly instead of using the split of the published run.")
     parser.add_argument("--resume", action="store_true",
-                        help="Initialize the model from the best checkpoint of a previous run with the same name.")
+                        help="Continue the previous run with the same name, restoring its optimizer and "
+                             "iteration count.")
     parser.add_argument("--check", action="store_true", help="Check the dataloaders instead of running training.")
     args = parser.parse_args()
 
+    exclude = EXCLUDE if not args.random_split else EXCLUDE + get_cristae_test_paths(SPLIT_FILE, TRAIN_ROOTS)
     train_paths, val_paths = get_cristae_paths(
-        TRAIN_ROOTS, split_file=None if args.random_split else SPLIT_FILE, exclude=EXCLUDE,
+        TRAIN_ROOTS, split_file=None if args.random_split else SPLIT_FILE, exclude=exclude,
     )
     print("Training on", len(train_paths), "tomograms and validating on", len(val_paths), "tomograms.")
-
-    checkpoint_path = None
-    if args.resume:
-        checkpoint_path = _resolve_resume_checkpoint(args.output_root, args.name, None)
 
     cristae_training(
         name=args.name,
@@ -80,7 +80,7 @@ def main():
         membrane_w_pos=MEMBRANE_W_POS,
         membrane_w_neg=MEMBRANE_W_NEG,
         membrane_band_nm=MEMBRANE_BAND_NM,
-        checkpoint_path=checkpoint_path,
+        resume=args.resume,
         check=args.check,
     )
 

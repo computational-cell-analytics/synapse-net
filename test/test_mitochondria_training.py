@@ -11,9 +11,7 @@ import torch_em
 from skimage.data import binary_blobs
 from skimage.measure import label
 
-from synapse_net.training.mitochondria import (
-    _resolve_resume_checkpoint, get_mitochondria_paths, mitochondria_training
-)
+from synapse_net.training.mitochondria import get_mitochondria_paths, mitochondria_training
 
 
 class TestMitochondriaTraining(unittest.TestCase):
@@ -72,20 +70,6 @@ class TestMitochondriaTraining(unittest.TestCase):
     def test_get_mitochondria_paths_without_data(self):
         with self.assertRaisesRegex(ValueError, "Did not find any files"):
             get_mitochondria_paths(self.data_folder, file_pattern="*.mrc")
-
-    def test_resolve_resume_checkpoint(self):
-        name = "test-model"
-        # An explicit checkpoint always wins.
-        self.assertEqual(_resolve_resume_checkpoint(self.tmp_folder, name, "/some/checkpoint.pt"),
-                         "/some/checkpoint.pt")
-        # Without a previous run there is nothing to resume from.
-        self.assertIsNone(_resolve_resume_checkpoint(self.tmp_folder, name, None))
-        self.assertIsNone(_resolve_resume_checkpoint(None, name, None))
-        # With a previous run we resume from its checkpoint folder.
-        checkpoint_folder = os.path.join(self.tmp_folder, "checkpoints", name)
-        os.makedirs(checkpoint_folder)
-        open(os.path.join(checkpoint_folder, "best.pt"), "w").close()
-        self.assertEqual(_resolve_resume_checkpoint(self.tmp_folder, name, None), checkpoint_folder)
 
     def test_recipe(self):
         # Check that the hyperparameters of the published 'mitochondria2' model are passed on.

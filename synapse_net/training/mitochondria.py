@@ -19,7 +19,7 @@ from typing import List, Optional, Sequence, Tuple, Union
 import torch_em
 from torch_em.data import MinInstanceSampler
 
-from .supervised_training import _resolve_resume_checkpoint, supervised_training
+from .supervised_training import supervised_training
 
 
 def get_mitochondria_paths(
@@ -92,6 +92,10 @@ def mitochondria_training(
     early_stopping: Optional[int] = 20,
     log_image_interval: int = 50,
     checkpoint_path: Optional[str] = None,
+    resume: bool = False,
+    overwrite: bool = False,
+    seed: Optional[int] = None,
+    deterministic: bool = False,
     sampler: Optional[Union[callable, bool]] = None,
     raw_transform: Optional[callable] = None,
     num_workers: int = 8,
@@ -128,7 +132,15 @@ def mitochondria_training(
             This has no effect if the model is initialized from `checkpoint_path`.
         early_stopping: The number of epochs without improvement after which training is stopped.
         log_image_interval: The interval (in iterations) at which images are written to the training log.
-        checkpoint_path: Path to a model checkpoint to initialize the weights from.
+        checkpoint_path: Path to a model checkpoint to initialize the weights from. Only the
+            weights are loaded; pass `resume` instead to continue a previous run.
+        resume: Whether to continue the previous run with this name in `save_root`, restoring
+            its weights, optimizer and iteration count. `n_iterations` then counts the total
+            iterations, including the ones the previous run already did.
+        overwrite: Whether to replace the checkpoints of a previous run with this name.
+        seed: The seed for the random number generators used in training. By default it is
+            not set, so that repeated runs differ.
+        deterministic: Whether to also disable cudnn benchmarking when a `seed` is given.
         sampler: Sampler to accept or reject patches for training.
             By default a minimum instance sampler with a rejection probability of 0.95 is used.
         raw_transform: Transformation applied to the tomogram before it is passed to the network.
@@ -164,6 +176,10 @@ def mitochondria_training(
         check=check,
         initial_features=initial_features,
         checkpoint_path=checkpoint_path,
+        resume=resume,
+        overwrite=overwrite,
+        seed=seed,
+        deterministic=deterministic,
         mixed_precision=mixed_precision,
         early_stopping=early_stopping,
         log_image_interval=log_image_interval,
@@ -201,7 +217,7 @@ def main():
     # How to split the data into training and validation data.
     parser.add_argument("--split_file", help="A json file with the keys 'train' and 'val', which each hold a list of filepaths relative to 'data_root'. If not given, the data is split randomly.")  # noqa
     parser.add_argument("--val_fraction", type=float, default=0.15, help="The fraction of the data to use for validation. This has no effect if 'split_file' was passed.")  # noqa
-    parser.add_argument("--seed", type=int, default=42, help="The seed for shuffling the files before splitting them.")
+    parser.add_argument("--seed", type=int, default=42, help="The seed for shuffling the files before splitting them, and for the random number generators used in training.")  # noqa
 
     # The training hyperparameters.
     parser.add_argument("-p", "--patch_shape", nargs=3, type=int, default=[32, 256, 256],
@@ -220,7 +236,9 @@ def main():
     # Where to save the model, and how to initialize it.
     parser.add_argument("--save_root", help="Root path for saving the checkpoint and log dir.")
     parser.add_argument("--checkpoint_path", help="A model checkpoint to initialize the weights from.")
-    parser.add_argument("--resume", action="store_true", help="Initialize the model from the best checkpoint of a previous run with the same name in 'save_root'. Note that the optimizer state is not restored.")  # noqa
+    parser.add_argument("--resume", action="store_true", help="Continue the previous run with the same name in 'save_root', restoring its weights, optimizer and iteration count. '--n_iterations' is the total number of iterations, including the ones already done.")  # noqa
+    parser.add_argument("--overwrite", action="store_true", help="Replace the checkpoints of a previous run with the same name. By default training refuses to overwrite them.")  # noqa
+    parser.add_argument("--deterministic", action="store_true", help="Disable cudnn benchmarking so that runs with the same seed match exactly. This costs throughput.")  # noqa
     parser.add_argument("--check", action="store_true", help="Visualize samples from the data loaders to ensure correct data instead of running training.")  # noqa
     args = parser.parse_args()
 
@@ -231,8 +249,6 @@ def main():
     print("Training on", len(train_paths), "tomograms and validating on", len(val_paths), "tomograms.")
 
     checkpoint_path = args.checkpoint_path
-    if args.resume:
-        checkpoint_path = _resolve_resume_checkpoint(args.save_root, args.name, checkpoint_path)
 
     mitochondria_training(
         name=args.name, train_paths=train_paths, val_paths=val_paths, save_root=args.save_root,
@@ -240,6 +256,8 @@ def main():
         batch_size=args.batch_size, lr=args.learning_rate, n_iterations=args.n_iterations,
         n_samples_train=args.n_samples_train, n_samples_val=args.n_samples_val,
         initial_features=args.initial_features, early_stopping=args.early_stopping,
-        checkpoint_path=checkpoint_path, num_workers=args.num_workers, shuffle=args.shuffle,
+        checkpoint_path=checkpoint_path, resume=args.resume, overwrite=args.overwrite,
+        seed=args.seed, deterministic=args.deterministic,
+        num_workers=args.num_workers, shuffle=args.shuffle,
         mixed_precision=args.mixed_precision, check=args.check,
     )

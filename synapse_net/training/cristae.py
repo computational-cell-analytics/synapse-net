@@ -1,6 +1,6 @@
 """Training for cristae segmentation in electron tomography.
 
-This module reproduces the recipe that was used to train SynapseNet's `cristae4` model, which
+This module reproduces the recipe that was used to train SynapseNet's `cristae5` model, which
 segments cristae in electron tomograms at a resolution of 1.74 nm.
 
 Cristae training differs from the other training functions in this package in three ways:
@@ -31,7 +31,7 @@ import torch_em
 from torch_em.data import MinInstanceSampler
 
 from .loss import MaskedDiceLossPerSample
-from .supervised_training import _resolve_resume_checkpoint, supervised_training
+from .supervised_training import supervised_training
 from .transform import (
     AugmentedMitoStateMaskTransform, CRISTAE_VOXEL_SIZE, MitoStateMaskTransform, standardize_channel
 )
@@ -43,6 +43,52 @@ def _normalize_roots(data_roots: Union[Mapping[str, str], Sequence[str], str]) -
     if not isinstance(data_roots, Mapping):
         data_roots = {os.path.basename(root.rstrip("/")): root for root in data_roots}
     return {name: root.rstrip("/") for name, root in data_roots.items()}
+
+
+def _resolve_split(split_file, roots, keys):
+    """Resolve the '<root name>/<relative path>' entries of a split file to filepaths."""
+    with open(split_file) as f:
+        split = json.load(f)
+    # A split file may carry the data roots it was created with, so that it is self-contained.
+    # Roots passed by the caller take precedence, so that the data can be moved.
+    roots = {**_normalize_roots(split.get("roots", {})), **roots}
+
+    resolved = []
+    for key in keys:
+        paths = []
+        for entry in split.get(key, []):
+            name, _, relative_path = entry.partition("/")
+            if name not in roots:
+                raise ValueError(f"The split file {split_file} refers to the unknown data root '{name}'.")
+            paths.append(os.path.join(roots[name], relative_path))
+        resolved.append(paths)
+    return resolved
+
+
+def get_cristae_test_paths(
+    split_file: str,
+    data_roots: Optional[Union[Mapping[str, str], Sequence[str], str]] = None,
+) -> List[str]:
+    """Find the tomograms that a split file holds out for testing.
+
+    The training functions only use the 'train' and 'val' entries of a split file. Use this to get
+    the 'test' entries, either to evaluate on them or to keep them out of a random split, which
+    would otherwise train on them.
+
+    Args:
+        split_file: Path to the json file with the split.
+        data_roots: The folders that contain the data. Can be left out if the split file carries
+            the roots it was created with.
+
+    Returns:
+        The filepaths of the test data. Empty if the split file has no 'test' entry.
+
+    Raises:
+        ValueError: If a root referenced by `split_file` is not given.
+    """
+    roots = {} if data_roots is None else _normalize_roots(data_roots)
+    test_paths, = _resolve_split(split_file, roots, ("test",))
+    return test_paths
 
 
 def get_cristae_paths(
@@ -85,22 +131,7 @@ def get_cristae_paths(
     roots = {} if data_roots is None else _normalize_roots(data_roots)
 
     if split_file is not None:
-        with open(split_file) as f:
-            split = json.load(f)
-        # A split file may carry the data roots it was created with, so that it is self-contained.
-        # Roots passed by the caller take precedence, so that the data can be moved.
-        roots = {**_normalize_roots(split.get("roots", {})), **roots}
-
-        def _resolve(entries):
-            paths = []
-            for entry in entries:
-                name, _, relative_path = entry.partition("/")
-                if name not in roots:
-                    raise ValueError(f"The split file {split_file} refers to the unknown data root '{name}'.")
-                paths.append(os.path.join(roots[name], relative_path))
-            return paths
-
-        train_paths, val_paths = _resolve(split["train"]), _resolve(split["val"])
+        train_paths, val_paths = _resolve_split(split_file, roots, ("train", "val"))
         missing = [path for path in train_paths + val_paths if not os.path.exists(path)]
         if missing:
             raise ValueError(f"{len(missing)} files from the split file {split_file} do not exist, e.g. {missing[0]}.")
@@ -144,6 +175,10 @@ def cristae_training(
     early_stopping: Optional[int] = 25,
     log_image_interval: int = 50,
     checkpoint_path: Optional[str] = None,
+    resume: bool = False,
+    overwrite: bool = False,
+    seed: Optional[int] = None,
+    deterministic: bool = False,
     sampler: Optional[Union[callable, bool]] = None,
     raw_transform: Optional[callable] = None,
     state_channel: int = 1,
@@ -164,7 +199,7 @@ def cristae_training(
 ) -> None:
     """Run supervised training for cristae segmentation in electron tomograms.
 
-    The default arguments reproduce SynapseNet's `cristae4` model: an anisotropic U-Net **without
+    The default arguments reproduce SynapseNet's `cristae5` model: an anisotropic U-Net **without
     normalization layers** that takes the tomogram and the mitochondria state as input, predicts
     foreground and boundaries, and is trained with a per-sample masked dice loss that is weighted
     towards the mitochondria membrane.
@@ -200,7 +235,15 @@ def cristae_training(
             This has no effect if the model is initialized from `checkpoint_path`.
         early_stopping: The number of epochs without improvement after which training is stopped.
         log_image_interval: The interval (in iterations) at which images are written to the training log.
-        checkpoint_path: Path to a model checkpoint to initialize the weights from.
+        checkpoint_path: Path to a model checkpoint to initialize the weights from. Only the
+            weights are loaded; pass `resume` instead to continue a previous run.
+        resume: Whether to continue the previous run with this name in `save_root`, restoring
+            its weights, optimizer and iteration count. `n_iterations` then counts the total
+            iterations, including the ones the previous run already did.
+        overwrite: Whether to replace the checkpoints of a previous run with this name.
+        seed: The seed for the random number generators used in training. By default it is
+            not set, so that repeated runs differ.
+        deterministic: Whether to also disable cudnn benchmarking when a `seed` is given.
         sampler: Sampler to accept or reject patches for training.
             By default a minimum instance sampler with a rejection probability of 0.95 is used.
         raw_transform: Transformation applied to the input before it is passed to the network.
@@ -264,6 +307,10 @@ def cristae_training(
         norm=None,
         transform=transform,
         checkpoint_path=checkpoint_path,
+        resume=resume,
+        overwrite=overwrite,
+        seed=seed,
+        deterministic=deterministic,
         mixed_precision=mixed_precision,
         early_stopping=early_stopping,
         log_image_interval=log_image_interval,
@@ -289,7 +336,7 @@ def main():
         "are found recursively in the folders passed via '-i'. For example:\n"
         "synapse_net.run_cristae_training -n my_cristae_model -i /path/to/tomograms\n"
         "The trained model will be saved in the folder 'checkpoints/my_cristae_model'.\n"
-        "The default arguments reproduce the training of SynapseNet's 'cristae4' model. Note that this model was\n"
+        "The default arguments reproduce the training of SynapseNet's 'cristae5' model. Note that this model was\n"
         "trained with a batch size of 24 and a patch shape of 32 x 256 x 256, which requires a large GPU.\n"
         "Check out the information below for details on the arguments of this function.",
         formatter_class=argparse.RawTextHelpFormatter
@@ -305,7 +352,8 @@ def main():
     parser.add_argument("--split_file", help="A json file with the keys 'train' and 'val', which each hold a list of entries '<root name>/<relative path>'. If not given, the data is split randomly.")  # noqa
     parser.add_argument("--val_fraction", type=float, default=0.1, help="The fraction of the data to use for validation. This has no effect if 'split_file' was passed.")  # noqa
     parser.add_argument("--exclude", nargs="*", default=[], help="Substrings of filepaths to exclude from the training data.")  # noqa
-    parser.add_argument("--seed", type=int, default=42, help="The seed for shuffling the files before splitting them.")
+    parser.add_argument("--exclude_test_from", help="A split file whose 'test' entries are excluded from the training data. Use this when splitting randomly, so that the run does not train on the test volumes of a previous split.")  # noqa
+    parser.add_argument("--seed", type=int, default=42, help="The seed for shuffling the files before splitting them, and for the random number generators used in training.")  # noqa
 
     # The training hyperparameters.
     parser.add_argument("-p", "--patch_shape", nargs=3, type=int, default=[32, 256, 256],
@@ -333,19 +381,23 @@ def main():
     # Where to save the model, and how to initialize it.
     parser.add_argument("--save_root", help="Root path for saving the checkpoint and log dir.")
     parser.add_argument("--checkpoint_path", help="A model checkpoint to initialize the weights from.")
-    parser.add_argument("--resume", action="store_true", help="Initialize the model from the best checkpoint of a previous run with the same name in 'save_root'. Note that the optimizer state is not restored.")  # noqa
+    parser.add_argument("--resume", action="store_true", help="Continue the previous run with the same name in 'save_root', restoring its weights, optimizer and iteration count. '--n_iterations' is the total number of iterations, including the ones already done.")  # noqa
+    parser.add_argument("--overwrite", action="store_true", help="Replace the checkpoints of a previous run with the same name. By default training refuses to overwrite them.")  # noqa
+    parser.add_argument("--deterministic", action="store_true", help="Disable cudnn benchmarking so that runs with the same seed match exactly. This costs throughput.")  # noqa
     parser.add_argument("--check", action="store_true", help="Visualize samples from the data loaders to ensure correct data instead of running training.")  # noqa
     args = parser.parse_args()
 
+    exclude = list(args.exclude)
+    if args.exclude_test_from is not None:
+        exclude += get_cristae_test_paths(args.exclude_test_from, args.data_root)
+
     train_paths, val_paths = get_cristae_paths(
         args.data_root, file_pattern=args.file_pattern, val_fraction=args.val_fraction,
-        split_file=args.split_file, exclude=args.exclude, seed=args.seed,
+        split_file=args.split_file, exclude=exclude, seed=args.seed,
     )
     print("Training on", len(train_paths), "tomograms and validating on", len(val_paths), "tomograms.")
 
     checkpoint_path = args.checkpoint_path
-    if args.resume:
-        checkpoint_path = _resolve_resume_checkpoint(args.save_root, args.name, checkpoint_path)
 
     cristae_training(
         name=args.name, train_paths=train_paths, val_paths=val_paths, save_root=args.save_root,
@@ -353,7 +405,9 @@ def main():
         batch_size=args.batch_size, lr=args.learning_rate, n_iterations=args.n_iterations,
         n_samples_train=args.n_samples_train, n_samples_val=args.n_samples_val,
         initial_features=args.initial_features, early_stopping=args.early_stopping,
-        checkpoint_path=checkpoint_path, num_workers=args.num_workers, shuffle=args.shuffle,
+        checkpoint_path=checkpoint_path, resume=args.resume, overwrite=args.overwrite,
+        seed=args.seed, deterministic=args.deterministic,
+        num_workers=args.num_workers, shuffle=args.shuffle,
         state_channel=args.state_channel, ignore_state_value=args.ignore_state_value,
         membrane_w_pos=args.membrane_w_pos, membrane_w_neg=args.membrane_w_neg,
         membrane_band_nm=args.membrane_band_nm, membrane_offset_nm=args.membrane_offset_nm,
