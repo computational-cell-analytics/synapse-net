@@ -6,6 +6,7 @@ import torch
 import torch_em
 from torch_em.transform.label import labels_to_binary
 from scipy.ndimage import distance_transform_edt
+from skimage.measure import label as connected_components
 
 # The voxel size of the cristae training data, in nanometer. Used when no voxel size is given.
 CRISTAE_VOXEL_SIZE = (1.74, 1.74, 1.74)
@@ -76,6 +77,85 @@ def normalize_channel(raw: np.ndarray, channel: int = 0, lower: float = 1.0, upp
     normalized = torch_em.transform.raw.normalize_percentile(raw[channel], lower=lower, upper=upper)
     raw[channel] = np.clip(normalized, 0, 1)
     return raw
+
+
+def remove_white_patches(raw: np.ndarray, min_size: int = 20, value: int = 255) -> np.ndarray:
+    """Set the connected components of saturated voxels in a volume EM block to zero.
+
+    Volume EM blocks that were cut out of a larger FIB-SEM volume carry white filler borders where the
+    cutout extends past the imaged region. Percentile normalization maps those borders to the bright
+    end of the value range, so the network sees a strong edge that does not exist in the sample.
+    Electron tomograms do not have these borders, this is only meant for volume EM data.
+
+    Small saturated components are kept, because they are saturated sample structure rather than
+    filler. The components are determined with full connectivity, so that filler that is only
+    connected diagonally still counts as one component.
+
+    Args:
+        raw: The volume, with the values of the filler given by `value`.
+        min_size: The minimal size (in voxels) of a component that is removed.
+        value: The value that marks the filler.
+
+    Returns:
+        The volume with the filler set to zero. The input is returned unchanged if it holds no filler.
+
+    Raises:
+        ValueError: If the volume is not 2d or 3d, or if it does not have an integer dtype.
+    """
+    if raw.ndim not in (2, 3):
+        raise ValueError(f"Expect 2d or 3d input data, got {raw.ndim} dimensions.")
+    # The filler is identified by an exact value, so this has to run on the unnormalized data.
+    # Normalized or standardized data would silently contain no filler at all.
+    if not np.issubdtype(raw.dtype, np.integer):
+        raise ValueError(
+            f"Expect input data with an integer dtype, got {raw.dtype}. This transform has to be applied "
+            "to the raw data, before it is normalized."
+        )
+
+    # This runs once per patch in every dataloader worker, and most patches do not touch the border.
+    mask = raw == value
+    if not mask.any():
+        return raw
+
+    components = connected_components(mask)
+    sizes = np.bincount(components.ravel())
+    filler_ids = np.where(sizes >= min_size)[0]
+    filler_ids = filler_ids[filler_ids != 0]
+    if filler_ids.size == 0:
+        return raw
+
+    raw = raw.copy()
+    raw[np.isin(components, filler_ids)] = 0
+    return raw
+
+
+class RemoveWhitePatchesAndNormalize:
+    """Remove the white filler borders of a volume EM block, then percentile-normalize it.
+
+    This is the **training** raw transform of SynapseNet's volume EM mitochondria model, see
+    `synapse_net.training.mitochondria_vol_em`. It is applied per patch, to the unnormalized data that
+    the dataset reads. It is a class rather than a function so that it can be pickled by reference:
+    the dataloader workers and the training checkpoint both require that.
+
+    Do not pass it as the `preprocess` of an inference function. `synapse_net.inference.util.get_prediction`
+    standardizes a numpy input volume before `preprocess` runs, so the filler would no longer have the
+    value that identifies it. At inference, call `remove_white_patches` on the whole volume first and
+    then normalize with `torch_em.transform.raw.normalize_percentile`.
+
+    Args:
+        min_size: The minimal size (in voxels) of a filler component that is removed.
+        lower: The lower percentile for the normalization.
+        upper: The upper percentile for the normalization.
+    """
+
+    def __init__(self, min_size: int = 20, lower: float = 1.0, upper: float = 99.0):
+        self.min_size = min_size
+        self.lower = lower
+        self.upper = upper
+
+    def __call__(self, raw: np.ndarray) -> np.ndarray:
+        raw = remove_white_patches(raw, min_size=self.min_size)
+        return torch_em.transform.raw.normalize_percentile(raw, lower=self.lower, upper=self.upper)
 
 
 def _fast_distance_transform(mask, sampling):
