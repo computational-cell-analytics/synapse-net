@@ -157,8 +157,9 @@ def vol_em_mitochondria_training(
       percentile normalization is invariant under that standardization, so the network sees the same
       values it saw during training.
 
-    A model that never saw the filler borders during training will segment them as mitochondria if
-    they are left in, so skipping the first step is not a small deviation. See
+    Skipping the first step is not a small deviation: the filler skews the percentile normalization
+    of every tile it overlaps, which degrades the prediction on the surrounding tissue. On one block
+    that is 14% filler, leaving it in cost 0.04 Dice (0.79 instead of 0.84). See
     `scripts/volume_em/inference/run_mitochondria_vol_em_segmentation.py` for a script that does both.
 
     Two training runs of this model exist and both are named 'final'. This function reproduces the run

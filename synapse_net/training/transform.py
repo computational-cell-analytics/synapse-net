@@ -83,9 +83,9 @@ def remove_white_patches(raw: np.ndarray, min_size: int = 20, value: int = 255) 
     """Set the connected components of saturated voxels in a volume EM block to zero.
 
     Volume EM blocks that were cut out of a larger FIB-SEM volume carry white filler borders where the
-    cutout extends past the imaged region. Percentile normalization maps those borders to the bright
-    end of the value range, so the network sees a strong edge that does not exist in the sample.
-    Electron tomograms do not have these borders, this is only meant for volume EM data.
+    cutout extends past the imaged region. They take up a large part of some blocks, so they skew the
+    percentile normalization of the data around them. Electron tomograms do not have these borders,
+    this is only meant for volume EM data.
 
     Small saturated components are kept, because they are saturated sample structure rather than
     filler. The components are determined with full connectivity, so that filler that is only

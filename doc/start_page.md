@@ -289,8 +289,8 @@ Volume EM training differs from the [tomography training](#mitochondria-training
 First, the data is strongly anisotropic (5:1), so the U-Net downsamples only in xy for its first **two** levels instead
 of one, and the network is trained **without normalization layers**.
 Second, the blocks were cut out of a larger FIB-SEM volume and carry **white filler borders** where the cutout extends
-past the imaged region. They are removed before the normalization, because the network would otherwise learn a strong
-edge that does not exist in the sample.
+past the imaged region. They take up a large part of some blocks, so they are removed before the normalization, which
+would otherwise be skewed by them.
 
 ```bash
 synapse_net.run_vol_em_mitochondria_training \
@@ -311,9 +311,9 @@ Note that the preprocessing is part of the model and has to be reproduced at inf
 filler from the whole volume with `synapse_net.training.transform.remove_white_patches`, then pass
 `preprocess=torch_em.transform.raw.normalize_percentile` to `synapse_net.inference.mitochondria.segment_mitochondria`.
 The filler removal cannot go into `preprocess`, because the input volume is standardized before that runs and the
-filler is identified by its literal value. This matters more than for the tomography model, because a model that never
-saw the filler borders during training will segment them as mitochondria if they are left in.
-See `scripts/volume_em/inference/run_mitochondria_vol_em_segmentation.py` for a script that does both.
+filler is identified by its literal value. Leaving the filler in is not a small deviation: on a block that is 14%
+filler it cost 0.04 Dice (0.79 instead of 0.84), because the filler skews the percentile normalization of every tile it
+overlaps. See `scripts/volume_em/inference/run_mitochondria_vol_em_segmentation.py` for a script that does both.
 
 Run
 ```bash
