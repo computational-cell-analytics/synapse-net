@@ -162,7 +162,7 @@ For more options supported by the IMOD exports, please run `synapse_net.export_t
 
 > Note: to use these commands you have to install IMOD.
 
-SynapseNet also provides four CLI comamnds for training models: one for supervised network training (see [Supervised Training](#supervised-training) for details), one for training a mitochondria model for electron tomography (see [Mitochondria Training](#mitochondria-training) for details), one for training a cristae model (see [Cristae Training](#cristae-training) for details) and one for domain adaptation (see [Domain Adaptation](#domain-adaptation) for details).
+SynapseNet also provides five CLI comamnds for training models: one for supervised network training (see [Supervised Training](#supervised-training) for details), one for training a mitochondria model for electron tomography (see [Mitochondria Training](#mitochondria-training) for details), one for training a cristae model (see [Cristae Training](#cristae-training) for details), one for training a mitochondria model for volume EM (see [Volume EM Mitochondria Training](#volume-em-mitochondria-training) for details) and one for domain adaptation (see [Domain Adaptation](#domain-adaptation) for details).
 
 
 ## Python Library
@@ -275,6 +275,49 @@ use an explicit split instead. The default batch size and patch shape require a 
 Run
 ```bash
 synapse_net.run_cristae_training -h
+```
+for more information and instructions on how to use the command.
+
+
+### Volume EM Mitochondria Training
+
+SynapseNet provides a dedicated function for training a model for mitochondria segmentation in volume electron
+microscopy. It reproduces the recipe that was used for our volume EM mitochondria model, which was trained on FIB-SEM
+data with a voxel size of 25 nm in z and 5 nm in xy, and is implemented in `synapse_net.training.mitochondria_vol_em`.
+
+Volume EM training differs from the [tomography training](#mitochondria-training) in two ways.
+First, the data is strongly anisotropic (5:1), so the U-Net downsamples only in xy for its first **two** levels instead
+of one, and the network is trained **without normalization layers**.
+Second, the blocks were cut out of a larger FIB-SEM volume and carry **white filler borders** where the cutout extends
+past the imaged region. They are removed before the normalization, because the network would otherwise learn a strong
+edge that does not exist in the sample.
+
+```bash
+synapse_net.run_vol_em_mitochondria_training \
+    -n my-vol-em-mito-model \  # The name of the model checkpoint.
+    -i /path/to/blocks \ # One or more folders with the hdf5 files, searched recursively.
+    --raw_key raw \ # The internal path of the image data, 'raw' by default.
+    --label_key labels/mitochondria \ # The internal path of the annotations, 'labels/mitochondria' by default.
+    --patch_shape 32 512 512 \ # The patch shape in ZYX.
+    --batch_size 4 \ # The batch size for training.
+    --n_iterations 50000 \ # The maximal number of iterations to train for.
+```
+Pass `--no_white_patch_fix` for data that was not cut out of a larger volume, so that it does not have the filler
+borders. The data is split into training and validation data randomly, with a fixed seed; pass `--split_file` to use an
+explicit split instead. The default batch size and patch shape require a GPU with a lot of memory; reduce them and pass
+`--mixed_precision` to train on a smaller GPU.
+
+Note that the preprocessing is part of the model and has to be reproduced at inference time in two steps: remove the
+filler from the whole volume with `synapse_net.training.transform.remove_white_patches`, then pass
+`preprocess=torch_em.transform.raw.normalize_percentile` to `synapse_net.inference.mitochondria.segment_mitochondria`.
+The filler removal cannot go into `preprocess`, because the input volume is standardized before that runs and the
+filler is identified by its literal value. This matters more than for the tomography model, because a model that never
+saw the filler borders during training will segment them as mitochondria if they are left in.
+See `scripts/volume_em/inference/run_mitochondria_vol_em_segmentation.py` for a script that does both.
+
+Run
+```bash
+synapse_net.run_vol_em_mitochondria_training -h
 ```
 for more information and instructions on how to use the command.
 

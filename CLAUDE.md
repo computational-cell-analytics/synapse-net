@@ -70,7 +70,12 @@ Per-structure **post-processing** lives in `inference/postprocessing/` (vesicles
 Built on `torch_em` U-Nets (`UNet2d`, `AnisotropicUNet`). Two regimes:
 - `supervised_training.py` — needs data + manual labels. Can init weights from a pretrained `model_type`.
 - `domain_adaptation.py` — unsupervised student-teacher (mean-teacher) adaptation to a new condition without labels; only works if the source model already partially detects the structure.
-- `semisupervised_training.py`, `transform.py` — supporting pieces.
+- `semisupervised_training.py`, `transform.py`, `loss.py`, `split.py` — supporting pieces.
+
+Per-structure recipes sit on top of `supervised_training.py`, each fixing the hyperparameters and data layout of one published model and exposing a `main()` behind a console script:
+- `mitochondria.py` — mitochondria in electron tomography (`mitochondria2`).
+- `cristae.py` — cristae in electron tomography (`cristae5`); two input channels, masked loss, membrane weighting.
+- `mitochondria_vol_em.py` — mitochondria in volume EM (FIB-SEM, 25 nm z / 5 nm xy); two anisotropic U-Net levels, no normalization layers, white-filler removal in the raw transform. **Not** in the model registry.
 
 ### Tools (`synapse_net/tools/`)
 - `cli.py` — argparse wrappers behind the console scripts.
