@@ -46,6 +46,11 @@ python /mnt/vast-nhr/home/freckmann15/u15205/synapse/sbatch_runner.py \
     scripts/volume_em/training/repro_aniso2lvl_seed42.yaml      # and 43, 44
 ```
 
+`synapse_net` is installed editable, so a queued job picks up whatever is in the working tree at the
+moment it *starts*, not at the moment it was submitted. Do not switch branches in this checkout while
+runs are queued or running, or they will train something other than what you submitted. `git log -1`
+of the checkout at job start is worth recording alongside the results.
+
 Before spending the GPU time, the cheap check is the one that actually verifies the port:
 
 ```bash

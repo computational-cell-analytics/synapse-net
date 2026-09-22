@@ -237,8 +237,16 @@ def main():
     val = results.groupby("model")[["val_metric", "iteration"]].first().reset_index()
     averaged = averaged.merge(val, on="model")
 
+    baseline_only = [
+        "",
+        "**Status: baseline only.** Only one model is in this report, so there is nothing to compare",
+        "against yet. Re-run with the reproduction runs added (`-m seed42=... -m seed43=...`) once they",
+        "finish; the segmentations already here are cached and are not recomputed.",
+    ] if len(models) < 2 else []
+
     report = [
         "# Volume EM mitochondria: reproduction vs. the published model",
+        *baseline_only,
         "",
         "Instance metrics are matching at an IoU of 0.5; `msa` averages over the thresholds 0.5 to 0.95.",
         "`dice` is the semantic foreground dice. `val_metric` is the best validation DiceLoss of the run,",
@@ -272,7 +280,14 @@ def main():
             "## Size filter sweep",
             "",
             "Applied to the finished segmentations, which is not the same as running the watershed with",
-            "that `min_size`, so read it as a diagnostic rather than as a tuning result.",
+            "that `min_size`, so read it as a diagnostic for how much of the error is sub-threshold",
+            "fragments.",
+            "",
+            "**Do not read a `min_size` off this table.** It would be tuning on the test data, and it",
+            "would generalize badly: these two test blocks happen to hold only large mitochondria, while",
+            "18% of the 717 mitochondria annotated in the training blocks are smaller than 20,000 voxels.",
+            "The default of 1,000 is the value consistent with the annotation, which has 99.7% of its",
+            "objects above it.",
             "",
             _markdown_table(sweep),
             "",
