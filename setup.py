@@ -47,6 +47,7 @@ setup(
             "synapse_net.run_domain_adaptation = synapse_net.training.domain_adaptation:main",
             "synapse_net.run_mitochondria_training = synapse_net.training.mitochondria:main",
             "synapse_net.run_cristae_training = synapse_net.training.cristae:main",
+            "synapse_net.run_vol_em_mitochondria_training = synapse_net.training.mitochondria_vol_em:main",
             "synapse_net.visualize_vesicle_pools = synapse_net.tools.cli:pool_visualization_cli",
             "synapse_net.run_cristae_analysis = synapse_net.tools.cli:cristae_analysis_cli",
         ],
