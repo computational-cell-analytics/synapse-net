@@ -135,15 +135,14 @@ def semisupervised_learning(
     source_checkpoint=None,
     check: bool = False,
 ):
-    """Run semisupervised segmentation training: supervised teacher warmup followed by
-    mean teacher training with invertible augmentations.
+    """Run semisupervised segmentation training.
 
-    This proceeds in two steps:
+    This proceeds in two phases:
 
-    1. If no `source_checkpoint` is given, run supervised training for as a warmup for the 
-        teacher model.
-    2. Run semisupervised training with the mean teacher setup, using the warmup checkpoint to 
-        initialize the teacher model. 
+        1. If no `source_checkpoint` is given, run supervised training to
+            warmup the teacher.
+        2. Run semisupervised training using mean teacher setup with invertible 
+            augumentation, using the warmup checkpoint to initialize the teacher.
 
     Args:
         name: The name for the checkpoint to be trained. The warmup checkpoint is saved
