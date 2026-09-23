@@ -46,6 +46,13 @@ python /mnt/vast-nhr/home/freckmann15/u15205/synapse/sbatch_runner.py \
     scripts/volume_em/training/repro_aniso2lvl_seed42.yaml      # and 43, 44
 ```
 
+Progress goes to **stderr**, so watch the `.err` file that `sbatch_runner.py` writes, not the `.log`:
+the `.log` only holds the four startup lines, and looks stalled if you watch it instead.
+
+```bash
+tr '\r' '\n' < logs/sbatch_jobs/<manifest>_<timestamp>.err | tail -3
+```
+
 `synapse_net` is installed editable, so a queued job picks up whatever is in the working tree at the
 moment it *starts*, not at the moment it was submitted. Do not switch branches in this checkout while
 runs are queued or running, or they will train something other than what you submitted. `git log -1`
