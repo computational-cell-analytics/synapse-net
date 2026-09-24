@@ -29,6 +29,8 @@ def _resolve_split(split_file, roots, keys):
             name, _, relative_path = entry.partition("/")
             if name not in roots:
                 raise ValueError(f"The split file {split_file} refers to the unknown data root '{name}'.")
-            paths.append(os.path.join(roots[name], relative_path))
+            # The entries always use '/', so split on it to get native separators. Otherwise the
+            # paths are mixed on Windows and do not match the ones found by glob, e.g. in 'exclude'.
+            paths.append(os.path.join(roots[name], *relative_path.split("/")))
         resolved.append(paths)
     return resolved
