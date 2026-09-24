@@ -51,7 +51,7 @@ synapse_net.visualize_vesicle_pools -h
 The package is organized by capability. The big picture spans several modules:
 
 ### Models & the model registry (`synapse_net/inference/inference.py`)
-Models are identified by a **`model_type` string** (`vesicles_3d`, `vesicles_2d`, `vesicles_cryo`, `active_zone`, `compartments`, `mitochondria`/`mitochondria2`, `cristae`/`cristae2`/`cristae3`, `ribbon`, plus CLI-only `vesicles_*` variants). `_get_model_registry()` maps each name to a sha256 + GWDG ownCloud download URL and fetches via `pooch`. `get_model(model_type)` downloads (if needed) and `torch.load`s the checkpoint.
+Models are identified by a **`model_type` string** (`vesicles_3d`, `vesicles_2d`, `vesicles_cryo`, `active_zone`, `compartments`, `mitochondria`/`mitochondria2`, `cristae`/`cristae2`/`cristae3`/`cristae4`/`cristae5`, `ribbon`, plus CLI-only `vesicles_*` variants). `_get_model_registry()` maps each name to a sha256 + GWDG ownCloud download URL and fetches via `pooch`. `get_model(model_type)` downloads (if needed) and `torch.load`s the checkpoint.
 
 **Voxel-size scaling is central.** Each model was trained at a specific resolution (`get_model_training_resolution`, in nm/axis). `compute_scale_from_voxel_size(voxel_size, model_type)` produces a zyx scale factor so input data is resized to match training resolution before inference and resized back after. Always pair a model with the right `scale` rather than feeding raw-resolution data.
 
@@ -70,7 +70,12 @@ Per-structure **post-processing** lives in `inference/postprocessing/` (vesicles
 Built on `torch_em` U-Nets (`UNet2d`, `AnisotropicUNet`). Two regimes:
 - `supervised_training.py` — needs data + manual labels. Can init weights from a pretrained `model_type`.
 - `domain_adaptation.py` — unsupervised student-teacher (mean-teacher) adaptation to a new condition without labels; only works if the source model already partially detects the structure.
-- `semisupervised_training.py`, `transform.py` — supporting pieces.
+- `semisupervised_training.py`, `transform.py`, `loss.py`, `split.py` — supporting pieces.
+
+Per-structure recipes sit on top of `supervised_training.py`, each fixing the hyperparameters and data layout of one published model and exposing a `main()` behind a console script:
+- `mitochondria.py` — mitochondria in electron tomography (`mitochondria2`).
+- `cristae.py` — cristae in electron tomography (`cristae5`); two input channels, masked loss, membrane weighting.
+- `mitochondria_vol_em.py` — mitochondria in volume EM (FIB-SEM, 25 nm z / 5 nm xy); two anisotropic U-Net levels, no normalization layers, white-filler removal in the raw transform. **Not** in the model registry.
 
 ### Tools (`synapse_net/tools/`)
 - `cli.py` — argparse wrappers behind the console scripts.
