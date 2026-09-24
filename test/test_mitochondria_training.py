@@ -19,6 +19,8 @@ class TestMitochondriaTraining(unittest.TestCase):
     data_folder = os.path.join(tmp_folder, "tomograms")
 
     def setUp(self):
+        # Remove what an interrupted run left behind, the datasets below cannot be created twice.
+        rmtree(self.tmp_folder, ignore_errors=True)
         os.makedirs(self.data_folder, exist_ok=True)
         # Write the tomograms into two sub-folders, to check that they are found recursively.
         for i in range(8):
@@ -56,8 +58,8 @@ class TestMitochondriaTraining(unittest.TestCase):
             json.dump(split, f)
 
         train_paths, val_paths = get_mitochondria_paths(self.data_folder, split_file=split_file)
-        self.assertEqual(train_paths, [os.path.join(self.data_folder, name) for name in split["train"]])
-        self.assertEqual(val_paths, [os.path.join(self.data_folder, name) for name in split["val"]])
+        self.assertEqual(train_paths, [os.path.join(self.data_folder, *name.split("/")) for name in split["train"]])
+        self.assertEqual(val_paths, [os.path.join(self.data_folder, *name.split("/")) for name in split["val"]])
 
     def test_get_mitochondria_paths_from_invalid_split_file(self):
         split_file = os.path.join(self.tmp_folder, "split.json")

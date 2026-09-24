@@ -53,8 +53,9 @@ def get_mitochondria_paths(
     if split_file is not None:
         with open(split_file) as f:
             split = json.load(f)
-        train_paths = [os.path.join(data_root, name) for name in split["train"]]
-        val_paths = [os.path.join(data_root, name) for name in split["val"]]
+        # The entries always use '/', join the parts so that the paths match the ones found by glob.
+        train_paths = [os.path.join(data_root, *name.split("/")) for name in split["train"]]
+        val_paths = [os.path.join(data_root, *name.split("/")) for name in split["val"]]
         missing = [path for path in train_paths + val_paths if not os.path.exists(path)]
         if missing:
             raise ValueError(f"{len(missing)} files from the split file {split_file} do not exist, e.g. {missing[0]}.")

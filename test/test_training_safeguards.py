@@ -14,6 +14,8 @@ class TestOverwriteGuard(unittest.TestCase):
     name = "a-previous-run"
 
     def setUp(self):
+        # Remove what an interrupted run left behind, the tests expect to start without checkpoints.
+        rmtree(self.tmp_folder, ignore_errors=True)
         self.checkpoint_folder = os.path.join(self.tmp_folder, "checkpoints", self.name)
         os.makedirs(self.checkpoint_folder, exist_ok=True)
 
@@ -56,6 +58,8 @@ class TestResume(unittest.TestCase):
     name = "a-previous-run"
 
     def setUp(self):
+        # Remove what an interrupted run left behind, the tests expect to start without checkpoints.
+        rmtree(self.tmp_folder, ignore_errors=True)
         self.checkpoint_folder = os.path.join(self.tmp_folder, "checkpoints", self.name)
         os.makedirs(self.checkpoint_folder, exist_ok=True)
 

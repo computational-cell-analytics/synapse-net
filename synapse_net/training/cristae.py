@@ -41,7 +41,7 @@ def _normalize_roots(data_roots: Union[Mapping[str, str], Sequence[str], str]) -
     if isinstance(data_roots, str):
         data_roots = [data_roots]
     if not isinstance(data_roots, Mapping):
-        data_roots = {os.path.basename(root.rstrip("/")): root for root in data_roots}
+        data_roots = {os.path.basename(os.path.normpath(root)): root for root in data_roots}
     return {name: root.rstrip("/") for name, root in data_roots.items()}
 
 
@@ -60,7 +60,8 @@ def _resolve_split(split_file, roots, keys):
             name, _, relative_path = entry.partition("/")
             if name not in roots:
                 raise ValueError(f"The split file {split_file} refers to the unknown data root '{name}'.")
-            paths.append(os.path.join(roots[name], relative_path))
+            # The entries always use '/', join the parts so that the paths match the ones found by glob.
+            paths.append(os.path.join(roots[name], *relative_path.split("/")))
         resolved.append(paths)
     return resolved
 

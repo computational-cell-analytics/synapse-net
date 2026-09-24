@@ -17,6 +17,8 @@ class TestCristaeTraining(unittest.TestCase):
     roots = {"ds0": os.path.join(tmp_folder, "ds0"), "ds1": os.path.join(tmp_folder, "ds1")}
 
     def setUp(self):
+        # Remove what an interrupted run left behind, the datasets below cannot be created twice.
+        rmtree(self.tmp_folder, ignore_errors=True)
         rng = np.random.default_rng(42)
         for i in range(8):
             root = self.roots["ds0"] if i % 2 == 0 else self.roots["ds1"]
@@ -72,8 +74,8 @@ class TestCristaeTraining(unittest.TestCase):
             json.dump(split, f)
 
         train_paths, val_paths = get_cristae_paths(self.roots, split_file=split_file)
-        self.assertEqual(train_paths, [os.path.join(self.tmp_folder, name) for name in split["train"]])
-        self.assertEqual(val_paths, [os.path.join(self.tmp_folder, name) for name in split["val"]])
+        self.assertEqual(train_paths, [os.path.join(self.tmp_folder, *name.split("/")) for name in split["train"]])
+        self.assertEqual(val_paths, [os.path.join(self.tmp_folder, *name.split("/")) for name in split["val"]])
 
     def test_get_cristae_paths_from_split_file_with_roots(self):
         from synapse_net.training.cristae import get_cristae_paths
@@ -132,7 +134,7 @@ class TestCristaeTraining(unittest.TestCase):
             json.dump(split, f)
 
         test_paths = get_cristae_test_paths(split_file, self.roots)
-        self.assertEqual(test_paths, [os.path.join(self.roots[e.split("/")[0]], e.split("/", 1)[1])
+        self.assertEqual(test_paths, [os.path.join(self.roots[e.split("/")[0]], *e.split("/")[1:])
                                       for e in split["test"]])
 
         # A random split must be able to keep those volumes out, otherwise it trains on them.
