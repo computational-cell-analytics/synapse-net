@@ -51,7 +51,7 @@ synapse_net.visualize_vesicle_pools -h
 The package is organized by capability. The big picture spans several modules:
 
 ### Models & the model registry (`synapse_net/inference/inference.py`)
-Models are identified by a **`model_type` string** (`vesicles_3d`, `vesicles_2d`, `vesicles_cryo`, `active_zone`, `compartments`, `mitochondria`/`mitochondria2`, `cristae`/`cristae2`/`cristae3`, `ribbon`, plus CLI-only `vesicles_*` variants). `_get_model_registry()` maps each name to a sha256 + GWDG ownCloud download URL and fetches via `pooch`. `get_model(model_type)` downloads (if needed) and `torch.load`s the checkpoint.
+Models are identified by a **`model_type` string** (`vesicles_3d`, `vesicles_2d`, `vesicles_cryo`, `active_zone`, `compartments`, `mitochondria`/`mitochondria2`, `cristae`/`cristae2`/`cristae3`/`cristae4`/`cristae5`, `ribbon`, plus CLI-only `vesicles_*` variants). `_get_model_registry()` maps each name to a sha256 + GWDG ownCloud download URL and fetches via `pooch`. `get_model(model_type)` downloads (if needed) and `torch.load`s the checkpoint.
 
 **Voxel-size scaling is central.** Each model was trained at a specific resolution (`get_model_training_resolution`, in nm/axis). `compute_scale_from_voxel_size(voxel_size, model_type)` produces a zyx scale factor so input data is resized to match training resolution before inference and resized back after. Always pair a model with the right `scale` rather than feeding raw-resolution data.
 
