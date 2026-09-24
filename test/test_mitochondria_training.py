@@ -26,7 +26,7 @@ class TestMitochondriaTraining(unittest.TestCase):
             labels = label(data).astype("uint16")
             path = os.path.join(self.data_folder, f"ds{i % 2}", f"tomo-{i}.h5")
             os.makedirs(os.path.dirname(path), exist_ok=True)
-            with h5py.File(path, "a") as f:
+            with h5py.File(path, "w") as f:
                 f.create_dataset("raw", data=data)
                 f.create_dataset("labels/mitochondria", data=labels)
 

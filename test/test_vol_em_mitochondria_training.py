@@ -32,7 +32,7 @@ class TestVolEmMitochondriaTraining(unittest.TestCase):
             raw[:, :, :8] = 255
             labels = label(raw > 0).astype("uint16")
 
-            with h5py.File(path, "a") as f:
+            with h5py.File(path, "w") as f:
                 f.create_dataset("raw", data=raw)
                 f.create_dataset("labels/mitochondria", data=labels)
 

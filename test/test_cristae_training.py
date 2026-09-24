@@ -30,7 +30,7 @@ class TestCristaeTraining(unittest.TestCase):
             state[:, 32:48] = 2
             cristae = binary_blobs(length=64, n_dim=3, volume_fraction=0.2)[:32].astype("uint8")
 
-            with h5py.File(path, "a") as f:
+            with h5py.File(path, "w") as f:
                 f.create_dataset("raw_mitos_combined", data=np.stack([raw, state]))
                 f.create_dataset("labels/cristae", data=cristae)
 
