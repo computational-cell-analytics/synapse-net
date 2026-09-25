@@ -11,6 +11,10 @@ from elf.evaluation import matching, symmetric_best_dice_score
 
 from elf.io.files import open_file
 
+# The held-out test set of the 'mitochondria2' model: 11 tomograms at the training resolution
+# (fidi downscaled by 4, wichmann by 2), with the annotations in 'labels/mitochondria'.
+TEST_ROOT = "/mnt/lustre-grete/usr/u12103/mitochondria/synapse-net-eval-data/eval_data_h5_s4"
+
 
 def evaluate(labels, vesicles):
     assert labels.shape == vesicles.shape
@@ -27,7 +31,7 @@ def summarize_eval(results):
         .reset_index("dataset")
     )
     total = results[["f1-score", "precision", "recall", "SBD score"]].mean().values.tolist()
-    summary.iloc[-1] = ["all"] + total
+    summary.loc[len(summary)] = ["all"] + total
     table = summary.to_markdown(index=False)
     print(table)
 
@@ -79,10 +83,7 @@ def evaluate_folder(labels_path, segmentation_path, model_name, segment_key, ann
                     anno_ext, segment_ext, mask_key, output_folder):
     print(f"Evaluating folder {segmentation_path}")
     print(f"Using labels stored in {labels_path}")
-    if labels_path is not None:
-        label_paths = get_file_paths(labels_path, ext=anno_ext)
-    else:
-        label_paths = _get_default_label_paths()
+    label_paths = get_file_paths(labels_path, ext=anno_ext)
     seg_paths = get_file_paths(segmentation_path, ext=segment_ext)
     if label_paths is None or seg_paths is None:
         print("Could not find label file or segmentation file")
@@ -122,6 +123,10 @@ def find_label_file(given_path: str, label_paths: list) -> str:
     raw_base = raw_base.replace("mito-v3_sd18_bt015_with__", "")
     raw_base = raw_base.rstrip("_")
     print("raw_base", raw_base)
+    # Prefer the file with the same name, so that a name contained in another one cannot match it.
+    for label_path in label_paths:
+        if os.path.basename(label_path) == os.path.basename(given_path):
+            return label_path
     for label_path in label_paths:
         label_base = os.path.splitext(os.path.basename(label_path))[0]  # Remove extension
         if raw_base.strip().lower() in label_base.strip().lower():  # Ensure raw name is contained in label name
@@ -130,25 +135,15 @@ def find_label_file(given_path: str, label_paths: list) -> str:
     return None  # No match found
 
 
-def _get_default_label_paths():
-    return ['/scratch-grete/projects/nim00007/data/mitochondria/wichmann/refined_mitos/M2_eb10_model.h5',
-            '/scratch-grete/projects/nim00007/data/mitochondria/wichmann/refined_mitos/WT21_eb3_model2.h5',
-            '/scratch-grete/projects/nim00007/data/mitochondria/wichmann/refined_mitos/M10_eb9_model.h5',
-            '/scratch-grete/projects/nim00007/data/mitochondria/wichmann/refined_mitos/KO9_eb4_model.h5',
-            '/scratch-grete/projects/nim00007/data/mitochondria/wichmann/refined_mitos/M7_eb11_model.h5',
-            '/scratch-grete/projects/nim00007/data/mitochondria/cooper/fidi_down_s2/36859_J1_66K_TS_CA3_PS_25_rec_2Kb1dawbp_crop_downscaled.h5'
-            ]
-
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-sp", "--segmentation_path", required=True)
-    parser.add_argument("-gp", "--groundtruth_path", default=None)
+    parser.add_argument("-gp", "--groundtruth_path", default=TEST_ROOT)
     parser.add_argument("-n", "--model_name", required=True)
-    parser.add_argument("-sk", "--segmentation_key", default=None)
-    parser.add_argument("-gk", "--groundtruth_key", default=None)
-    parser.add_argument("-ae", "--annotation_extension", default=None)
-    parser.add_argument("-se", "--segmentation_extension", default=None)
+    parser.add_argument("-sk", "--segmentation_key", default="seg")
+    parser.add_argument("-gk", "--groundtruth_key", default="labels/mitochondria")
+    parser.add_argument("-ae", "--annotation_extension", default=".h5")
+    parser.add_argument("-se", "--segmentation_extension", default=".h5")
     parser.add_argument("-m", "--mask_key", default=None)
     parser.add_argument("-o", "--output_folder", required=True)
     args = parser.parse_args()
