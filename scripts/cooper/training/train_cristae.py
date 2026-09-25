@@ -9,6 +9,10 @@ The split file next to this script holds the exact train / val split of the publ
 because their raw data or their annotations are unreliable, and so are the volumes that the split
 file holds out for testing, which the run would otherwise train on.
 
+The recipe needs about 56 GB of GPU memory, so it requires an 80 GB GPU (e.g. an H100, or
+'--gres=gpu:A100:1 --constraint=80gb' on Grete). To evaluate the trained model on the held-out test
+set, segment it with 'segment_test_set.py -t cristae' and score it with 'evaluate_cristae.py'.
+
 Note that the published checkpoint did not converge: it stopped at iteration 39,406 of 100,000 after
 running into the job time limit twice. Rerun this script with '--resume' to continue it; N_ITERATIONS
 is the total number of iterations, so it will train the remaining ones.

@@ -5,7 +5,12 @@ the fidi (downscaled by a factor of 4) and wichmann (downscaled by a factor of 2
 are both at a resolution of roughly 2.87 nm, with refined mitochondria annotations.
 
 The split file next to this script holds the exact train / val split of the published run.
-Delete the '--split_file' argument below to split the data randomly instead.
+Pass '--random_split' to split the data randomly instead.
+
+The recipe trains without mixed precision and needs about 50 GB of GPU memory, so it requires an
+80 GB GPU (e.g. an H100, or '--gres=gpu:A100:1 --constraint=80gb' on Grete). It runs out of memory
+on a 40 GB A100. To evaluate the trained model on the held-out test set, segment it with
+'segment_test_set.py -t mito' and score it with 'evaluate_mitochondria.py'.
 """
 
 import argparse

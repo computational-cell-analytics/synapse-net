@@ -384,7 +384,7 @@ def main():
     parser.add_argument("--checkpoint_path", help="A model checkpoint to initialize the weights from.")
     parser.add_argument("--resume", action="store_true", help="Continue the previous run with the same name in 'save_root', restoring its weights, optimizer and iteration count. '--n_iterations' is the total number of iterations, including the ones already done.")  # noqa
     parser.add_argument("--overwrite", action="store_true", help="Replace the checkpoints of a previous run with the same name. By default training refuses to overwrite them.")  # noqa
-    parser.add_argument("--deterministic", action="store_true", help="Disable cudnn benchmarking so that runs with the same seed match exactly. This costs throughput.")  # noqa
+    parser.add_argument("--deterministic", action="store_true", help="Disable cudnn benchmarking so that runs with the same seed match exactly. This costs throughput and GPU memory.")  # noqa
     parser.add_argument("--check", action="store_true", help="Visualize samples from the data loaders to ensure correct data instead of running training.")  # noqa
     args = parser.parse_args()
 

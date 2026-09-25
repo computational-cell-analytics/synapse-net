@@ -232,8 +232,10 @@ synapse_net.run_mitochondria_training \
     --n_iterations 150000 \ # The maximal number of iterations to train for.
 ```
 The data is split into training and validation data randomly, with a fixed seed. Pass `--split_file` to use an explicit
-split instead. The default batch size and patch shape require a GPU with a lot of memory; reduce them and pass
-`--mixed_precision` to train on a smaller GPU.
+split instead. The default batch size and patch shape need about 50 GB of GPU memory (PyTorch reserves about 70 GB),
+because the recipe trains without mixed precision, so the training does not fit on a 40 GB GPU. Use an 80 GB GPU, or
+reduce them and pass `--mixed_precision` to train on a smaller GPU. `--deterministic` needs more memory than that and
+does not fit on an 80 GB GPU with the default batch size.
 
 Note that the normalization is part of the model: to segment with the resulting model you have to pass
 `preprocess=torch_em.transform.raw.normalize_percentile` to `synapse_net.inference.mitochondria.segment_mitochondria`.
@@ -270,7 +272,9 @@ synapse_net.run_cristae_training \
 ```
 The membrane weighting is controlled with `--membrane_w_pos` and `--membrane_w_neg`; pass 1.0 for both to train
 without it. The data is split into training and validation data randomly, with a fixed seed; pass `--split_file` to
-use an explicit split instead. The default batch size and patch shape require a GPU with a lot of memory.
+use an explicit split instead. The default batch size and patch shape need about 56 GB of GPU memory with mixed
+precision (PyTorch reserves about 72 GB), so the training requires an 80 GB GPU. `--deterministic` needs more memory
+than that and does not fit on an 80 GB GPU with the default batch size.
 
 Run
 ```bash

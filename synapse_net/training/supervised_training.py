@@ -209,7 +209,7 @@ def _set_seed(seed, deterministic=False):
             cuBLAS workspace. Without this, two runs with the same seed still differ slightly,
             because cudnn picks algorithms by timing. Note that torch has no deterministic backward
             pass for the max pooling that the U-Net downsamples with, so this is requested with
-            'warn_only' and bit-exact equality is not guaranteed on every GPU. It costs throughput.
+            'warn_only' and bit-exact equality is not guaranteed on every GPU. It costs throughput and GPU memory.
     """
     random.seed(seed)
     np.random.seed(seed)
