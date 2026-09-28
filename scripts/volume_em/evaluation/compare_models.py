@@ -7,6 +7,10 @@ a comparison of the trained networks.
 
 The segmentations are cached, so the script can be re-run to add a model without redoing the others.
 
+Segmentations produced elsewhere, such as the MitoNet baseline of segment_mitonet.py, can be scored
+alongside with '-s'. They are only scored here, not segmented, so the note on identical
+post-processing does not apply to them; their settings are read from the attributes of their 'seg'.
+
 Metrics:
   f1 / precision / recall  instance matching at an IoU of 0.5, the metric the volume EM pipeline
                            has always reported (`elf.evaluation.matching`)
@@ -17,11 +21,12 @@ Metrics:
   val_metric               the best validation DiceLoss of the run, read from its checkpoint
 
 Usage:
-    python compare_models.py -m name=/path/to/checkpoint [-m ...] -o RESULTS.md
+    python compare_models.py -m name=/path/to/checkpoint [-m ...] [-s name=/path/to/segmentations] -o RESULTS.md
 """
 
 import argparse
 import importlib.util
+import json
 import os
 import sys
 
@@ -33,9 +38,11 @@ import torch_em
 from elf.evaluation import dice_score, matching, mean_segmentation_accuracy, symmetric_best_dice_score
 
 from synapse_net.inference.util import parse_tiling
+from synapse_net.training.split import _resolve_split
 
 TEST_SPLIT = "/mnt/lustre-grete/projects/nim00020/data/volume-em/moebius/test_split"
 SEGMENTATION_ROOT = "/mnt/lustre-grete/usr/u15205/volume-em/repro-comparison"
+TITLE = "Volume EM mitochondria: reproduction vs. the published model"
 
 _INFERENCE_SCRIPT = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -64,6 +71,27 @@ def find_test_blocks(test_split: str):
         blocks[dataset] = os.path.join(folder, files[0])
     if not blocks:
         raise ValueError(f"Did not find any test blocks in {test_split}.")
+    return blocks
+
+
+def find_split_blocks(split_file: str, key: str):
+    """Find the blocks of one key of a split file, as a mapping of data root name to filepath.
+
+    Naming a block by its data root keeps the names of the validation blocks parallel to the test
+    blocks ('4007', '4009'); it requires at most one block per root.
+    """
+    with open(split_file) as f:
+        entries = json.load(f).get(key, [])
+    paths = _resolve_split(split_file, {}, [key])[0]
+    blocks = {}
+    for entry, path in zip(entries, paths):
+        name = entry.partition("/")[0]
+        if name in blocks:
+            raise ValueError(f"The '{key}' split has more than one block from '{name}', so they cannot "
+                             "be named by their data root.")
+        blocks[name] = path
+    if not blocks:
+        raise ValueError(f"The split file {split_file} has no '{key}' entries.")
     return blocks
 
 
@@ -170,10 +198,32 @@ def read_val_metric(model_path):
     return state.get("best_metric"), state.get("iteration")
 
 
+def find_precomputed_segmentations(folder, blocks):
+    """Map each test block to its segmentation in a folder of precomputed ones."""
+    paths = {dataset: os.path.join(folder, f"{dataset}.h5") for dataset in blocks}
+    missing = [path for path in paths.values() if not os.path.exists(path)]
+    if missing:
+        raise ValueError(f"Missing segmentations in {folder}: {', '.join(missing)}")
+    return paths
+
+
+def read_segmentation_settings(segmentation_path):
+    """Read the settings a precomputed segmentation was made with, from the attributes of its 'seg'."""
+    with h5py.File(segmentation_path, "r") as f:
+        attrs = dict(f["seg"].attrs)
+
+    def render(value):
+        if isinstance(value, np.ndarray):
+            return "/".join(str(v) for v in value.tolist())
+        return str(value)
+
+    return ", ".join(f"{key} {render(value)}" for key, value in attrs.items())
+
+
 def _markdown_table(frame: pd.DataFrame, float_format: str = "{:.4f}") -> str:
     """Render a dataframe as a markdown table, without depending on tabulate."""
     def render(value):
-        if value is None or (isinstance(value, float) and np.isnan(value)):
+        if value is None or value is pd.NA or (isinstance(value, float) and np.isnan(value)):
             return "-"
         return float_format.format(value) if isinstance(value, float) else str(value)
 
@@ -189,9 +239,15 @@ def _markdown_table(frame: pd.DataFrame, float_format: str = "{:.4f}") -> str:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    parser.add_argument("-m", "--model", action="append", required=True, metavar="NAME=PATH",
+    parser.add_argument("-m", "--model", action="append", default=[], metavar="NAME=PATH",
                         help="A model to compare, as 'name=checkpoint folder'. Repeat for each model.")
+    parser.add_argument("-s", "--segmentation", action="append", default=[], metavar="NAME=FOLDER",
+                        help="Precomputed segmentations to score, as 'name=folder' with one '<dataset>.h5' "
+                             "per test block, holding 'seg'. Repeat for each. These are not segmented here.")
+    parser.add_argument("--title", default=TITLE, help="The title of the report.")
     parser.add_argument("--test_split", default=TEST_SPLIT, help="The folder with the held-out test blocks.")
+    parser.add_argument("--split_file", help="Score the blocks of a split file instead of the test split.")
+    parser.add_argument("--split_key", default="val", help="The key of the split file to score.")
     parser.add_argument("--segmentation_root", default=SEGMENTATION_ROOT,
                         help="Where the segmentations are cached.")
     parser.add_argument("-o", "--output", help="Write the report to this markdown file.")
@@ -203,29 +259,58 @@ def main():
                              "for how much of the error is sub-threshold fragments.")
     args = parser.parse_args()
 
-    models = {}
-    for entry in args.model:
-        if "=" not in entry:
-            parser.error(f"Expect '--model name=path', got {entry!r}.")
-        name, path = entry.split("=", 1)
-        if not os.path.exists(path):
-            parser.error(f"The checkpoint of {name!r} does not exist: {path}")
-        models[name] = path
+    def parse_entries(entries, flag):
+        parsed = {}
+        for entry in entries:
+            if "=" not in entry:
+                parser.error(f"Expect '{flag} name=path', got {entry!r}.")
+            name, path = entry.split("=", 1)
+            if not os.path.exists(path):
+                parser.error(f"The path of {name!r} does not exist: {path}")
+            parsed[name] = path
+        return parsed
+
+    models = parse_entries(args.model, "--model")
+    segmentations = parse_entries(args.segmentation, "--segmentation")
+    if not models and not segmentations:
+        parser.error("Pass at least one '--model' or '--segmentation'.")
+    if set(models) & set(segmentations):
+        parser.error(f"Names are used twice: {', '.join(sorted(set(models) & set(segmentations)))}")
 
     inference = _load_inference_module()
     tiling = parse_tiling(args.tile_shape, args.halo)
-    blocks = find_test_blocks(args.test_split)
-    print(f"Comparing {len(models)} model(s) on {len(blocks)} test block(s): {', '.join(blocks)}\n")
+    if args.split_file:
+        blocks = find_split_blocks(args.split_file, args.split_key)
+    else:
+        blocks = find_test_blocks(args.test_split)
+    print(f"Comparing {len(models)} model(s) and {len(segmentations)} precomputed segmentation(s) "
+          f"on {len(blocks)} test block(s): {', '.join(blocks)}\n")
+
+    # The blocks of a split file are named like the test blocks, so their cached segmentations go
+    # into a folder of their own; otherwise a cached test segmentation would be scored against them.
+    cache_root = os.path.join(args.segmentation_root, args.split_key) if args.split_file else args.segmentation_root
+    segmentation_paths = {
+        name: {dataset: os.path.join(cache_root, name, f"{dataset}.h5") for dataset in blocks}
+        for name in models
+    }
+    for name, folder in segmentations.items():
+        segmentation_paths[name] = find_precomputed_segmentations(folder, blocks)
 
     rows = []
     for name, model_path in models.items():
         val_metric, iteration = read_val_metric(model_path)
         for dataset, block_path in blocks.items():
-            output_path = os.path.join(args.segmentation_root, name, f"{dataset}.h5")
+            output_path = segmentation_paths[name][dataset]
             print(f"  {name} / {dataset} ...", flush=True)
             segment_block(inference, model_path, block_path, output_path, tiling, force=args.force)
             metrics = evaluate_block(output_path, block_path)
             metrics.update(model=name, dataset=dataset, val_metric=val_metric, iteration=iteration)
+            rows.append(metrics)
+    for name in segmentations:
+        for dataset, block_path in blocks.items():
+            print(f"  {name} / {dataset} (precomputed) ...", flush=True)
+            metrics = evaluate_block(segmentation_paths[name][dataset], block_path)
+            metrics.update(model=name, dataset=dataset, val_metric=None, iteration=None)
             rows.append(metrics)
 
     results = pd.DataFrame(rows)
@@ -235,6 +320,8 @@ def main():
     mean_columns = ["f1", "precision", "recall", "msa", "sbd", "dice"]
     averaged = results.groupby("model")[mean_columns].mean().reset_index()
     val = results.groupby("model")[["val_metric", "iteration"]].first().reset_index()
+    # A precomputed segmentation has no iteration, which would otherwise turn the column into floats.
+    val["iteration"] = val["iteration"].astype("Int64")
     averaged = averaged.merge(val, on="model")
 
     baseline_only = [
@@ -242,10 +329,19 @@ def main():
         "**Status: baseline only.** Only one model is in this report, so there is nothing to compare",
         "against yet. Re-run with the reproduction runs added (`-m seed42=... -m seed43=...`) once they",
         "finish; the segmentations already here are cached and are not recomputed.",
-    ] if len(models) < 2 else []
+    ] if len(models) + len(segmentations) < 2 else []
+
+    precomputed = [
+        "",
+        "Segmentations passed with `-s` were produced elsewhere and are only scored here, so the",
+        "sentence above does not apply to them. They were made with:",
+        "",
+        *(f"- `{name}`: {read_segmentation_settings(next(iter(segmentation_paths[name].values())))}"
+          for name in segmentations),
+    ] if segmentations else []
 
     report = [
-        "# Volume EM mitochondria: reproduction vs. the published model",
+        f"# {args.title}",
         *baseline_only,
         "",
         "Instance metrics are matching at an IoU of 0.5; `msa` averages over the thresholds 0.5 to 0.95.",
@@ -255,6 +351,7 @@ def main():
         "All models were segmented with identical preprocessing and identical post-processing",
         f"(seed_distance {inference.SEED_DISTANCE}, boundary_threshold {inference.BOUNDARY_THRESHOLD}, "
         f"area_threshold {inference.AREA_THRESHOLD}, min_size {inference.MIN_SIZE}).",
+        *precomputed,
         "",
         "## Averaged over the test blocks",
         "",
@@ -267,10 +364,9 @@ def main():
     ]
     if args.size_filter_sweep:
         sweep_rows = []
-        for name, _ in models.items():
+        for name, paths in segmentation_paths.items():
             for dataset, block_path in blocks.items():
-                path = os.path.join(args.segmentation_root, name, f"{dataset}.h5")
-                for row in sweep_size_filter(path, block_path, args.size_filter_sweep):
+                for row in sweep_size_filter(paths[dataset], block_path, args.size_filter_sweep):
                     row.update(model=name, dataset=dataset)
                     sweep_rows.append(row)
         sweep = pd.DataFrame(sweep_rows)[
