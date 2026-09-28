@@ -15,6 +15,16 @@ inference/
   run_mitochondria_vol_em_segmentation.py   segmentation with a local checkpoint
 evaluation/
   compare_models.py                         model comparison on the held-out test blocks
+  voxel_sweep.py                            block lookup and resampling shared by the baseline sweeps
+  segment_mitonet.py                        MitoNet baseline at a chosen voxel size, for compare_models.py -s
+  mitonet_iso30.yaml                        job manifest for it at 30 nm isotropic on the test blocks
+  mitonet_sweep_val.yaml                    job manifest for the MitoNet sweep on the validation blocks
+  mitonet_sweep_score.yaml                  job manifest for scoring it
+  segment_microsam.py                       micro-sam baseline at a chosen voxel size, for compare_models.py -s
+  microsam_sweep_val.yaml                   job manifest for the micro-sam sweep on the validation blocks
+  microsam_sweep_score.yaml                 job manifest for scoring it
+  microsam_test_selected.yaml               job manifest for the test run of the selected setting
+  score_voxel_size_sweep.py                 scores a voxel-size sweep of one method, selects per approach
 ```
 
 ## The published model
@@ -133,6 +143,200 @@ The real lever is the seed and boundary parameters, which is where the fragmenta
 re-tuning those needs a validation set that is not these two blocks. `compare_models.py
 --size_filter_sweep` reproduces the table above as a diagnostic; read it as a measure of how much of
 the error is fragments, not as a tuning result.
+
+### MitoNet baseline
+
+MitoNet (empanada, `MitoNet_v1`) is a 2D generalist whose 3D mode, the ortho-plane consensus, infers on
+xy, xz and yz planes and so assumes isotropic voxels. `evaluation/segment_mitonet.py` resamples each
+test block from 25/5/5 nm to 30 nm isotropic (107 x 267 x 267; linear with anti-aliasing), runs
+ortho-plane inference, and resizes the result back to the native grid with nearest-neighbor
+interpolation. The ground truth is never resampled. Both the consensus and the xy stack alone come
+out of the same run:
+
+```bash
+python /mnt/vast-nhr/home/freckmann15/u15205/synapse/sbatch_runner.py scripts/volume_em/evaluation/mitonet_iso30.yaml
+python scripts/volume_em/evaluation/compare_models.py \
+    -m paper=/mnt/lustre-grete/usr/u15205/volume-em/models-repro/reference/volume-em-mito-aniso2lvl-lr1e-4-bs4-ps32x512x512-blacked-final \
+    -s mitonet-iso30-ortho=/mnt/lustre-grete/usr/u15205/volume-em/repro-comparison/mitonet-iso30-ortho \
+    -s mitonet-iso30-xy=/mnt/lustre-grete/usr/u15205/volume-em/repro-comparison/mitonet-iso30-xy \
+    --size_filter_sweep 1000 10000 20000 30000 \
+    --title "Volume EM mitochondria: MitoNet at 30 nm isotropic vs. the published model" \
+    -o scripts/volume_em/RESULTS_mitonet_iso30.md
+```
+
+It runs in its own environment, `/mnt/lustre-grete/usr/u15205/envs/empanada`, built from the synapse
+repo's `env_empanada.yaml` (empanada-napari 1.2.1, torch 2.8).
+
+- **Size filter.** `min_size` is 23 voxels at 30 nm, the same physical volume as synapse-net's 1,000
+  native voxels (a 30 nm voxel is 43.2 native ones). empanada's default of 500 would be ~21,600
+  native voxels, the kind of threshold the section above explains does not generalize, and it would
+  flatter MitoNet on these two blocks. `min_extent` is empanada's 4.
+- **Everything else is the `Engine3d` default**, as in the earlier MitoNet runs (`confidence_thr` 0.3,
+  median filter over 5 slices). The napari widget's defaults differ (0.5, 3 slices, `min_extent` 5).
+- **The raw is fed as-is.** There is no white-filler removal, which is part of synapse-net's
+  preprocessing, not MitoNet's. The 4009 block has 11.4 % filler.
+- **Result: MitoNet fails at 30 nm**, with F1 0 on both blocks in both modes
+  (`RESULTS_mitonet_iso30.md`). On 4009 it predicts no objects at all. On 4007 its 16 (consensus)
+  or 20 (xy) objects barely touch the mitochondria (semantic dice 0.01), and they are small.
+  - **It is not a resampling artefact.** MitoNet's 2D engine run directly on the resampled slices
+    also has a dice of 0, and no flip or transpose of the result improves the overlap.
+  - **The cause is the scale, not the contrast.** The objects MitoNet predicts at 30 nm are dark
+    (mean raw 97.5), while the mitochondria in these blocks are brighter than their surroundings
+    (144 vs. 134 in 4007). That first suggested an inverted contrast. The voxel-size sweep below
+    refutes it: the inverted contrast scores F1 ≈ 0 at every voxel size, while the raw contrast
+    works once xy is at 8–15 nm.
+- **The February 2026 MitoNet numbers are not comparable.** They are in
+  `/mnt/lustre-grete/usr/u12103/mitochondria/volume-em/test_split_empanada_vs25-*` (F1 ≤ 0.07), and
+  they differ in three ways:
+  - they ran on anisotropic input, in the xy stack only;
+  - they saved the raw panoptic stack as uint8, whose `1000 + n` IDs wrap (ID 1024 became background);
+  - they were scored with border filtering (`eval_mitos_touching_borders.py -b 2 -z`) against
+    downsampled labels.
+
+### MitoNet voxel-size sweep
+
+30 nm may simply be the wrong scale: a median mitochondrion here is 305–370 nm across (measured on
+the validation blocks), so only ~10–12 px at 30 nm. The sweep looks for the voxel size, and the
+contrast polarity, at which MitoNet works best.
+
+**It is run on the two validation blocks of the pinned split, not on the test blocks.** MitoNet never
+saw them, and they mirror the test pair: one 4007 and one 4009 block, `(128, 1600, 1600)`, 37 and 28
+mitochondria, the 4009 one with 13.8 % filler. Only the setting selected for each approach is then
+run once on the test split.
+
+Every setting runs on the raw and on the inverted contrast (`255 - raw`):
+
+| group | voxel size (z/y/x nm) | modes |
+|---|---|---|
+| A: z native, xy swept | 25 / {5, 7.5, 8, 10, 12.5, 15, 20, 25, 30} | xy stack |
+| B: isotropic | {10, 12.5, 15, 20, 25, 30} in every axis | ortho-plane and xy stack |
+| C: single settings | 30 / 8 / 8, which MitoNet_v1 was probably trained at | xy stack |
+
+Why these bounds:
+- **A below 5 nm** would upsample the native data.
+- **B below 10 nm** would interpolate z by more than 2.5× and reach 0.5–1.6 G voxels.
+- **Above 30 nm** the smallest mitochondria fall under ~8 px.
+
+A setting at the edge of its grid is flagged by the scorer, as a cue to extend the grid by one step.
+The sweep holds fixed:
+- `min_size`, scaled to the same physical volume as synapse-net's 1,000 native voxels at every
+  voxel size;
+- `min_extent` at 4 voxels;
+- the `Engine3d` and consensus defaults.
+
+25 nm isotropic is shared by A and B. The xy stack comes out identical whether it runs alone or
+next to the ortho-plane consensus, which was checked.
+
+```bash
+python /mnt/vast-nhr/home/freckmann15/u15205/synapse/sbatch_runner.py scripts/volume_em/evaluation/mitonet_sweep_val.yaml
+python /mnt/vast-nhr/home/freckmann15/u15205/synapse/sbatch_runner.py scripts/volume_em/evaluation/mitonet_sweep_score.yaml \
+    --dependency afterok:<sweep job id>
+```
+
+The scorer selects per group by the F1 averaged over the validation blocks, ties broken by msa.
+It says plainly when even the best setting is below F1 0.05, rather than presenting a failure as a
+selection. It writes `RESULTS_mitonet_sweep_val.md` and `best.json` in the sweep root, whose
+`segment_args` are the arguments for the one test run. `compare_models.py --split_file
+... --split_key val` scores models on the validation blocks the same way; their cached
+segmentations go into a `val/` folder so they cannot be confused with the test ones.
+
+**Result.** The val tables are in `RESULTS_mitonet_sweep_val.md`, and the test run of the three
+selected settings is in `RESULTS_mitonet_voxel_size.md`.
+
+- **Contrast.** The inverted contrast scores F1 ≈ 0 at every voxel size, so the raw contrast is
+  the right one.
+- **Scale.** With the raw contrast, MitoNet works only at fine scales. It peaks at 8–15 nm in xy
+  (median mitochondrion 20–45 px across) and collapses to 0 at 25–30 nm, in every group.
+- **Noise.** The top settings are within a few hundredths of each other, which is within noise
+  for 65 objects.
+
+| selected on val | val F1 | test F1 | test precision / recall | test dice |
+|---|---|---|---|---|
+| A: z 25, xy 10 nm, xy stack | 0.182 | 0.094 | 0.070 / 0.143 | 0.368 |
+| B: 12.5 nm isotropic, ortho-plane | 0.235 | 0.101 | 0.083 / 0.131 | 0.328 |
+| C: z 30, xy 8 nm, xy stack | 0.223 | 0.121 | 0.087 / 0.200 | 0.407 |
+| synapse-net, published model | – | 0.691 | 0.585 / 0.847 | 0.849 |
+
+At its best voxel size MitoNet goes from F1 0 to about 0.1 on the test blocks, still far below
+synapse-net. It predicts 55–99 objects against 30 and 43, most of which do not match. The test
+scores are about half the val scores, so the val selection should be read as "8–15 nm" rather
+than as one exact voxel size.
+
+### micro-sam voxel-size sweep
+
+`evaluation/segment_microsam.py` runs the same grid with micro-sam's automatic instance segmentation
+(`vit_b_em_organelles`, AIS decoder), selected on the same validation blocks by the same rule, with
+the same physically matched size filter. It runs on the raw contrast only. It uses its own
+environment, `/mnt/lustre-grete/usr/u15205/envs/micro-sam`, built from the micro-sam checkout's
+`environment.yaml` plus an editable install of the checkout: micro-sam 1.8.14 (`de4231f`),
+python-elf 0.9.2, bioimage-cpp 0.9.0.
+
+- **The micro-sam version matters.** micro-sam 1.7.7 builds nifty graphs for the merge along z,
+  while elf 0.9 takes bioimage-cpp graphs. Its `environment.yaml` only asks for `python-elf >=0.7.1`,
+  so a fresh environment for 1.7.7 gets elf 0.9.2 and fails in the merge (`'UndirectedGraph' object
+  has no attribute 'number_of_nodes'`). micro-sam 1.8.x requires elf 0.9 and works.
+- The model is unchanged: the cached `vit_b_em_organelles` weights and decoder match the registry
+  of 1.8.14.
+
+- **The encoder scale is controlled, not only the resampling.**
+  - SAM resizes every image, and every tile, so that its longest side is 1024 px, up or down.
+    Passed as-is, a slice of these 8 µm blocks would reach the encoder at ~7.8 nm/px at every
+    voxel size, only more or less blurred.
+  - So every image or tile that holds data is made exactly 1024 px. A slice of up to 1024 px is
+    reflect-padded to 1024 × 1024. The two larger ones, xy 5 and 7.5 nm, are padded onto a canvas
+    on which micro-sam's tiling (768 + a halo of 128) gives every tile holding data its full 1024 px.
+    That was checked for every grid size.
+  - The padding is cropped away before scoring.
+- **One mode.** micro-sam segments the xy slices and merges them along z; it has no ortho-plane
+  mode.
+- **Settings.** Everything else is micro-sam's own: the AIS defaults, and `gap_closing` 2 and
+  `min_z_extent` 2, the napari annotator's defaults for automatic 3D segmentation.
+- **The February 2026 `test_split_microsam_vs25-*` runs are not comparable.** They were never
+  scored, and they are stored at the reduced grids. Because of the rescaling above, their "10" and
+  "20 nm" runs saw ~7.8 nm/px.
+
+```bash
+python /mnt/vast-nhr/home/freckmann15/u15205/synapse/sbatch_runner.py scripts/volume_em/evaluation/microsam_sweep_val.yaml
+python /mnt/vast-nhr/home/freckmann15/u15205/synapse/sbatch_runner.py scripts/volume_em/evaluation/microsam_sweep_score.yaml \
+    --dependency afterok:<sweep job id>
+python /mnt/vast-nhr/home/freckmann15/u15205/synapse/sbatch_runner.py scripts/volume_em/evaluation/microsam_test_selected.yaml
+```
+
+**Result on the validation blocks** (`RESULTS_microsam_sweep_val.md`):
+
+- **Finer is better, down to the native resolution.** In group A the F1 rises steadily as xy gets
+  finer: 0 at 12.5–30 nm, 0.03 at 10 nm, 0.04 at 7.5–8 nm, and **0.089 at the native 5 nm**.
+  - The first run selected 5 nm at the edge of its grid, so the grid was extended by a step.
+    At 3.75 nm, which upsamples the native data, the F1 falls back to 0.057, so 5 nm is a real peak.
+  - At 5 nm there is no resampling at all, only the tiled 1024 px canvas.
+- **B and C have no working setting.** The best isotropic setting is 10 nm at F1 0.017, and 30/8/8
+  reaches 0.029, both below the floor of 0.05, so neither group has a selection.
+  - B is also rising towards its finest setting. It could only be extended below 10 nm by
+    interpolating z by more than 2.5×, and A shows that even the native data gives 0.089.
+- **micro-sam over-segments at every scale that finds anything.** At 5 nm it predicts 346 objects
+  against 65 (precision 0.05, recall 0.29). Its semantic dice of 0.46 shows it finds the
+  mitochondria, but splits them into fragments that fail the IoU 0.5 match.
+- **Compared with MitoNet** on the same blocks and grid, micro-sam is worse everywhere: MitoNet's
+  best settings reach F1 0.18–0.23.
+
+**Result on the test blocks** (`RESULTS_baselines_voxel_size.md`). The selected setting was run
+once, and is scored next to the MitoNet settings selected the same way:
+
+| setting (selected on val) | val F1 | test F1 | test precision / recall | test dice | objects 4007 / 4009 |
+|---|---|---|---|---|---|
+| micro-sam A: z 25, xy 5 nm (native) | 0.089 | 0.073 | 0.046 / 0.185 | 0.379 | 132 / 170 |
+| MitoNet A: z 25, xy 10 nm | 0.182 | 0.094 | 0.070 / 0.143 | 0.368 | 66 / 85 |
+| MitoNet B: 12.5 nm isotropic, ortho-plane | 0.235 | 0.101 | 0.083 / 0.131 | 0.328 | 55 / 63 |
+| MitoNet C: z 30, xy 8 nm | 0.223 | 0.121 | 0.087 / 0.200 | 0.407 | 69 / 99 |
+| synapse-net, published model | – | 0.691 | 0.585 / 0.847 | 0.849 | 48 / 57 |
+
+The ground truth has 30 / 43 objects.
+
+- **Both generalists fail on this data at every voxel size.** Each detects part of the mitochondria
+  (dice 0.33–0.41) but splits it into fragments, which is why precision is so low.
+- **micro-sam is worse than MitoNet**, with the gap largest on 4007 (F1 0.025 against 0.06–0.10).
+- **The ranking holds on test.** It matches the one on val, which suggests the val selection
+  carried over.
 
 ### Test data
 
