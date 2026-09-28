@@ -1,0 +1,36 @@
+# MitoNet_v1 voxel-size sweep on the validation blocks of the pinned split, see segment_mitonet.py.
+# Every setting runs on the raw and on the inverted contrast:
+#   B  isotropic 30 25 20 15 12.5 10 nm, ortho-plane consensus and xy stack
+#   A  z at the native 25 nm, xy 30 20 15 12.5 10 8 7.5 5 nm, xy stack; xy 25 is B's iso25-xy
+#   C  30 nm in z and 8 nm in xy, the voxel size MitoNet_v1 was probably trained at, xy stack
+# B runs first, so A at xy 25 finds B's segmentation and skips it. Settings that already exist are
+# skipped, so a grid extension only computes the new ones. Score with mitonet_sweep_score.yaml.
+#
+# Submit with the runner of the synapse repo:
+#   python /mnt/vast-nhr/home/freckmann15/u15205/synapse/sbatch_runner.py \
+#       scripts/volume_em/evaluation/mitonet_sweep_val.yaml [--dry-run]
+
+slurm_profile: grete_interactive_10gb
+
+slurm:
+  job_name: "volem-mitonet-sweep-val"
+  time: "06:00:00"
+
+env:
+  type: micromamba
+  path: /mnt/lustre-grete/usr/u15205/envs/empanada
+
+commands:
+  - "export CUDA_VISIBLE_DEVICES=0
+     SEG=/mnt/vast-nhr/home/freckmann15/u15205/synapse-net/scripts/volume_em/evaluation/segment_mitonet.py
+     SPLIT=/mnt/vast-nhr/home/freckmann15/u15205/synapse-net/scripts/volume_em/training/split-mito_vol_em_aniso2lvl_final.json
+     ROOT=/mnt/lustre-grete/usr/u15205/volume-em/mitonet-sweep/val"
+  - "for inv in '' --invert; do for v in 30 25 20 15 12.5 10; do
+       python $SEG --voxel_size $v $v $v --modes ortho xy $inv --split_file $SPLIT --split_key val --segmentation_root $ROOT;
+     done; done"
+  - "for inv in '' --invert; do for xy in 30 25 20 15 12.5 10 8 7.5 5; do
+       python $SEG --voxel_size 25 $xy $xy --modes xy $inv --split_file $SPLIT --split_key val --segmentation_root $ROOT;
+     done; done"
+  - "for inv in '' --invert; do
+       python $SEG --voxel_size 30 8 8 --modes xy $inv --split_file $SPLIT --split_key val --segmentation_root $ROOT;
+     done"
