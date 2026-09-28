@@ -1,0 +1,25 @@
+# MitoNet baseline at 30 nm isotropic on the held-out test blocks, see segment_mitonet.py.
+# Writes mitonet-iso30-ortho/ and mitonet-iso30-xy/ under /mnt/lustre-grete/usr/u15205/volume-em/repro-comparison,
+# which compare_models.py then scores with '-s'. The volumes are small at 30 nm (107 x 267 x 267), so a
+# MIG slice is ample. (The grete_interactive profile asks for 1g.20gb slices, which the partition no longer has.)
+#
+# The environment is built from the synapse repo's env_empanada.yaml. The MitoNet_v1 weights are
+# downloaded to ~/.empanada on first use; fetch them on the login node if the compute nodes have no
+# internet access.
+#
+# Submit with the runner of the synapse repo:
+#   python /mnt/vast-nhr/home/freckmann15/u15205/synapse/sbatch_runner.py \
+#       scripts/volume_em/evaluation/mitonet_iso30.yaml [--dry-run]
+
+slurm_profile: grete_interactive_10gb
+
+slurm:
+  job_name: "volem-mitonet-iso30"
+  time: "01:00:00"
+
+env:
+  type: micromamba
+  path: /mnt/lustre-grete/usr/u15205/envs/empanada
+
+commands:
+  - "CUDA_VISIBLE_DEVICES=0 python /mnt/vast-nhr/home/freckmann15/u15205/synapse-net/scripts/volume_em/evaluation/segment_mitonet.py"
