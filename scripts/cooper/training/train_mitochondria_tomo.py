@@ -1,16 +1,8 @@
-"""Train the mitochondria model for electron tomography.
+"""Train the mitochondria model for electron tomography, reproducing 'mitochondria2'.
 
-This reproduces the training of SynapseNet's 'mitochondria2' model. The training data consists of
-the fidi (downscaled by a factor of 4) and wichmann (downscaled by a factor of 2) tomograms, which
-are both at a resolution of roughly 2.87 nm, with refined mitochondria annotations.
-
-The split file next to this script holds the exact train / val split of the published run.
-Pass '--random_split' to split the data randomly instead.
-
-The recipe trains without mixed precision and needs about 50 GB of GPU memory, so it requires an
-80 GB GPU (e.g. an H100, or '--gres=gpu:A100:1 --constraint=80gb' on Grete). It runs out of memory
-on a 40 GB A100. To evaluate the trained model on the held-out test set, segment it with
-'segment_test_set.py -t mito' and score it with 'evaluate_mitochondria.py'.
+The training data are the fidi (downscaled by 4) and wichmann (downscaled by 2) tomograms with refined
+annotations, at about 2.87 nm. The split file next to this script holds the split of the published run.
+The training needs an 80 GB GPU. Evaluate the model with 'evaluate_test_set.py -t mito'.
 """
 
 import argparse
@@ -19,47 +11,22 @@ import os
 from synapse_net.training.mitochondria import get_mitochondria_paths, mitochondria_training
 
 TRAIN_ROOT = "/mnt/lustre-grete/usr/u12103/mitochondria/mito-tomo-all"
-OUTPUT_ROOT = "/mnt/lustre-grete/usr/u12103/mitochondria/tomo"
 SPLIT_FILE = os.path.join(os.path.dirname(__file__), "split-mito_tomo_s4_refined.json")
-
-PATCH_SHAPE = (32, 256, 256)
-BATCH_SIZE = 8
-LEARNING_RATE = 1e-4
-N_ITERATIONS = 150000
-EARLY_STOPPING = 20
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Train the mitochondria model for electron tomography.")
-    parser.add_argument("-n", "--name", default="mitotomo-net32-lr1e-4-bs8-ps32x256x256-s4-refined-final",
-                        help="The name of the model to be trained.")
-    parser.add_argument("-i", "--train_root", default=TRAIN_ROOT, help="The folder with the training data.")
-    parser.add_argument("-o", "--output_root", default=OUTPUT_ROOT, help="The folder for the checkpoint and logs.")
-    parser.add_argument("--random_split", action="store_true",
-                        help="Split the data randomly instead of using the split of the published run.")
-    parser.add_argument("--resume", action="store_true",
-                        help="Continue the previous run with the same name, restoring its optimizer and "
-                             "iteration count.")
-    parser.add_argument("--check", action="store_true", help="Check the dataloaders instead of running training.")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("-o", "--output_root", required=True, help="The folder for the checkpoint and the logs.")
+    parser.add_argument("-n", "--name", default="mitotomo-net32-lr1e-4-bs8-ps32x256x256-s4-refined-final")
+    parser.add_argument("--random_split", action="store_true", help="Split randomly instead of the published split.")
+    parser.add_argument("--resume", action="store_true", help="Continue the previous run with this name.")
+    parser.add_argument("--check", action="store_true", help="Check the dataloaders instead of training.")
     args = parser.parse_args()
 
-    train_paths, val_paths = get_mitochondria_paths(
-        args.train_root, split_file=None if args.random_split else SPLIT_FILE,
-    )
-    print("Training on", len(train_paths), "tomograms and validating on", len(val_paths), "tomograms.")
-
+    train_paths, val_paths = get_mitochondria_paths(TRAIN_ROOT, split_file=None if args.random_split else SPLIT_FILE)
+    print("Training on", len(train_paths), "tomograms and validating on", len(val_paths))
     mitochondria_training(
-        name=args.name,
-        train_paths=train_paths,
-        val_paths=val_paths,
-        save_root=args.output_root,
-        patch_shape=PATCH_SHAPE,
-        batch_size=BATCH_SIZE,
-        lr=LEARNING_RATE,
-        n_iterations=N_ITERATIONS,
-        early_stopping=EARLY_STOPPING,
-        resume=args.resume,
-        check=args.check,
+        args.name, train_paths, val_paths, save_root=args.output_root, resume=args.resume, check=args.check
     )
 
 

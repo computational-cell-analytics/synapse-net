@@ -162,7 +162,7 @@ For more options supported by the IMOD exports, please run `synapse_net.export_t
 
 > Note: to use these commands you have to install IMOD.
 
-SynapseNet also provides four CLI comamnds for training models: one for supervised network training (see [Supervised Training](#supervised-training) for details), one for training a mitochondria model for electron tomography (see [Mitochondria Training](#mitochondria-training) for details), one for training a cristae model (see [Cristae Training](#cristae-training) for details) and one for domain adaptation (see [Domain Adaptation](#domain-adaptation) for details).
+SynapseNet also provides two CLI comamnds for training models, one for supervised network training (see [Supervised Training](#supervised-training) for details) and one for domain adaptation (see [Domain Adaptation](#domain-adaptation) for details).
 
 
 ## Python Library
@@ -211,76 +211,26 @@ synapse_net.run_supervised_training -h
 for more information and instructions on how to use the command.
 
 
-### Mitochondria Training
+### Mitochondria and Cristae Training
 
-SynapseNet provides a dedicated function for training a model for mitochondria segmentation in electron tomograms.
-It reproduces the recipe that was used for our `mitochondria2` model and is implemented in
-`synapse_net.training.mitochondria`. Compared to the generic supervised training it fixes the hyperparameters of that
-model, expects the tomograms and annotations in the same hdf5 file, and normalizes the tomograms with the 1st and 99th
-percentile instead of standardizing them.
+SynapseNet provides dedicated functions for training the mitochondria and cristae models for electron tomography,
+which reproduce the recipes of our `mitochondria2` and `cristae5` models:
+```python
+from synapse_net.training import cristae_training, mitochondria_training
+from synapse_net.training.cristae import get_cristae_paths
+from synapse_net.training.mitochondria import get_mitochondria_paths
 
-We also provide a command line function to run it: `synapse_net.run_mitochondria_training`.
-It expects one hdf5 file per tomogram, which contains the tomogram and the mitochondria annotations:
-```bash
-synapse_net.run_mitochondria_training \
-    -n my-mito-model \  # The name of the model checkpoint.
-    -i /path/to/tomograms \ # The folder with the hdf5 files, which is searched recursively.
-    --raw_key raw \ # The internal path of the tomogram, 'raw' by default.
-    --label_key labels/mitochondria \ # The internal path of the annotations, 'labels/mitochondria' by default.
-    --patch_shape 32 256 256 \ # The patch shape in ZYX.
-    --batch_size 8 \ # The batch size for training.
-    --n_iterations 150000 \ # The maximal number of iterations to train for.
+train_paths, val_paths = get_mitochondria_paths("/path/to/tomograms")
+mitochondria_training("my-mito-model", train_paths, val_paths, save_root="/path/to/models")
+
+train_paths, val_paths = get_cristae_paths({"cristae": "/path/to/cristae-tomograms"})
+cristae_training("my-cristae-model", train_paths, val_paths, save_root="/path/to/models")
 ```
-The data is split into training and validation data randomly, with a fixed seed. Pass `--split_file` to use an explicit
-split instead. The default batch size and patch shape need about 50 GB of GPU memory (PyTorch reserves about 70 GB),
-because the recipe trains without mixed precision, so the training does not fit on a 40 GB GPU. Use an 80 GB GPU, or
-reduce them and pass `--mixed_precision` to train on a smaller GPU. `--deterministic` needs more memory than that and
-does not fit on an 80 GB GPU with the default batch size.
-
-Note that the normalization is part of the model: to segment with the resulting model you have to pass
+The mitochondria model is trained on percentile-normalized tomograms, so segment with it by passing
 `preprocess=torch_em.transform.raw.normalize_percentile` to `synapse_net.inference.mitochondria.segment_mitochondria`.
-
-Run
-```bash
-synapse_net.run_mitochondria_training -h
-```
-for more information and instructions on how to use the command.
-
-
-### Cristae Training
-
-SynapseNet provides a dedicated function for training a model for cristae segmentation in electron tomograms.
-It reproduces the recipe that was used for our `cristae5` model and is implemented in `synapse_net.training.cristae`.
-
-Cristae training differs from the other training functions in two ways.
-First, the network takes **two input channels**: the tomogram and a semantic mitochondria state, where 0 is background,
-1 is a mitochondrion that carries cristae annotations and 2 is a mitochondrion that does not.
-Both are expected in a single hdf5 dataset of shape `(2, z, y, x)`.
-Second, the voxels of the mitochondria without annotations are **excluded from the loss**, so that the network is not
-penalized for predicting cristae where no annotation exists, and the loss is weighted towards the mitochondria
-membrane, which improves the detection of cristae junctions.
-
-```bash
-synapse_net.run_cristae_training \
-    -n my-cristae-model \  # The name of the model checkpoint.
-    -i /path/to/tomograms \ # One or more folders with the hdf5 files, searched recursively.
-    --raw_key raw_mitos_combined \ # The internal path of the tomogram and mitochondria state.
-    --label_key labels/cristae \ # The internal path of the cristae annotations.
-    --patch_shape 32 256 256 \ # The patch shape in ZYX.
-    --batch_size 24 \ # The batch size for training.
-    --n_iterations 100000 \ # The maximal number of iterations to train for.
-```
-The membrane weighting is controlled with `--membrane_w_pos` and `--membrane_w_neg`; pass 1.0 for both to train
-without it. The data is split into training and validation data randomly, with a fixed seed; pass `--split_file` to
-use an explicit split instead. The default batch size and patch shape need about 56 GB of GPU memory with mixed
-precision (PyTorch reserves about 72 GB), so the training requires an 80 GB GPU. `--deterministic` needs more memory
-than that and does not fit on an 80 GB GPU with the default batch size.
-
-Run
-```bash
-synapse_net.run_cristae_training -h
-```
-for more information and instructions on how to use the command.
+The cristae model gets the tomogram and a mitochondria state as input, where 0 is background, 1 is a mitochondrion with
+cristae annotations and 2 is one without, which is excluded from the loss. Both recipes need an 80 GB GPU.
+The scripts in `scripts/cooper/training` train and evaluate the published models.
 
 
 ### Domain Adaptation
