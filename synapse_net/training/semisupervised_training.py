@@ -7,7 +7,8 @@ import torch_em.self_training as self_training
 from torchvision import transforms
 from torch_em.data import RawDatasetWithMasks
 
-from .supervised_training import get_2d_model, get_3d_model, get_supervised_loader, _determine_ndim, supervised_training
+from .models import get_2d_model, get_3d_model
+from .supervised_training import get_supervised_loader, _determine_ndim, supervised_training
 
 def weak_augmentations(p: float = 0.75) -> callable:
     """The weak augmentations used in the unsupervised data loader.

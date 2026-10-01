@@ -5,68 +5,9 @@ from typing import Optional, Tuple, Union
 import torch
 import torch_em
 from sklearn.model_selection import train_test_split
-from torch_em.model import AnisotropicUNet, UNet2d
 
 from synapse_net.inference.inference import get_model_path, get_available_models
-
-
-def get_3d_model(
-    out_channels: int,
-    in_channels: int = 1,
-    scale_factors: Tuple[Tuple[int, int, int]] = [[1, 2, 2], [2, 2, 2], [2, 2, 2], [2, 2, 2]],
-    initial_features: int = 32,
-    final_activation: str = "Sigmoid",
-) -> torch.nn.Module:
-    """Get the U-Net model for 3D segmentation tasks.
-
-    Args:
-        out_channels: The number of output channels of the network.
-        scale_factors: The downscaling factors for each level of the U-Net encoder.
-        initial_features: The number of features in the first level of the U-Net.
-            The number of features increases by a factor of two in each level.
-        final_activation: The activation applied to the last output layer.
-
-    Returns:
-        The U-Net.
-    """
-    model = AnisotropicUNet(
-        scale_factors=scale_factors,
-        in_channels=in_channels,
-        out_channels=out_channels,
-        initial_features=initial_features,
-        gain=2,
-        final_activation=final_activation,
-    )
-    return model
-
-
-def get_2d_model(
-    out_channels: int,
-    in_channels: int = 1,
-    initial_features: int = 32,
-    final_activation: str = "Sigmoid",
-) -> torch.nn.Module:
-    """Get the U-Net model for 2D segmentation tasks.
-
-    Args:
-        out_channels: The number of output channels of the network.
-        initial_features: The number of features in the first level of the U-Net.
-            The number of features increases by a factor of two in each level.
-        final_activation: The activation applied to the last output layer.
-
-    Returns:
-        The U-Net.
-    """
-    model = UNet2d(
-        in_channels=in_channels,
-        out_channels=out_channels,
-        initial_features=initial_features,
-        gain=2,
-        depth=4,
-        final_activation=final_activation,
-    )
-    return model
-
+from synapse_net.training.models import get_2d_model, get_3d_model
 
 def _adjust_patch_shape(data_shape, patch_shape):
     # If data is 2D and patch_shape is 3D, drop the extra dimension in patch_shape
