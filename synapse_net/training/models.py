@@ -1,5 +1,5 @@
 """
-Code ported from micromatch.
+Code ported from micro-match.
 Author: Marei Freitag
 """
 import os
@@ -17,6 +17,104 @@ from torch_em.model.unetr import UNETR2D, UNETR3D
 from torch_em.model import UNet2d, AnisotropicUNet
 from torch_em.transform.raw import normalize_percentile, normalize
 
+def get_unetr_model(
+    ndim: int,
+    backbone: Literal["sam", "sam2", "dinov2", "dinov3"],
+    model_type: str,
+    out_channels: int = 1,
+    init_decoder: bool = False,
+    final_activation="Sigmoid",
+):
+    if backbone not in ("sam", "sam2", "dinov2", "dinov3"):
+        raise ValueError(f"Unsupported backbone '{backbone}'.")
+    
+    # Get the model class.
+    if ndim == 2:
+        model_class = UNETR2D
+    else:
+        model_class = partial(UNETR3D, use_strip_pooling=False)
+
+    # Load the model
+    model = model_class(
+        img_size=518 if backbone == "dinov2" else 1024,
+        backbone=backbone,
+        encoder=_get_vit_type(model_type),
+        encoder_checkpoint=_get_checkpoint(backbone=backbone, model_type=model_type),
+        out_channels=out_channels,
+        resize_input=True,
+        final_activation=final_activation,
+        use_skip_connection=False,
+        use_conv_transpose=False,
+        use_sam_stats="sam" in backbone,
+        use_dino_stats="dino" in backbone,
+        embed_dim=_get_embed_dim(backbone=backbone),
+    )
+    _get_checkpoint(backbone, model_type, return_decoder_path=False)
+
+    if init_decoder and ndim == 2:
+        model = _init_microsam_decoder(model, backbone, model_type, out_channels)
+    # Init decoder for microSAM2 model
+    elif init_decoder and backbone == "sam2" and model_type == "hvit_t_em_organelles":
+        model = _init_microsam_decoder(model, backbone, model_type, out_channels)
+
+    return model
+
+def get_3d_model(
+    out_channels: int,
+    in_channels: int = 1,
+    scale_factors: Tuple[Tuple[int, int, int]] = [[1, 2, 2], [2, 2, 2], [2, 2, 2], [2, 2, 2]],
+    initial_features: int = 32,
+    final_activation: str = "Sigmoid",
+) -> torch.nn.Module:
+    """Get the U-Net model for 3D segmentation tasks.
+
+    Args:
+        out_channels: The number of output channels of the network.
+        scale_factors: The downscaling factors for each level of the U-Net encoder.
+        initial_features: The number of features in the first level of the U-Net.
+            The number of features increases by a factor of two in each level.
+        final_activation: The activation applied to the last output layer.
+
+    Returns:
+        The U-Net.
+    """
+    model = AnisotropicUNet(
+        scale_factors=scale_factors,
+        in_channels=in_channels,
+        out_channels=out_channels,
+        initial_features=initial_features,
+        gain=2,
+        final_activation=final_activation,
+    )
+    return model
+
+
+def get_2d_model(
+    out_channels: int,
+    in_channels: int = 1,
+    initial_features: int = 32,
+    final_activation: str = "Sigmoid",
+) -> torch.nn.Module:
+    """Get the U-Net model for 2D segmentation tasks.
+
+    Args:
+        out_channels: The number of output channels of the network.
+        initial_features: The number of features in the first level of the U-Net.
+            The number of features increases by a factor of two in each level.
+        final_activation: The activation applied to the last output layer.
+
+    Returns:
+        The U-Net.
+    """
+    model = UNet2d(
+        in_channels=in_channels,
+        out_channels=out_channels,
+        initial_features=initial_features,
+        gain=2,
+        depth=4,
+        final_activation=final_activation,
+    )
+    return model
 
 def normalize_percentile_to_0_1(raw):
     raw = normalize_percentile(raw)
@@ -260,101 +358,4 @@ def _init_microsam_decoder(model, backbone, model_type, out_channels):
 
     model.load_state_dict(unetr_state_dict)
 
-    return model
-
-
-def get_unetr_model(
-    ndim: int = 2,
-    backbone: Literal["sam", "sam2", "sam3", "dinov2", "dinov3"] = "sam",
-    model_type: str = "vit_b_em_organelles",
-    out_channels: int = 1,
-    init_decoder: bool = False,
-    final_activation="Sigmoid",
-):
-    # Get the model class.
-    if ndim == 2:
-        model_class = UNETR2D
-    else:
-        model_class = partial(UNETR3D, use_strip_pooling=False)
-
-    # Load the model
-    model = model_class(
-        img_size=518 if backbone == "dinov2" else 1024,
-        backbone=backbone,
-        encoder=_get_vit_type(model_type),
-        encoder_checkpoint=_get_checkpoint(backbone=backbone, model_type=model_type),
-        out_channels=out_channels,
-        resize_input=True,
-        final_activation=final_activation,
-        use_skip_connection=False,
-        use_conv_transpose=False,
-        use_sam_stats="sam" in backbone,
-        use_dino_stats="dino" in backbone,
-        embed_dim=_get_embed_dim(backbone=backbone),
-    )
-    _get_checkpoint(backbone, model_type, return_decoder_path=False)
-
-    if init_decoder and ndim == 2:
-        model = _init_microsam_decoder(model, backbone, model_type, out_channels)
-    # Init decoder for microSAM2 model
-    elif init_decoder and backbone == "sam2" and model_type == "hvit_t_em_organelles":
-        model = _init_microsam_decoder(model, backbone, model_type, out_channels)
-
-    return model
-
-def get_3d_model(
-    out_channels: int,
-    in_channels: int = 1,
-    scale_factors: Tuple[Tuple[int, int, int]] = [[1, 2, 2], [2, 2, 2], [2, 2, 2], [2, 2, 2]],
-    initial_features: int = 32,
-    final_activation: str = "Sigmoid",
-) -> torch.nn.Module:
-    """Get the U-Net model for 3D segmentation tasks.
-
-    Args:
-        out_channels: The number of output channels of the network.
-        scale_factors: The downscaling factors for each level of the U-Net encoder.
-        initial_features: The number of features in the first level of the U-Net.
-            The number of features increases by a factor of two in each level.
-        final_activation: The activation applied to the last output layer.
-
-    Returns:
-        The U-Net.
-    """
-    model = AnisotropicUNet(
-        scale_factors=scale_factors,
-        in_channels=in_channels,
-        out_channels=out_channels,
-        initial_features=initial_features,
-        gain=2,
-        final_activation=final_activation,
-    )
-    return model
-
-
-def get_2d_model(
-    out_channels: int,
-    in_channels: int = 1,
-    initial_features: int = 32,
-    final_activation: str = "Sigmoid",
-) -> torch.nn.Module:
-    """Get the U-Net model for 2D segmentation tasks.
-
-    Args:
-        out_channels: The number of output channels of the network.
-        initial_features: The number of features in the first level of the U-Net.
-            The number of features increases by a factor of two in each level.
-        final_activation: The activation applied to the last output layer.
-
-    Returns:
-        The U-Net.
-    """
-    model = UNet2d(
-        in_channels=in_channels,
-        out_channels=out_channels,
-        initial_features=initial_features,
-        gain=2,
-        depth=4,
-        final_activation=final_activation,
-    )
     return model

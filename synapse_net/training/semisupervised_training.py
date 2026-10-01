@@ -10,7 +10,7 @@ from .models import get_2d_model, get_3d_model
 from .supervised_training import supervised_training
 
 
-def semisupervised_training(
+def semisupervised_training( #TODO edit docstring
     name: str,
     unsupervised_train_paths: Tuple[str],
     unsupervised_val_paths: Tuple[str],
@@ -27,6 +27,8 @@ def semisupervised_training(
     teacher_warmup_iterations: int = int(1e4),
     n_samples_train: Optional[int] = None,
     n_samples_val: Optional[int] = None,
+    backbone: Optional[str] = None,
+    model_type: Optional[str] = None,
     source_checkpoint=None,
     supervised_sampler: Optional[callable] = None,
     check: bool = False,
@@ -69,6 +71,8 @@ def semisupervised_training(
             based on the patch_shape and size of the volumes used for training.
         n_samples_val: The number of val samples per epoch. By default this will be estimated
             based on the patch_shape and size of the volumes used for validation.
+        backbone:
+        model_type:
         source_checkpoint: Warmup checkpoint used to initialize the teacher model. If not provided,
             run supervised training `teacher_warmup_iterations`.
         supervised_sampler: Optional sampler for selecting patches from the labelled data.
@@ -121,6 +125,8 @@ def semisupervised_training(
                 lr=lr,
                 n_iterations=teacher_warmup_iterations,
                 sampler=supervised_sampler,
+                backbone=backbone,
+                model_type=model_type,
                 check=False,
             )
         source_checkpoint = os.path.dirname(warmup_checkpoint)
@@ -144,6 +150,8 @@ def semisupervised_training(
         n_samples_train=n_samples_train,
         n_samples_val=n_samples_val,
         supervised_sampler=supervised_sampler,
+        backbone=backbone,
+        model_type=model_type,
         check=False,
     )
 

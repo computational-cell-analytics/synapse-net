@@ -12,7 +12,7 @@ from elf.io import open_file
 from sklearn.model_selection import train_test_split
 
 from .dataloaders import get_supervised_loader, get_unsupervised_loader, _determine_ndim
-from .models import get_2d_model, get_3d_model
+from .models import get_2d_model, get_3d_model, get_unetr_model
 from .supervised_training import _derive_key_from_files
 from ..inference.inference import get_model_path, compute_scale_from_voxel_size, get_available_models
 from ..inference.util import _Scaler
@@ -26,7 +26,7 @@ DEFAULT_WEAK_AUGMENTATIONS["intensity"] = {
     "RandomGaussianNoise": {"mean": (0.0), "std": (0.1)},
 }    
 
-def mean_teacher_adaptation(
+def mean_teacher_adaptation( #TODO update docstring 
     name: str,
     unsupervised_train_paths: Tuple[str],
     unsupervised_val_paths: Tuple[str],
@@ -49,6 +49,8 @@ def mean_teacher_adaptation(
     sample_mask_key: Optional[str] = None,
     unsupervised_sampler: Optional[callable] = None,
     supervised_sampler: Optional[callable] = None,
+    backbone: Optional[str] = None,
+    model_type: Optional[str] = None,
     check: bool = False,
 ) -> None:
     """Run domain adaptation to transfer a network trained on a source domain for a supervised
@@ -100,9 +102,12 @@ def mean_teacher_adaptation(
         unsupervised_sampler: Sampler to accept or reject patches for the unsupervised data stream.
         supervised_sampler: Sampler to accept or reject patches for the supervised data stream.
             Pass `False` to disable.
+        backbone:
+        model_type:
         check: Whether to check the training and validation loaders instead of running training.
     """  # noqa
     assert (supervised_train_paths is None) == (supervised_val_paths is None)
+    assert (backbone is None) == (model_type is None)
     is_2d, _ = _determine_ndim(patch_shape)
 
     if source_checkpoint is None:
@@ -110,10 +115,18 @@ def mean_teacher_adaptation(
         # that's why we have the assertion here.
         assert supervised_train_paths is not None
         print("Mean teacher training from scratch (AdaMT)")
-        if is_2d:
-            model = get_2d_model(out_channels=2)
+
+        if backbone is not None:
+            model = get_unetr_model(
+                ndim=2 if is_2d else 3,
+                backbone=backbone, model_type=model_type,
+                out_channels=2
+            )
         else:
-            model = get_3d_model(out_channels=2)
+            if is_2d:
+                model = get_2d_model(out_channels=2)
+            else:
+                model = get_3d_model(out_channels=2)
         reinit_teacher = True
     else:
         print("Mean teacher training initialized from source model:", source_checkpoint)

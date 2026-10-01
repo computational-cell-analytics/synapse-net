@@ -7,10 +7,10 @@ import torch_em
 from sklearn.model_selection import train_test_split
 
 from synapse_net.inference.inference import get_model_path, get_available_models
+from synapse_net.training.models import get_2d_model, get_3d_model, get_unetr_model
 from synapse_net.training.dataloaders import get_supervised_loader, _determine_ndim
-from synapse_net.training.models import get_2d_model, get_3d_model
 
-def supervised_training(
+def supervised_training( #TODO edit docstring
     name: str,
     train_paths: Tuple[str],
     val_paths: Tuple[str],
@@ -35,6 +35,8 @@ def supervised_training(
     in_channels: int = 1,
     out_channels: int = 2,
     mask_channel: bool = False,
+    backbone: Optional[str] = None,
+    model_type: Optional[str] = None,
     checkpoint_path: Optional[str] = None,
     save_every_kth_epoch: Optional[int] = None,
     **loader_kwargs,
@@ -80,11 +82,15 @@ def supervised_training(
         out_channels: The number of output channels of the UNet.
         mask_channel: Whether the last channels in the labels should be used for masking the loss.
             This can be used to implement more complex masking operations and is not compatible with `ignore_label`.
+        backbone:
+        model_type:
         checkpoint_path: Path to the directory where 'best.pt' resides; continue training this model.
         save_every_kth_epoch: Save checkpoints after every kth epoch in a separate file.
             The corresponding checkpoints will be saved with the naming scheme 'epoch-{epoch}.pt'.
         loader_kwargs: Additional keyword arguments for the dataloader.
     """
+    assert (backbone is None) == (model_type is None)
+
     train_loader = get_supervised_loader(train_paths, raw_key, label_key, patch_shape, batch_size,
                                          n_samples=n_samples_train, rois=train_rois, sampler=sampler,
                                          ignore_label=ignore_label, label_transform=label_transform,
@@ -101,12 +107,25 @@ def supervised_training(
         return
 
     is_2d, _ = _determine_ndim(patch_shape)
-    if checkpoint_path is not None:
-        model = torch_em.util.load_model(checkpoint=checkpoint_path)
-    elif is_2d:
-        model = get_2d_model(out_channels=out_channels, in_channels=in_channels)
+    
+    if backbone is not None:
+        assert in_channels == 1
+
+        if checkpoint_path is not None:
+            model = torch_em.util.load_model(checkpoint=checkpoint_path)
+        else:
+            model = get_unetr_model(
+                ndim=2 if is_2d else 3,
+                backbone=backbone, model_type=model_type,
+                out_channels=out_channels
+            )
     else:
-        model = get_3d_model(out_channels=out_channels, in_channels=in_channels)
+        if checkpoint_path is not None:
+            model = torch_em.util.load_model(checkpoint=checkpoint_path)
+        elif is_2d:
+            model = get_2d_model(out_channels=out_channels, in_channels=in_channels)
+        else:
+            model = get_3d_model(out_channels=out_channels, in_channels=in_channels)
 
     base_loss = loss_fn if loss_fn is not None else torch_em.loss.DiceLoss()
     metric = base_loss
