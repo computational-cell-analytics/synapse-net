@@ -2,116 +2,12 @@ import os
 from typing import Optional, Tuple
 
 import torch
-import torch_em
 import torch_em.self_training as self_training
-from torchvision import transforms
-from torch_em.data import RawDatasetWithMasks
 
+from .dataloaders import get_supervised_loader, get_unsupervised_loader
+from .domain_adaptation import mean_teacher_adaptation
 from .models import get_2d_model, get_3d_model
-from .supervised_training import get_supervised_loader, _determine_ndim, supervised_training
-
-def weak_augmentations(p: float = 0.75) -> callable:
-    """The weak augmentations used in the unsupervised data loader.
-
-    Args:
-        p: The probability for applying one of the augmentations.
-
-    Returns:
-        The transformation function applying the augmentation.
-    """
-    norm = torch_em.transform.raw.standardize
-    aug = transforms.Compose([
-        norm,
-        transforms.RandomApply([torch_em.transform.raw.GaussianBlur()], p=p),
-        transforms.RandomApply([torch_em.transform.raw.AdditiveGaussianNoise(
-            scale=(0, 0.15), clip_kwargs=False)], p=p
-        ),
-    ])
-    return torch_em.transform.raw.get_raw_transform(normalizer=norm, augmentation1=aug)
-
-
-def get_unsupervised_loader(
-    data_paths: Tuple[str],
-    raw_key: str,
-    patch_shape: Tuple[int, int, int],
-    batch_size: int,
-    n_samples: Optional[int],
-    sample_mask_paths: Optional[Tuple[str]] = None,
-    sample_mask_key: Optional[str] = None,
-    bg_mask_paths: Optional[Tuple[str]] = None,
-    bg_mask_key: Optional[str] = None,
-    sampler: Optional[callable] = None,
-    exclude_top_and_bottom: bool = False,
-) -> torch.utils.data.DataLoader:
-    """Get a dataloader for unsupervised segmentation training.
-
-    Args:
-        data_paths: The filepaths to the hdf5 files containing the training data.
-        raw_key: The key that holds the raw data inside of the hdf5.
-        patch_shape: The patch shape used for a training example.
-            In order to run 2d training pass a patch shape with a singleton in the z-axis,
-            e.g. 'patch_shape = [1, 512, 512]'.
-        batch_size: The batch size for training.
-        n_samples: The number of samples per epoch. By default this will be estimated
-            based on the patch_shape and size of the volumes used for training.
-        sample_mask_paths: The filepaths to the corresponding sample masks for each tomogram.
-        sample_mask_key: The key to the sample mask dataset inside each file.
-        bg_mask_paths: The filepaths to the background masks for each tomogram.
-        bg_mask_key: The key to the background mask dataset inside each file.
-        sampler: Optional sampler to accept or reject patches for training. 
-        exclude_top_and_bottom: Whether to exclude the five top and bottom slices to
-            avoid artifacts at the border of tomograms.
-
-    Returns:
-        The PyTorch dataloader.
-    """
-    if exclude_top_and_bottom:
-        roi = (slice(5, -5), slice(None), slice(None))
-    else:
-        roi = None
-
-    if sample_mask_paths is not None:
-        assert len(data_paths) == len(sample_mask_paths), \
-            f"Expected equal number of data_paths and sample_mask_paths, got {len(data_paths)} and {len(sample_mask_paths)}."
-    if bg_mask_paths is not None:
-        assert len(data_paths) == len(bg_mask_paths), \
-            f"Expected equal number of data_paths and bg_mask_paths, got {len(data_paths)} and {len(bg_mask_paths)}."
-
-    _, ndim = _determine_ndim(patch_shape)
-    raw_transform = torch_em.transform.get_raw_transform()
-    transform = torch_em.transform.get_augmentations(ndim=ndim)
-    # augmentations = (weak_augmentations(), weak_augmentations())
-
-    if n_samples is None:
-        n_samples_per_ds = None
-    else:
-        n_samples_per_ds = int(n_samples / len(data_paths))
-
-    datasets = [
-        RawDatasetWithMasks(
-            raw_path=data_path,
-            raw_key=raw_key,
-            patch_shape=patch_shape,
-            raw_transform=raw_transform,
-            transform=transform,
-            roi=roi,
-            n_samples=n_samples_per_ds,
-            sampler=sampler,
-            ndim=ndim,
-            augmentations=None,
-            sample_mask_path=sample_mask_paths[i] if sample_mask_paths is not None else None,
-            sample_mask_key=sample_mask_key,
-            bg_mask_path=bg_mask_paths[i] if bg_mask_paths is not None else None,
-            bg_mask_key=bg_mask_key,
-        )
-        for i, data_path in enumerate(data_paths)
-    ]
-    ds = torch.utils.data.ConcatDataset(datasets)
-
-    num_workers = 4 * batch_size
-    loader = torch_em.segmentation.get_data_loader(ds, batch_size=batch_size,
-                                                   num_workers=num_workers, shuffle=True)
-    return loader
+from .supervised_training import supervised_training
 
 
 def semisupervised_training(
@@ -229,7 +125,6 @@ def semisupervised_training(
             )
         source_checkpoint = os.path.dirname(warmup_checkpoint)
     
-    from .domain_adaptation import mean_teacher_adaptation
     mean_teacher_adaptation(
         name=name,
         unsupervised_train_paths=unsupervised_train_paths,

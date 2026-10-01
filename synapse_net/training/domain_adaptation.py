@@ -11,9 +11,9 @@ import torch_em.self_training as self_training
 from elf.io import open_file
 from sklearn.model_selection import train_test_split
 
+from .dataloaders import get_supervised_loader, get_unsupervised_loader, _determine_ndim
 from .models import get_2d_model, get_3d_model
-from .semisupervised_training import get_unsupervised_loader
-from .supervised_training import get_supervised_loader, _determine_ndim, _derive_key_from_files
+from .supervised_training import _derive_key_from_files
 from ..inference.inference import get_model_path, compute_scale_from_voxel_size, get_available_models
 from ..inference.util import _Scaler
 
