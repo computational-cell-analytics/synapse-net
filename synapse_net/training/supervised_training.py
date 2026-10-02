@@ -10,7 +10,7 @@ from synapse_net.inference.inference import get_model_path, get_available_models
 from synapse_net.training.models import get_2d_model, get_3d_model, get_unetr_model, get_raw_transform
 from synapse_net.training.dataloaders import get_supervised_loader, _determine_ndim
 
-def supervised_training( #TODO edit docstring
+def supervised_training(
     name: str,
     train_paths: Tuple[str],
     val_paths: Tuple[str],
@@ -82,8 +82,10 @@ def supervised_training( #TODO edit docstring
         out_channels: The number of output channels of the UNet.
         mask_channel: Whether the last channels in the labels should be used for masking the loss.
             This can be used to implement more complex masking operations and is not compatible with `ignore_label`.
-        backbone:
-        model_type:
+        backbone: The pretrained ViT encoder of a UNETR model. Options: "sam", "sam2", "dinov2" or "dinov3".
+            Must be set together with `model_type`.
+        model_type: Model type for the selected `backbone` model family, for example "vit_b" or "vit_t".
+            Must be set together with `backbone`.
         checkpoint_path: Path to the directory where 'best.pt' resides; continue training this model.
         save_every_kth_epoch: Save checkpoints after every kth epoch in a separate file.
             The corresponding checkpoints will be saved with the naming scheme 'epoch-{epoch}.pt'.

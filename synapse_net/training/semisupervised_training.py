@@ -10,7 +10,7 @@ from .models import get_2d_model, get_3d_model, get_raw_transform
 from .supervised_training import supervised_training
 
 
-def semisupervised_training( #TODO edit docstring
+def semisupervised_training(
     name: str,
     unsupervised_train_paths: Tuple[str],
     unsupervised_val_paths: Tuple[str],
@@ -71,8 +71,10 @@ def semisupervised_training( #TODO edit docstring
             based on the patch_shape and size of the volumes used for training.
         n_samples_val: The number of val samples per epoch. By default this will be estimated
             based on the patch_shape and size of the volumes used for validation.
-        backbone:
-        model_type:
+        backbone: The pretrained ViT encoder of a UNETR model. Options: "sam", "sam2", "dinov2" or "dinov3".
+            Must be set together with `model_type`.
+        model_type: Model type for the selected `backbone` model family, for example "vit_b" or "vit_t".
+            Must be set together with `backbone`.
         source_checkpoint: Warmup checkpoint used to initialize the teacher model. If not provided,
             run supervised training `teacher_warmup_iterations`.
         supervised_sampler: Optional sampler for selecting patches from the labelled data.

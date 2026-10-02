@@ -26,7 +26,7 @@ DEFAULT_WEAK_AUGMENTATIONS["intensity"] = {
     "RandomGaussianNoise": {"mean": (0.0), "std": (0.1)},
 }    
 
-def mean_teacher_adaptation( #TODO update docstring 
+def mean_teacher_adaptation(
     name: str,
     unsupervised_train_paths: Tuple[str],
     unsupervised_val_paths: Tuple[str],
@@ -102,10 +102,12 @@ def mean_teacher_adaptation( #TODO update docstring
         unsupervised_sampler: Sampler to accept or reject patches for the unsupervised data stream.
         supervised_sampler: Sampler to accept or reject patches for the supervised data stream.
             Pass `False` to disable.
-        backbone:
-        model_type:
+        backbone: The pretrained ViT encoder of a UNETR model. Options: "sam", "sam2", "dinov2" or "dinov3".
+            Must be set together with `model_type`.
+        model_type: Model type for the selected `backbone` model family, for example "vit_b" or "vit_t".
+            Must be set together with `backbone`.
         check: Whether to check the training and validation loaders instead of running training.
-    """  # noqa
+    """
     assert (supervised_train_paths is None) == (supervised_val_paths is None)
     assert (backbone is None) == (model_type is None)
     is_2d, _ = _determine_ndim(patch_shape)
