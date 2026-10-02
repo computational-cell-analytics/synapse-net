@@ -7,7 +7,7 @@ import torch_em
 from sklearn.model_selection import train_test_split
 
 from synapse_net.inference.inference import get_model_path, get_available_models
-from synapse_net.training.models import get_2d_model, get_3d_model, get_unetr_model
+from synapse_net.training.models import get_2d_model, get_3d_model, get_unetr_model, get_raw_transform
 from synapse_net.training.dataloaders import get_supervised_loader, _determine_ndim
 
 def supervised_training( #TODO edit docstring
@@ -91,14 +91,20 @@ def supervised_training( #TODO edit docstring
     """
     assert (backbone is None) == (model_type is None)
 
-    train_loader = get_supervised_loader(train_paths, raw_key, label_key, patch_shape, batch_size,
-                                         n_samples=n_samples_train, rois=train_rois, sampler=sampler,
-                                         ignore_label=ignore_label, label_transform=label_transform,
-                                         label_paths=train_label_paths, **loader_kwargs)
-    val_loader = get_supervised_loader(val_paths, raw_key, label_key, patch_shape, batch_size,
-                                       n_samples=n_samples_val, rois=val_rois, sampler=sampler,
-                                       ignore_label=ignore_label, label_transform=label_transform,
-                                       label_paths=val_label_paths, **loader_kwargs)
+    raw_transform = get_raw_transform(backbone)[0] if backbone is not None else None
+
+    train_loader = get_supervised_loader(
+        train_paths, raw_key, label_key, patch_shape, batch_size,
+        n_samples=n_samples_train, rois=train_rois, sampler=sampler, ignore_label=ignore_label,
+        label_transform=label_transform, label_paths=train_label_paths, raw_transform=raw_transform,
+        **loader_kwargs,
+    )
+    val_loader = get_supervised_loader(
+        val_paths, raw_key, label_key, patch_shape, batch_size,
+        n_samples=n_samples_val, rois=val_rois, sampler=sampler, ignore_label=ignore_label,
+        label_transform=label_transform, label_paths=val_label_paths, raw_transform=raw_transform,
+        **loader_kwargs,
+    )
 
     if check:
         from torch_em.util.debug import check_loader

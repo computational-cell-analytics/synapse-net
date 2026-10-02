@@ -6,7 +6,7 @@ import torch_em.self_training as self_training
 
 from .dataloaders import get_supervised_loader, get_unsupervised_loader
 from .domain_adaptation import mean_teacher_adaptation
-from .models import get_2d_model, get_3d_model
+from .models import get_2d_model, get_3d_model, get_raw_transform
 from .supervised_training import supervised_training
 
 
@@ -78,27 +78,27 @@ def semisupervised_training( #TODO edit docstring
         supervised_sampler: Optional sampler for selecting patches from the labelled data.
         check: Whether to check the training and validation loaders instead of running training.
     """
+    raw_transform = get_raw_transform(backbone)[0] if backbone is not None else None
+
     # check both sets of loaders before teacher warmup
     if check:
         from torch_em.util.debug import check_loader
 
         unsupervised_train_loader = get_unsupervised_loader(
-            unsupervised_train_paths, raw_key,
-            patch_shape, batch_size, n_samples_train,
+            unsupervised_train_paths, raw_key, patch_shape, batch_size, n_samples_train,
+            raw_transform=raw_transform,
         )
         unsupervised_val_loader = get_unsupervised_loader(
-            unsupervised_val_paths, raw_key, 
-            patch_shape, batch_size, n_samples_val,
+            unsupervised_val_paths, raw_key, patch_shape, batch_size, n_samples_val,
+            raw_transform=raw_transform,
         )
         supervised_train_loader = get_supervised_loader(
-            supervised_train_paths, raw_key, label_key,
-            patch_shape, batch_size, n_samples_train,
-            sampler=supervised_sampler,
+            supervised_train_paths, raw_key, label_key, patch_shape, batch_size, n_samples_train,
+            sampler=supervised_sampler, raw_transform=raw_transform,
         )
         supervised_val_loader = get_supervised_loader(
-            supervised_val_paths, raw_key, label_key,
-            patch_shape, batch_size, n_samples_val,
-            sampler=supervised_sampler,
+            supervised_val_paths, raw_key, label_key, patch_shape, batch_size, n_samples_val,
+            sampler=supervised_sampler, raw_transform=raw_transform,
         )
         check_loader(unsupervised_train_loader, n_samples=2)
         check_loader(unsupervised_val_loader, n_samples=2)

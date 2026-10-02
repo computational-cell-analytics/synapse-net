@@ -27,8 +27,8 @@ def _determine_ndim(patch_shape):
 def weak_augmentations(p: float = 0.75) -> callable:
     """The weak augmentations used in the unsupervised data loader.
 
-    #TODO this function is deprecated since now `MeanTeacherWithInvertibleAugmentations`
-    handles intenstiy as well as geometric augmentations.
+    This function is deprecated, since `MeanTeacherWithInvertibleAugmentations`
+    now handles intenstiy as well as geometric augmentations.
 
     Args:
         p: The probability for applying one of the augmentations.
@@ -60,6 +60,7 @@ def get_supervised_loader(
     ignore_label: Optional[int] = None,
     label_transform: Optional[callable] = None,
     label_paths: Optional[Tuple[str]] = None,
+    raw_transform: Optional[callable] = None,
     **loader_kwargs,
 ) -> torch.utils.data.DataLoader:
     """Get a dataloader for supervised segmentation training.
@@ -85,6 +86,7 @@ def get_supervised_loader(
             If no label transform is passed (the default) a boundary transform is used.
         label_paths: Optional paths containing the labels / annotations for training.
             If not given, the labels are expected to be contained in the `data_paths`.
+        raw_transform: Normalization applied to the raw data. By default the torch_em standardization is used.
         loader_kwargs: Additional keyword arguments for the dataloader.
 
     Returns:
@@ -135,7 +137,7 @@ def get_supervised_loader(
         batch_size=batch_size, patch_shape=patch_shape, ndim=ndim,
         is_seg_dataset=True, label_transform=label_transform, transform=transform,
         num_workers=num_workers, shuffle=shuffle, n_samples=n_samples,
-        label_dtype=label_dtype, rois=rois, **loader_kwargs,
+        label_dtype=label_dtype, rois=rois, raw_transform=raw_transform, **loader_kwargs,
     )
     return loader
 
@@ -152,6 +154,7 @@ def get_unsupervised_loader(
     bg_mask_key: Optional[str] = None,
     sampler: Optional[callable] = None,
     exclude_top_and_bottom: bool = False,
+    raw_transform: Optional[callable] = None,
 ) -> torch.utils.data.DataLoader:
     """Get a dataloader for unsupervised segmentation training.
 
@@ -171,6 +174,7 @@ def get_unsupervised_loader(
         sampler: Optional sampler to accept or reject patches for training. 
         exclude_top_and_bottom: Whether to exclude the five top and bottom slices to
             avoid artifacts at the border of tomograms.
+        raw_transform: Normalization applied to the raw data. By default the torch_em standardization is used.
 
     Returns:
         The PyTorch dataloader.
@@ -188,7 +192,8 @@ def get_unsupervised_loader(
             f"Expected equal number of data_paths and bg_mask_paths, got {len(data_paths)} and {len(bg_mask_paths)}."
 
     _, ndim = _determine_ndim(patch_shape)
-    raw_transform = torch_em.transform.get_raw_transform()
+    if raw_transform is None:
+        raw_transform = torch_em.transform.get_raw_transform()
     transform = torch_em.transform.get_augmentations(ndim=ndim)
     # augmentations = (weak_augmentations(), weak_augmentations())
 

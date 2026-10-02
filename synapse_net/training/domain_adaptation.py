@@ -12,7 +12,7 @@ from elf.io import open_file
 from sklearn.model_selection import train_test_split
 
 from .dataloaders import get_supervised_loader, get_unsupervised_loader, _determine_ndim
-from .models import get_2d_model, get_3d_model, get_unetr_model
+from .models import get_2d_model, get_3d_model, get_unetr_model, get_raw_transform
 from .supervised_training import _derive_key_from_files
 from ..inference.inference import get_model_path, compute_scale_from_voxel_size, get_available_models
 from ..inference.util import _Scaler
@@ -144,8 +144,13 @@ def mean_teacher_adaptation( #TODO update docstring
     loss = self_training.SelfTrainingLossWithInvertibleAugmentations()
     loss_and_metric = self_training.SelfTrainingLossAndMetricWithInvertibleAugmentations()
 
+    if backbone is not None:
+        raw_transform, clip_max = get_raw_transform(backbone)
+    else:
+        raw_transform, clip_max = None, None
+
     ndim = 2 if is_2d else 3
-    augmenters = torch_em.transform.invertible_augmentations.MeanTeacherAugmenters(ndim=ndim)
+    augmenters = torch_em.transform.invertible_augmentations.MeanTeacherAugmenters(ndim=ndim, clip_max=clip_max)
 
     unsupervised_train_loader = get_unsupervised_loader(
         data_paths=unsupervised_train_paths,
@@ -156,6 +161,7 @@ def mean_teacher_adaptation( #TODO update docstring
         sample_mask_paths=train_mask_paths,
         sample_mask_key=sample_mask_key,
         sampler=unsupervised_sampler,
+        raw_transform=raw_transform,
     )
     unsupervised_val_loader = get_unsupervised_loader(
         data_paths=unsupervised_val_paths,
@@ -166,6 +172,7 @@ def mean_teacher_adaptation( #TODO update docstring
         sample_mask_paths=val_mask_paths,
         sample_mask_key=sample_mask_key,
         sampler=unsupervised_sampler,
+        raw_transform=raw_transform,
     )
 
     if supervised_train_paths is not None:
@@ -173,12 +180,12 @@ def mean_teacher_adaptation( #TODO update docstring
         supervised_train_loader = get_supervised_loader(
             supervised_train_paths, raw_key_supervised, label_key,
             patch_shape, batch_size, n_samples=n_samples_train,
-            sampler=supervised_sampler,
+            sampler=supervised_sampler, raw_transform=raw_transform,
         )
         supervised_val_loader = get_supervised_loader(
             supervised_val_paths, raw_key_supervised, label_key,
             patch_shape, batch_size, n_samples=n_samples_val,
-            sampler=supervised_sampler,
+            sampler=supervised_sampler, raw_transform=raw_transform,
         )
     else:
         supervised_train_loader = None
