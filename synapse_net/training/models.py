@@ -10,8 +10,6 @@ from functools import partial
 import numpy as np
 
 import torch
-import micro_sam
-from micro_sam.v2.util import _get_checkpoint as _get_sam2_checkpoint
 
 from torch_em.model.unetr import UNETR2D, UNETR3D
 from torch_em.model import UNet2d, AnisotropicUNet
@@ -159,7 +157,7 @@ def _get_dinov2_checkpoint(model_type: str):
     assert isinstance(model_type, str), "Watch out, we need the 'model_type' name."
 
     # Let's create a cache directory.
-    save_directory = os.path.expanduser(pooch.os_cache("micro_match/dinov2_models"))
+    save_directory = os.path.expanduser(pooch.os_cache("synapse_net/dinov2_models"))
 
     # The weights are stored on owncloud for now
     urls = {"vit_b": "https://dl.fbaipublicfiles.com/dinov2/dinov2_vitb14/dinov2_vitb14_pretrain.pth"}
@@ -189,7 +187,7 @@ def _get_dinov3_checkpoint(model_type: str):
     assert isinstance(model_type, str), "Watch out, we need the 'model_type' name."
 
     # Let's create a cache directory.
-    save_directory = os.path.expanduser(pooch.os_cache("micro_match/dinov3_models"))
+    save_directory = os.path.expanduser(pooch.os_cache("synapse_net/dinov3_models"))
 
     # The weights are stored on owncloud for now
     urls = {"vit_b": "https://owncloud.gwdg.de/index.php/s/PvTzG3fdo2pnNCz/download"}
@@ -224,7 +222,7 @@ def _get_microsam2_checkpoint(model_type: str, cache_dir=None):
         Absolute path to the cached model file.
     """
     if cache_dir is None:
-        cache_dir = os.path.expanduser(pooch.os_cache("micro_match/microsam2_models"))
+        cache_dir = os.path.expanduser(pooch.os_cache("synapse_net/microsam2_models"))
 
     urls = {"hvit_t_em_organelles": "https://owncloud.gwdg.de/index.php/s/kMxqsRL1FG9pslC/download"}
     hashes = {"hvit_t_em_organelles": "a34b4a4e9360d48eafe7995438610bf656325acae71cd1f3f512e236511b212e"}
@@ -269,12 +267,14 @@ def _get_microsam2_checkpoint(model_type: str, cache_dir=None):
 def _get_checkpoint(backbone, model_type, return_decoder_path=False):
 
     if backbone == "sam":
-        checkpoint_path, _, decoder_path = micro_sam.util._download_sam_model(model_type)
+        from micro_sam.util import _download_sam_model
+        checkpoint_path, _, decoder_path = _download_sam_model(model_type)
 
     elif backbone == "sam2":
         if model_type == 'hvit_t_em_organelles':  # Not yet in the zoo
             checkpoint_path, decoder_path = _get_microsam2_checkpoint(model_type)
         else:
+            from micro_sam.v2.util import _get_checkpoint as _get_sam2_checkpoint
             checkpoint_path = _get_sam2_checkpoint(model_type)
 
     elif backbone == "dinov2":
