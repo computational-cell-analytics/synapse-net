@@ -27,10 +27,14 @@ def semisupervised_training(
     teacher_warmup_iterations: int = int(1e4),
     n_samples_train: Optional[int] = None,
     n_samples_val: Optional[int] = None,
+    train_mask_paths: Optional[Tuple[str]] = None,
+    val_mask_paths: Optional[Tuple[str]] = None,
+    sample_mask_key: Optional[str] = None,
     backbone: Optional[str] = None,
     model_type: Optional[str] = None,
     source_checkpoint=None,
     supervised_sampler: Optional[callable] = None,
+    unsupervised_sampler: Optional[callable] = None,
     check: bool = False,
 ):
     """Run semisupervised segmentation training.
@@ -77,7 +81,11 @@ def semisupervised_training(
             Must be set together with `backbone`.
         source_checkpoint: Warmup checkpoint used to initialize the teacher model. If not provided,
             run supervised training `teacher_warmup_iterations`.
-        supervised_sampler: Optional sampler for selecting patches from the labelled data.
+        train_mask_paths: Sample masks used by the unsupervised sampler to accept or reject patches for training.
+        val_mask_paths: Sample masks used by the unsupervised sampler to accept or reject patches for validation.
+        sample_mask_key: The key to the sample mask dataset inside each file.
+        supervised_sampler:  Sampler to accept or reject patches for the supervised data stream.
+        unsupervised_sampler:  Sampler to accept or reject patches for the unsupervised data stream.
         check: Whether to check the training and validation loaders instead of running training.
     """
     raw_transform = get_raw_transform(backbone)[0] if backbone is not None else None
@@ -88,11 +96,13 @@ def semisupervised_training(
 
         unsupervised_train_loader = get_unsupervised_loader(
             unsupervised_train_paths, raw_key, patch_shape, batch_size, n_samples_train,
-            raw_transform=raw_transform,
+            sample_mask_paths=train_mask_paths, sample_mask_key=sample_mask_key,
+            sampler=unsupervised_sampler, raw_transform=raw_transform,
         )
         unsupervised_val_loader = get_unsupervised_loader(
             unsupervised_val_paths, raw_key, patch_shape, batch_size, n_samples_val,
-            raw_transform=raw_transform,
+            sample_mask_paths=val_mask_paths, sample_mask_key=sample_mask_key,
+            sampler=unsupervised_sampler, raw_transform=raw_transform,
         )
         supervised_train_loader = get_supervised_loader(
             supervised_train_paths, raw_key, label_key, patch_shape, batch_size, n_samples_train,
@@ -151,7 +161,11 @@ def semisupervised_training(
         n_iterations=n_iterations,
         n_samples_train=n_samples_train,
         n_samples_val=n_samples_val,
+        train_mask_paths=train_mask_paths,
+        val_mask_paths=val_mask_paths,
+        sample_mask_key=sample_mask_key,
         supervised_sampler=supervised_sampler,
+        unsupervised_sampler=unsupervised_sampler,
         backbone=backbone,
         model_type=model_type,
         check=False,
