@@ -1,121 +1,177 @@
+import os
 from typing import Optional, Tuple
 
 import torch
-import torch_em
 import torch_em.self_training as self_training
-from torchvision import transforms
-from torch_em.data import RawDatasetWithMasks
 
-from .supervised_training import get_2d_model, get_3d_model, get_supervised_loader, _determine_ndim
-
-
-def weak_augmentations(p: float = 0.75) -> callable:
-    """The weak augmentations used in the unsupervised data loader.
-
-    Args:
-        p: The probability for applying one of the augmentations.
-
-    Returns:
-        The transformation function applying the augmentation.
-    """
-    norm = torch_em.transform.raw.standardize
-    aug = transforms.Compose([
-        norm,
-        transforms.RandomApply([torch_em.transform.raw.GaussianBlur()], p=p),
-        transforms.RandomApply([torch_em.transform.raw.AdditiveGaussianNoise(
-            scale=(0, 0.15), clip_kwargs=False)], p=p
-        ),
-    ])
-    return torch_em.transform.raw.get_raw_transform(normalizer=norm, augmentation1=aug)
+from .dataloaders import get_supervised_loader, get_unsupervised_loader
+from .domain_adaptation import mean_teacher_adaptation
+from .models import get_2d_model, get_3d_model, get_raw_transform
+from .supervised_training import supervised_training
 
 
-def get_unsupervised_loader(
-    data_paths: Tuple[str],
-    raw_key: str,
+def semisupervised_training(
+    name: str,
+    unsupervised_train_paths: Tuple[str],
+    unsupervised_val_paths: Tuple[str],
+    supervised_train_paths: Tuple[str],
+    supervised_val_paths: Tuple[str],
     patch_shape: Tuple[int, int, int],
-    batch_size: int,
-    n_samples: Optional[int],
-    sample_mask_paths: Optional[Tuple[str]] = None,
+    label_key: str,
+    save_root: str,
+    raw_key: str = "raw",
+    confidence_threshold: float = 0.9,
+    batch_size: int = 1,
+    lr: float = 1e-4,
+    n_iterations: int = int(1e5),
+    teacher_warmup_iterations: int = int(1e4),
+    n_samples_train: Optional[int] = None,
+    n_samples_val: Optional[int] = None,
+    train_mask_paths: Optional[Tuple[str]] = None,
+    val_mask_paths: Optional[Tuple[str]] = None,
     sample_mask_key: Optional[str] = None,
-    bg_mask_paths: Optional[Tuple[str]] = None,
-    bg_mask_key: Optional[str] = None,
-    sampler: Optional[callable] = None,
-    exclude_top_and_bottom: bool = False,
-) -> torch.utils.data.DataLoader:
-    """Get a dataloader for unsupervised segmentation training.
+    backbone: Optional[str] = None,
+    model_type: Optional[str] = None,
+    source_checkpoint=None,
+    supervised_sampler: Optional[callable] = None,
+    unsupervised_sampler: Optional[callable] = None,
+    check: bool = False,
+):
+    """Run semisupervised segmentation training.
+
+    This proceeds in two phases:
+
+        1. If no `source_checkpoint` is given, run supervised training to
+            warmup the teacher.
+        2. Run semisupervised training using mean teacher setup with invertible 
+            augumentation, using the warmup checkpoint to initialize the teacher.
 
     Args:
-        data_paths: The filepaths to the hdf5 files containing the training data.
-        raw_key: The key that holds the raw data inside of the hdf5.
+        name: The name for the checkpoint to be trained. The warmup checkpoint is saved
+            under the name "{name}-warmup".
+        unsupervised_train_paths: Filepaths to the hdf5 files for the unsupervised
+            training data. This data does not require labels.
+        unsupervised_val_paths: Filepaths to the hdf5 files for the unsupervised
+            validation data. This data does not require labels.
+        supervised_train_paths: Filepaths to the hdf5 files for the supervised training
+            data, requires labels. Used for both the teacher warmup and the semi-supervised loss.
+        supervised_val_paths: Filepaths to the hdf5 files for the supervised validation data,
+            requires labels.
         patch_shape: The patch shape used for a training example.
             In order to run 2d training pass a patch shape with a singleton in the z-axis,
             e.g. 'patch_shape = [1, 512, 512]'.
+        label_key: The key that holds the labels inside of the hdf5 files.
+        save_root: Folder where the checkpoints will be saved.
+        raw_key: The key that holds the raw data inside of the hdf5 files.
+        confidence_threshold: The threshold for filtering data in the unsupervised loss.
+            The label filtering is done based on the uncertainty of network predictions, and only
+            the data with higher certainty than this threshold is used for training.
         batch_size: The batch size for training.
-        n_samples: The number of samples per epoch. By default this will be estimated
+        lr: The initial learning rate.
+        n_iterations: The number of mean-teacher training iterations.
+        teacher_warmup_iterations: The number of iterations for the supervised teacher warmup,
+            only used if no warmup checkpoint exists yet and no `source_checkpoint` is given.
+        n_samples_train: The number of train samples per epoch. By default this will be estimated
             based on the patch_shape and size of the volumes used for training.
-        sample_mask_paths: The filepaths to the corresponding sample masks for each tomogram.
+        n_samples_val: The number of val samples per epoch. By default this will be estimated
+            based on the patch_shape and size of the volumes used for validation.
+        backbone: The pretrained ViT encoder of a UNETR model. Options: "sam", "sam2", "dinov2" or "dinov3".
+            Must be set together with `model_type`.
+        model_type: Model type for the selected `backbone` model family, for example "vit_b" or "vit_t".
+            Must be set together with `backbone`.
+        source_checkpoint: Warmup checkpoint used to initialize the teacher model. If not provided,
+            run supervised training `teacher_warmup_iterations`.
+        train_mask_paths: Sample masks used by the unsupervised sampler to accept or reject patches for training.
+        val_mask_paths: Sample masks used by the unsupervised sampler to accept or reject patches for validation.
         sample_mask_key: The key to the sample mask dataset inside each file.
-        bg_mask_paths: The filepaths to the background masks for each tomogram.
-        bg_mask_key: The key to the background mask dataset inside each file.
-        sampler: Optional sampler to accept or reject patches for training. 
-        exclude_top_and_bottom: Whether to exclude the five top and bottom slices to
-            avoid artifacts at the border of tomograms.
-
-    Returns:
-        The PyTorch dataloader.
+        supervised_sampler:  Sampler to accept or reject patches for the supervised data stream.
+        unsupervised_sampler:  Sampler to accept or reject patches for the unsupervised data stream.
+        check: Whether to check the training and validation loaders instead of running training.
     """
-    if exclude_top_and_bottom:
-        roi = (slice(5, -5), slice(None), slice(None))
-    else:
-        roi = None
+    raw_transform = get_raw_transform(backbone)[0] if backbone is not None else None
 
-    if sample_mask_paths is not None:
-        assert len(data_paths) == len(sample_mask_paths), \
-            f"Expected equal number of data_paths and sample_mask_paths, got {len(data_paths)} and {len(sample_mask_paths)}."
-    if bg_mask_paths is not None:
-        assert len(data_paths) == len(bg_mask_paths), \
-            f"Expected equal number of data_paths and bg_mask_paths, got {len(data_paths)} and {len(bg_mask_paths)}."
+    # check both sets of loaders before teacher warmup
+    if check:
+        from torch_em.util.debug import check_loader
 
-    _, ndim = _determine_ndim(patch_shape)
-    raw_transform = torch_em.transform.get_raw_transform()
-    transform = torch_em.transform.get_augmentations(ndim=ndim)
-    # augmentations = (weak_augmentations(), weak_augmentations())
-
-    if n_samples is None:
-        n_samples_per_ds = None
-    else:
-        n_samples_per_ds = int(n_samples / len(data_paths))
-
-    datasets = [
-        RawDatasetWithMasks(
-            raw_path=data_path,
-            raw_key=raw_key,
-            patch_shape=patch_shape,
-            raw_transform=raw_transform,
-            transform=transform,
-            roi=roi,
-            n_samples=n_samples_per_ds,
-            sampler=sampler,
-            ndim=ndim,
-            augmentations=None,
-            sample_mask_path=sample_mask_paths[i] if sample_mask_paths is not None else None,
-            sample_mask_key=sample_mask_key,
-            bg_mask_path=bg_mask_paths[i] if bg_mask_paths is not None else None,
-            bg_mask_key=bg_mask_key,
+        unsupervised_train_loader = get_unsupervised_loader(
+            unsupervised_train_paths, raw_key, patch_shape, batch_size, n_samples_train,
+            sample_mask_paths=train_mask_paths, sample_mask_key=sample_mask_key,
+            sampler=unsupervised_sampler, raw_transform=raw_transform,
         )
-        for i, data_path in enumerate(data_paths)
-    ]
-    ds = torch.utils.data.ConcatDataset(datasets)
+        unsupervised_val_loader = get_unsupervised_loader(
+            unsupervised_val_paths, raw_key, patch_shape, batch_size, n_samples_val,
+            sample_mask_paths=val_mask_paths, sample_mask_key=sample_mask_key,
+            sampler=unsupervised_sampler, raw_transform=raw_transform,
+        )
+        supervised_train_loader = get_supervised_loader(
+            supervised_train_paths, raw_key, label_key, patch_shape, batch_size, n_samples_train,
+            sampler=supervised_sampler, raw_transform=raw_transform,
+        )
+        supervised_val_loader = get_supervised_loader(
+            supervised_val_paths, raw_key, label_key, patch_shape, batch_size, n_samples_val,
+            sampler=supervised_sampler, raw_transform=raw_transform,
+        )
+        check_loader(unsupervised_train_loader, n_samples=2)
+        check_loader(unsupervised_val_loader, n_samples=2)
+        check_loader(supervised_train_loader, n_samples=2)
+        check_loader(supervised_val_loader, n_samples=2)
+        
+        return
 
-    num_workers = 4 * batch_size
-    loader = torch_em.segmentation.get_data_loader(ds, batch_size=batch_size,
-                                                   num_workers=num_workers, shuffle=True)
-    return loader
+    warmup_name = f"{name}-warmup"
+    if source_checkpoint is None:
+        warmup_checkpoint = os.path.join(save_root, "checkpoints", warmup_name, "best.pt")
 
+        if not os.path.exists(warmup_checkpoint):
+            print(f"No warmup checkpoint was found, initiating supervised warmup for teacher model with {teacher_warmup_iterations} iterations.")
 
-# TODO: use different paths for supervised and unsupervised training
-# (We are currently not using this functionality directly, so this is not a high priority)
-def semisupervised_training(
+            supervised_training(
+                name=warmup_name,
+                train_paths=supervised_train_paths,
+                val_paths=supervised_val_paths,
+                label_key=label_key,
+                patch_shape=patch_shape,
+                save_root=save_root,
+                batch_size=batch_size,
+                lr=lr,
+                n_iterations=teacher_warmup_iterations,
+                sampler=supervised_sampler,
+                backbone=backbone,
+                model_type=model_type,
+                check=False,
+            )
+        source_checkpoint = os.path.dirname(warmup_checkpoint)
+    
+    mean_teacher_adaptation(
+        name=name,
+        unsupervised_train_paths=unsupervised_train_paths,
+        unsupervised_val_paths=unsupervised_val_paths,
+        supervised_train_paths=supervised_train_paths,
+        supervised_val_paths=supervised_val_paths,
+        raw_key=raw_key,
+        raw_key_supervised=raw_key,
+        label_key=label_key,
+        patch_shape=patch_shape,
+        save_root=save_root,
+        source_checkpoint=source_checkpoint,
+        confidence_threshold=confidence_threshold,
+        batch_size=batch_size,
+        lr=lr,
+        n_iterations=n_iterations,
+        n_samples_train=n_samples_train,
+        n_samples_val=n_samples_val,
+        train_mask_paths=train_mask_paths,
+        val_mask_paths=val_mask_paths,
+        sample_mask_key=sample_mask_key,
+        supervised_sampler=supervised_sampler,
+        unsupervised_sampler=unsupervised_sampler,
+        backbone=backbone,
+        model_type=model_type,
+        check=False,
+    )
+
+def semisupervised_training_v0( #TODO remove old unused version?
     name: str,
     train_paths: Tuple[str],
     val_paths: Tuple[str],
