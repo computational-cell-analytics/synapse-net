@@ -211,6 +211,28 @@ synapse_net.run_supervised_training -h
 for more information and instructions on how to use the command.
 
 
+### Mitochondria and Cristae Training
+
+SynapseNet provides dedicated functions for training the mitochondria and cristae models for electron tomography,
+which reproduce the recipes of our `mitochondria2` and `cristae5` models:
+```python
+from synapse_net.training import cristae_training, mitochondria_training
+from synapse_net.training.cristae import get_cristae_paths
+from synapse_net.training.mitochondria import get_mitochondria_paths
+
+train_paths, val_paths = get_mitochondria_paths("/path/to/tomograms")
+mitochondria_training("my-mito-model", train_paths, val_paths, save_root="/path/to/models")
+
+train_paths, val_paths = get_cristae_paths({"cristae": "/path/to/cristae-tomograms"})
+cristae_training("my-cristae-model", train_paths, val_paths, save_root="/path/to/models")
+```
+The mitochondria model is trained on percentile-normalized tomograms, so segment with it by passing
+`preprocess=torch_em.transform.raw.normalize_percentile` to `synapse_net.inference.mitochondria.segment_mitochondria`.
+The cristae model gets the tomogram and a mitochondria state as input, where 0 is background, 1 is a mitochondrion with
+cristae annotations and 2 is one without, which is excluded from the loss. Both recipes need an 80 GB GPU.
+The scripts in `scripts/cooper/training` train and evaluate the published models.
+
+
 ### Domain Adaptation
 
 SynapseNet provides functionality for (unsupervised) domain adaptation.

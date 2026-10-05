@@ -1,4 +1,5 @@
 import os
+import random
 from glob import glob
 from typing import Optional, Tuple, Union
 
@@ -16,6 +17,7 @@ def get_3d_model(
     scale_factors: Tuple[Tuple[int, int, int]] = [[1, 2, 2], [2, 2, 2], [2, 2, 2], [2, 2, 2]],
     initial_features: int = 32,
     final_activation: str = "Sigmoid",
+    norm: Optional[str] = "InstanceNorm",
 ) -> torch.nn.Module:
     """Get the U-Net model for 3D segmentation tasks.
 
@@ -25,6 +27,7 @@ def get_3d_model(
         initial_features: The number of features in the first level of the U-Net.
             The number of features increases by a factor of two in each level.
         final_activation: The activation applied to the last output layer.
+        norm: The normalization layer used in the convolutional blocks, or None for no normalization.
 
     Returns:
         The U-Net.
@@ -36,6 +39,7 @@ def get_3d_model(
         initial_features=initial_features,
         gain=2,
         final_activation=final_activation,
+        norm=norm,
     )
     return model
 
@@ -101,6 +105,7 @@ def get_supervised_loader(
     ignore_label: Optional[int] = None,
     label_transform: Optional[callable] = None,
     label_paths: Optional[Tuple[str]] = None,
+    transform: Optional[callable] = None,
     **loader_kwargs,
 ) -> torch.utils.data.DataLoader:
     """Get a dataloader for supervised segmentation training.
@@ -126,6 +131,8 @@ def get_supervised_loader(
             If no label transform is passed (the default) a boundary transform is used.
         label_paths: Optional paths containing the labels / annotations for training.
             If not given, the labels are expected to be contained in the `data_paths`.
+        transform: Joint transformation applied to the raw data and the labels, after the
+            `label_transform`. By default padding and the standard augmentations are applied.
         loader_kwargs: Additional keyword arguments for the dataloader.
 
     Returns:
@@ -147,7 +154,9 @@ def get_supervised_loader(
             raise NotImplementedError
         label_transform = torch_em.transform.label.connected_components
 
-    if ndim == 2:
+    if transform is not None:  # A specific joint transform was passed, do nothing.
+        pass
+    elif ndim == 2:
         adjusted_patch_shape = _adjust_patch_shape(ndim, patch_shape)
         transform = torch_em.transform.Compose(
             torch_em.transform.PadIfNecessary(adjusted_patch_shape), torch_em.transform.get_augmentations(2)
@@ -181,6 +190,17 @@ def get_supervised_loader(
     return loader
 
 
+def _random_split(paths, val_fraction, seed):
+    if len(paths) == 0:
+        raise ValueError("Did not find any training data.")
+    # Shuffle with a separate random state, so that the split is deterministic for a given set of files.
+    paths = sorted(paths)
+    random.Random(seed).shuffle(paths)
+    # Validate on at least one file if there is more than one.
+    n_val = max(int(len(paths) * val_fraction), int(len(paths) > 1))
+    return paths[:len(paths) - n_val], paths[len(paths) - n_val:]
+
+
 def supervised_training(
     name: str,
     train_paths: Tuple[str],
@@ -205,9 +225,15 @@ def supervised_training(
     loss_fn: Optional[torch.nn.Module] = None,
     in_channels: int = 1,
     out_channels: int = 2,
+    norm: Optional[str] = "InstanceNorm",
+    transform: Optional[callable] = None,
     mask_channel: bool = False,
     checkpoint_path: Optional[str] = None,
+    resume: bool = False,
     save_every_kth_epoch: Optional[int] = None,
+    mixed_precision: bool = True,
+    early_stopping: Optional[int] = None,
+    log_image_interval: int = 100,
     **loader_kwargs,
 ):
     """Run supervised segmentation training.
@@ -249,21 +275,29 @@ def supervised_training(
             If no label transform is passed (the default) a boundary transform is used.
         loss_fn: Custom loss function. If None, will default to `torch_em.loss.DiceLoss`.
         out_channels: The number of output channels of the UNet.
+        norm: The normalization layer of the UNet, or None for no normalization.
+        transform: Joint transformation applied to the raw data and the labels.
+            By default padding and the standard augmentations are applied.
         mask_channel: Whether the last channels in the labels should be used for masking the loss.
             This can be used to implement more complex masking operations and is not compatible with `ignore_label`.
-        checkpoint_path: Path to the directory where 'best.pt' resides; continue training this model.
+        checkpoint_path: Path to the directory where 'best.pt' resides, to initialize the weights from it.
+        resume: Whether to continue the previous run with this name in `save_root`, with its optimizer
+            and iteration count. `n_iterations` then includes the iterations of the previous run.
         save_every_kth_epoch: Save checkpoints after every kth epoch in a separate file.
             The corresponding checkpoints will be saved with the naming scheme 'epoch-{epoch}.pt'.
+        mixed_precision: Whether to train with mixed precision.
+        early_stopping: The number of epochs without improvement after which training is stopped.
+        log_image_interval: The interval (in iterations) at which images are written to the log.
         loader_kwargs: Additional keyword arguments for the dataloader.
     """
     train_loader = get_supervised_loader(train_paths, raw_key, label_key, patch_shape, batch_size,
                                          n_samples=n_samples_train, rois=train_rois, sampler=sampler,
                                          ignore_label=ignore_label, label_transform=label_transform,
-                                         label_paths=train_label_paths, **loader_kwargs)
+                                         label_paths=train_label_paths, transform=transform, **loader_kwargs)
     val_loader = get_supervised_loader(val_paths, raw_key, label_key, patch_shape, batch_size,
                                        n_samples=n_samples_val, rois=val_rois, sampler=sampler,
                                        ignore_label=ignore_label, label_transform=label_transform,
-                                       label_paths=val_label_paths, **loader_kwargs)
+                                       label_paths=val_label_paths, transform=transform, **loader_kwargs)
 
     if check:
         from torch_em.util.debug import check_loader
@@ -277,7 +311,7 @@ def supervised_training(
     elif is_2d:
         model = get_2d_model(out_channels=out_channels, in_channels=in_channels)
     else:
-        model = get_3d_model(out_channels=out_channels, in_channels=in_channels)
+        model = get_3d_model(out_channels=out_channels, in_channels=in_channels, norm=norm)
 
     base_loss = loss_fn if loss_fn is not None else torch_em.loss.DiceLoss()
     metric = base_loss
@@ -315,14 +349,19 @@ def supervised_training(
         train_loader=train_loader,
         val_loader=val_loader,
         learning_rate=lr,
-        mixed_precision=True,
-        log_image_interval=100,
+        mixed_precision=mixed_precision,
+        log_image_interval=log_image_interval,
+        early_stopping=early_stopping,
         compile_model=False,
         save_root=save_root,
         loss=loss,
         metric=metric,
     )
-    trainer.fit(n_iterations, save_every_kth_epoch=save_every_kth_epoch)
+    if resume:  # Train only the remaining iterations; this fails if there is no previous run.
+        latest = os.path.join(trainer.checkpoint_folder, "latest.pt")
+        n_iterations -= torch.load(latest, map_location="cpu", weights_only=False)["iteration"]
+    trainer.fit(n_iterations, load_from_checkpoint="latest" if resume else None,
+                save_every_kth_epoch=save_every_kth_epoch)
 
 
 def _derive_key_from_files(files, key):

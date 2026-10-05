@@ -20,6 +20,11 @@ def _erode_instances(mito_data, erode_voxels, verbose):
         t_erode = time.time()
         print(f"Eroding mitochondria instances globally by {erode_voxels} voxels ...")
 
+    # The mitochondria come from the second channel of the input if they are not passed separately,
+    # so they have the dtype of the tomogram, which is often float. regionprops only accepts labels.
+    if not np.issubdtype(mito_data.dtype, np.integer):
+        mito_data = np.rint(mito_data).astype("uint32")
+
     footprint = ball(erode_voxels)
     props = regionprops(mito_data)
 
