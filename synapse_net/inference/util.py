@@ -23,6 +23,7 @@ from scipy.ndimage import binary_closing
 from skimage.measure import regionprops
 from skimage.morphology import remove_small_holes
 from skimage.transform import rescale, resize
+from torch_em.model.unet import Decoder
 from torch_em.util.prediction import predict_with_halo
 from tqdm import tqdm
 
@@ -98,6 +99,14 @@ class _Scaler:
             print("Resized prediction back to original shape", output.shape, "in", time.time() - t0, "s")
 
         return output
+
+
+def _restore_legacy_attributes(model):
+    # Models pickled with torch_em < 0.10.7 lack the attributes that the newer decoder reads in its forward pass.
+    for module in model.modules():
+        if isinstance(module, Decoder) and not hasattr(module, "explicit_skip_channels"):
+            module.explicit_skip_channels = False
+    return model
 
 
 def _preprocess(input_volume, with_channels, channels_to_standardize):
@@ -246,6 +255,7 @@ def get_prediction_torch_em(
                 model = torch_em.util.load_model(checkpoint=model_path, device=devices[0])
             else:  # Load the model directly from a serialized pytorch model.
                 model = torch.load(model_path, weights_only=False)
+    model = _restore_legacy_attributes(model)
 
     # Run prediction with the model.
     with torch.no_grad():
