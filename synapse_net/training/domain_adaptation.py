@@ -16,7 +16,7 @@ from .supervised_training import (
     get_2d_model, get_3d_model, get_supervised_loader, _determine_ndim, _derive_key_from_files
 )
 from ..inference.inference import get_model_path, compute_scale_from_voxel_size, get_available_models
-from ..inference.util import _Scaler
+from ..inference.util import _restore_legacy_attributes, _Scaler
 
 # configure weak augmentations
 from torch_em.transform.invertible_augmentations import DEFAULT_WEAK_AUGMENTATIONS
@@ -121,7 +121,7 @@ def mean_teacher_adaptation(
         if os.path.isdir(source_checkpoint):
             model = torch_em.util.load_model(source_checkpoint)
         else:
-            model = torch.load(source_checkpoint, weights_only=False)
+            model = _restore_legacy_attributes(torch.load(source_checkpoint, weights_only=False))
         reinit_teacher = False
 
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
