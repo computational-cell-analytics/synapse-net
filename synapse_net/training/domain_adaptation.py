@@ -112,31 +112,40 @@ def mean_teacher_adaptation(
     assert (backbone is None) == (model_type is None)
     is_2d, _ = _determine_ndim(patch_shape)
 
-    if source_checkpoint is None:
-        # training from scratch only makes sense if we have supervised training data
-        # that's why we have the assertion here.
-        assert supervised_train_paths is not None
-        print("Mean teacher training from scratch (AdaMT)")
+    # for now supported backbones are UNETR
+    if backbone is not None: 
+        model = get_unetr_model(
+            ndim=2 if is_2d else 3,
+            backbone=backbone, 
+            model_type=model_type,
+            out_channels=2,
+        )
+        if source_checkpoint is not None:
+            print("Load UNETR model from checkpoint:", source_checkpoint)
+            model = torch_em.util.load_model(checkpoint=source_checkpoint, model=model)
 
-        if backbone is not None:
-            model = get_unetr_model(
-                ndim=2 if is_2d else 3,
-                backbone=backbone, model_type=model_type,
-                out_channels=2
-            )
-        else:
-            if is_2d:
-                model = get_2d_model(out_channels=2)
-            else:
-                model = get_3d_model(out_channels=2)
-        reinit_teacher = True
-    else:
-        print("Mean teacher training initialized from source model:", source_checkpoint)
-        if os.path.isdir(source_checkpoint):
-            model = torch_em.util.load_model(source_checkpoint)
-        else:
-            model = torch.load(source_checkpoint, weights_only=False)
         reinit_teacher = False
+
+    # load or initialize UNET if not using UNETR backbones
+    else:
+        if is_2d:
+            model = get_2d_model(out_channels=2)
+        else:
+            model = get_3d_model(out_channels=2)
+
+        if source_checkpoint is not None:
+            print("Load UNET model from checkpoint:", source_checkpoint)
+            if os.path.isdir(source_checkpoint):
+                model = torch_em.util.load_model(source_checkpoint)
+            else:
+                model = torch.load(source_checkpoint, weights_only=False)
+            reinit_teacher = False
+        else:
+            # training from scratch only makes sense if we have supervised training data
+            # that's why we have the assertion here.
+            assert supervised_train_paths is not None
+            print("Mean teacher training from scratch (AdaMT)")
+            reinit_teacher = True
 
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=5)
