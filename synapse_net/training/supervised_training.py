@@ -1,7 +1,10 @@
 import os
+import random
 from glob import glob
+from shutil import copyfile
 from typing import Optional, Tuple, Union
 
+import numpy as np
 import torch
 import torch_em
 from sklearn.model_selection import train_test_split
@@ -16,6 +19,7 @@ def get_3d_model(
     scale_factors: Tuple[Tuple[int, int, int]] = [[1, 2, 2], [2, 2, 2], [2, 2, 2], [2, 2, 2]],
     initial_features: int = 32,
     final_activation: str = "Sigmoid",
+    norm: Optional[str] = "InstanceNorm",
 ) -> torch.nn.Module:
     """Get the U-Net model for 3D segmentation tasks.
 
@@ -25,6 +29,8 @@ def get_3d_model(
         initial_features: The number of features in the first level of the U-Net.
             The number of features increases by a factor of two in each level.
         final_activation: The activation applied to the last output layer.
+        norm: The normalization layer used in the convolutional blocks.
+            Pass None to build the network without normalization layers.
 
     Returns:
         The U-Net.
@@ -36,6 +42,7 @@ def get_3d_model(
         initial_features=initial_features,
         gain=2,
         final_activation=final_activation,
+        norm=norm,
     )
     return model
 
@@ -101,6 +108,7 @@ def get_supervised_loader(
     ignore_label: Optional[int] = None,
     label_transform: Optional[callable] = None,
     label_paths: Optional[Tuple[str]] = None,
+    transform: Optional[callable] = None,
     **loader_kwargs,
 ) -> torch.utils.data.DataLoader:
     """Get a dataloader for supervised segmentation training.
@@ -126,6 +134,8 @@ def get_supervised_loader(
             If no label transform is passed (the default) a boundary transform is used.
         label_paths: Optional paths containing the labels / annotations for training.
             If not given, the labels are expected to be contained in the `data_paths`.
+        transform: Joint transformation applied to the raw data and the labels, after the
+            `label_transform`. By default padding and the standard augmentations are applied.
         loader_kwargs: Additional keyword arguments for the dataloader.
 
     Returns:
@@ -147,7 +157,9 @@ def get_supervised_loader(
             raise NotImplementedError
         label_transform = torch_em.transform.label.connected_components
 
-    if ndim == 2:
+    if transform is not None:  # A specific joint transform was passed, do nothing.
+        pass
+    elif ndim == 2:
         adjusted_patch_shape = _adjust_patch_shape(ndim, patch_shape)
         transform = torch_em.transform.Compose(
             torch_em.transform.PadIfNecessary(adjusted_patch_shape), torch_em.transform.get_augmentations(2)
@@ -181,6 +193,114 @@ def get_supervised_loader(
     return loader
 
 
+def _checkpoint_folder(save_root, name):
+    """The folder that torch-em writes the checkpoints of this run to."""
+    return os.path.join(save_root, "checkpoints", name)
+
+
+def _set_seed(seed, deterministic=False):
+    """Seed the random number generators that affect training.
+
+    Args:
+        seed: The seed for python's `random`, numpy and torch. Seeding alone does not make a
+            training run bit-exact on the GPU, because some cudnn kernels accumulate with atomics
+            and are non-deterministic regardless of the seed. Pass `deterministic` for that.
+        deterministic: Whether to also use deterministic kernels where torch has them, and pin the
+            cuBLAS workspace. Without this, two runs with the same seed still differ slightly,
+            because cudnn picks algorithms by timing. Note that torch has no deterministic backward
+            pass for the max pooling that the U-Net downsamples with, so this is requested with
+            'warn_only' and bit-exact equality is not guaranteed on every GPU. It costs throughput.
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    if deterministic:
+        torch.backends.cudnn.benchmark = False
+        # cuBLAS needs this to be set before the CUDA context is created to be reproducible.
+        os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+        torch.use_deterministic_algorithms(True, warn_only=True)
+
+
+def _check_overwrite(save_root, name, overwrite, resume):
+    """Refuse to start a run that would replace the checkpoints of a previous one.
+
+    torch-em writes into '<save_root>/checkpoints/<name>' without any check, so a second run with
+    the same name silently replaces the checkpoints of the first. Its own `overwrite_training` does
+    not help: that only skips runs which already reached exactly the requested iteration count.
+
+    Raises:
+        ValueError: If a previous run with this name exists and neither `overwrite` nor `resume`
+            was asked for.
+    """
+    if save_root is None or overwrite or resume:
+        return
+
+    previous_run = _checkpoint_folder(save_root, name)
+    if os.path.exists(os.path.join(previous_run, "latest.pt")):
+        raise ValueError(
+            f"The training run '{name}' already has checkpoints in {previous_run}. Training would "
+            "overwrite them. Pass a different name, or 'overwrite=True' ('--overwrite' on the "
+            "command line) to replace them, or 'resume=True' ('--resume') to continue that run."
+        )
+
+
+def _prepare_resume(save_root, name, n_iterations, mixed_precision, verbose=True):
+    """Work out how to continue a previous run, and how many iterations are left for it.
+
+    Two details of torch-em are handled here. It only writes the scaler state if the previous run
+    used mixed precision, but reads it unconditionally when the new trainer has one, so a mismatch
+    is caught up front instead of failing with a `KeyError` mid-run. And it resets the best metric
+    when it initializes the trainer, so the first validation of the resumed run would overwrite
+    'best.pt' even if it is worse; the previous best is copied aside before that can happen.
+
+    Returns:
+        The argument for `trainer.fit(load_from_checkpoint=...)`. torch-em joins it with '.pt', so
+            it is the checkpoint path without the extension. A path that does not resolve is only
+            warned about and training then silently starts from scratch, so the file is checked to
+            exist before its stem is returned.
+        The number of iterations left to reach `n_iterations` in total.
+
+    Raises:
+        ValueError: If there is no previous run, if it already reached `n_iterations`, or if it
+            used a different mixed precision setting.
+    """
+    checkpoint_folder = _checkpoint_folder(save_root, name)
+    checkpoint_path = os.path.join(checkpoint_folder, "latest.pt")
+    if not os.path.exists(checkpoint_path):
+        raise ValueError(
+            f"Cannot resume the training run '{name}': {checkpoint_path} does not exist."
+        )
+
+    state = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    iteration = state["iteration"]
+    remaining = n_iterations - iteration
+    if remaining <= 0:
+        raise ValueError(
+            f"The training run '{name}' is already at iteration {iteration} of the requested "
+            f"{n_iterations}. Increase 'n_iterations' to train it further."
+        )
+
+    if mixed_precision and "scaler_state" not in state:
+        raise ValueError(
+            f"The training run '{name}' was trained without mixed precision, so it cannot be "
+            "resumed with mixed precision. Pass 'mixed_precision=False' to continue it."
+        )
+
+    best_path = os.path.join(checkpoint_folder, "best.pt")
+    if os.path.exists(best_path):
+        backup_path = os.path.join(checkpoint_folder, "best-before-resume.pt")
+        copyfile(best_path, backup_path)
+        if verbose:
+            print("The previous best checkpoint was copied to", backup_path)
+
+    if verbose:
+        print(f"Resuming '{name}' from iteration {iteration}, training for {remaining} more.")
+
+    return os.path.splitext(checkpoint_path)[0], remaining
+
+
 def supervised_training(
     name: str,
     train_paths: Tuple[str],
@@ -205,9 +325,20 @@ def supervised_training(
     loss_fn: Optional[torch.nn.Module] = None,
     in_channels: int = 1,
     out_channels: int = 2,
+    initial_features: int = 32,
+    scale_factors: Optional[Tuple[Tuple[int, int, int]]] = None,
+    norm: Optional[str] = "InstanceNorm",
+    transform: Optional[callable] = None,
     mask_channel: bool = False,
     checkpoint_path: Optional[str] = None,
+    resume: bool = False,
+    overwrite: bool = False,
+    seed: Optional[int] = None,
+    deterministic: bool = False,
     save_every_kth_epoch: Optional[int] = None,
+    mixed_precision: bool = True,
+    early_stopping: Optional[int] = None,
+    log_image_interval: int = 100,
     **loader_kwargs,
 ):
     """Run supervised segmentation training.
@@ -248,22 +379,56 @@ def supervised_training(
         label_transform: Label transform that is applied to the segmentation to compute the targets.
             If no label transform is passed (the default) a boundary transform is used.
         loss_fn: Custom loss function. If None, will default to `torch_em.loss.DiceLoss`.
+        in_channels: The number of input channels of the UNet. Use a value larger than one to train
+            on data with multiple channels, and pass `with_channels=True` so that the loader reads them.
         out_channels: The number of output channels of the UNet.
+        initial_features: The number of features in the first level of the UNet.
+            The number of features increases by a factor of two in each level.
+        scale_factors: The downscaling factors for each level of the UNet encoder, in ZYX. By default
+            a single anisotropic level is used, which matches data with an anisotropy of about two.
+            Pass more anisotropic levels for data with a stronger anisotropy. This has no effect for
+            2d training, or if the model is initialized from `checkpoint_path`.
+        norm: The normalization layer used in the convolutional blocks of the UNet.
+            Pass None to train a network without normalization layers.
+        transform: Joint transformation applied to the raw data and the labels.
+            By default padding and the standard augmentations are applied.
         mask_channel: Whether the last channels in the labels should be used for masking the loss.
             This can be used to implement more complex masking operations and is not compatible with `ignore_label`.
-        checkpoint_path: Path to the directory where 'best.pt' resides; continue training this model.
+        checkpoint_path: Path to a checkpoint to initialize the weights of a new run from. Only the
+            weights are loaded, the run starts at iteration zero with a fresh optimizer. Pass
+            `resume` instead to continue a previous run of the same name.
+        resume: Whether to continue the previous training run with this name in `save_root`,
+            restoring its weights, optimizer, learning rate schedule and iteration count.
+            `n_iterations` is the total number of iterations to train for, including the ones that
+            the previous run already did.
+        overwrite: Whether to replace the checkpoints of a previous training run with this name in
+            `save_root`. By default training refuses to overwrite them.
+        seed: The seed for the random number generators used in training, for example for the
+            weight initialization and the augmentations. By default the seed is not set, so that
+            repeated runs differ.
+        deterministic: Whether to also disable the cudnn benchmarking when a `seed` is given. This
+            makes repeated runs on the same hardware match exactly, at the cost of throughput.
         save_every_kth_epoch: Save checkpoints after every kth epoch in a separate file.
             The corresponding checkpoints will be saved with the naming scheme 'epoch-{epoch}.pt'.
+        mixed_precision: Whether to train with mixed precision.
+        early_stopping: The number of epochs without improvement after which training is stopped.
+            By default training runs for the full number of iterations.
+        log_image_interval: The interval (in iterations) at which images are written to the training log.
         loader_kwargs: Additional keyword arguments for the dataloader.
     """
+    # Before the loaders, so that this fails immediately instead of after the dataset construction.
+    _check_overwrite(save_root, name, overwrite, resume)
+    if seed is not None:
+        _set_seed(seed, deterministic=deterministic)
+
     train_loader = get_supervised_loader(train_paths, raw_key, label_key, patch_shape, batch_size,
                                          n_samples=n_samples_train, rois=train_rois, sampler=sampler,
                                          ignore_label=ignore_label, label_transform=label_transform,
-                                         label_paths=train_label_paths, **loader_kwargs)
+                                         label_paths=train_label_paths, transform=transform, **loader_kwargs)
     val_loader = get_supervised_loader(val_paths, raw_key, label_key, patch_shape, batch_size,
                                        n_samples=n_samples_val, rois=val_rois, sampler=sampler,
                                        ignore_label=ignore_label, label_transform=label_transform,
-                                       label_paths=val_label_paths, **loader_kwargs)
+                                       label_paths=val_label_paths, transform=transform, **loader_kwargs)
 
     if check:
         from torch_em.util.debug import check_loader
@@ -271,13 +436,23 @@ def supervised_training(
         check_loader(val_loader, n_samples=4)
         return
 
+    # When resuming, 'fit' loads the weights together with the rest of the trainer state below.
+    load_from_checkpoint, n_iterations = (
+        _prepare_resume(save_root, name, n_iterations, mixed_precision) if resume else (None, n_iterations)
+    )
+
     is_2d, _ = _determine_ndim(patch_shape)
-    if checkpoint_path is not None:
+    if checkpoint_path is not None and not resume:
         model = torch_em.util.load_model(checkpoint=checkpoint_path)
     elif is_2d:
-        model = get_2d_model(out_channels=out_channels, in_channels=in_channels)
+        model = get_2d_model(out_channels=out_channels, in_channels=in_channels, initial_features=initial_features)
     else:
-        model = get_3d_model(out_channels=out_channels, in_channels=in_channels)
+        # Leave the default to 'get_3d_model', so that it stays the single source of truth.
+        scale_factor_kwargs = {} if scale_factors is None else {"scale_factors": scale_factors}
+        model = get_3d_model(
+            out_channels=out_channels, in_channels=in_channels, initial_features=initial_features, norm=norm,
+            **scale_factor_kwargs,
+        )
 
     base_loss = loss_fn if loss_fn is not None else torch_em.loss.DiceLoss()
     metric = base_loss
@@ -315,14 +490,16 @@ def supervised_training(
         train_loader=train_loader,
         val_loader=val_loader,
         learning_rate=lr,
-        mixed_precision=True,
-        log_image_interval=100,
+        mixed_precision=mixed_precision,
+        log_image_interval=log_image_interval,
+        early_stopping=early_stopping,
         compile_model=False,
         save_root=save_root,
         loss=loss,
         metric=metric,
     )
-    trainer.fit(n_iterations, save_every_kth_epoch=save_every_kth_epoch)
+    trainer.fit(n_iterations, load_from_checkpoint=load_from_checkpoint,
+                save_every_kth_epoch=save_every_kth_epoch)
 
 
 def _derive_key_from_files(files, key):

@@ -1,0 +1,29 @@
+# Reproduction of the volume EM mitochondria model with the synapse-net training module.
+# Baseline: volume-em-mito-aniso2lvl-lr1e-4-bs4-ps32x512x512-blacked-final (val DiceLoss 0.292714).
+# One clean run per seed; the recipe stops on early stopping, not on n_iterations.
+# The save_root is deliberately separate from the original models/ directory: the published
+# checkpoint was corrupted by two concurrent jobs sharing one, and synapse-net now refuses that.
+#
+# Submit with the runner of the synapse repo, which resolves 'slurm_profile' against its own
+# slurm_profiles/ and writes the generated job script to its logs/sbatch_jobs/:
+#   python /mnt/vast-nhr/home/freckmann15/u15205/synapse/sbatch_runner.py \
+#       scripts/volume_em/training/repro_aniso2lvl_seed42.yaml [--dry-run]
+
+slurm_profile: grete_shared_80gb
+
+slurm:
+  job_name: "volem-mito-repro-seed42"
+  # The profile caps at 36 h. Historical runs early-stopped after 26-29 h, so raise this to the
+  # partition maximum to keep a margin at the measured 5.13 s/it.
+  time: "2-00:00:00"
+
+env:
+  type: micromamba
+  path: /mnt/vast-nhr/home/freckmann15/u15205/micromamba/envs/synapse
+
+commands:
+  - "CUDA_VISIBLE_DEVICES=0 synapse_net.run_vol_em_mitochondria_training
+     -n volume-em-mito-aniso2lvl-repro-seed42
+     --split_file /mnt/vast-nhr/home/freckmann15/u15205/synapse-net/scripts/volume_em/training/split-mito_vol_em_aniso2lvl_final.json
+     --seed 42
+     --save_root /mnt/lustre-grete/usr/u15205/volume-em/models-repro"
