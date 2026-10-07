@@ -35,6 +35,7 @@ def semisupervised_training(
     source_checkpoint=None,
     supervised_sampler: Optional[callable] = None,
     unsupervised_sampler: Optional[callable] = None,
+    separate_backward: bool = False,
     check: bool = False,
 ):
     """Run semisupervised segmentation training.
@@ -44,7 +45,7 @@ def semisupervised_training(
         1. If no `source_checkpoint` is given, run supervised training to
             warmup the teacher.
         2. Run semisupervised training using mean teacher setup with invertible 
-            augumentation, using the warmup checkpoint to initialize the teacher.
+            augumentations, using the warmup checkpoint to initialize the teacher.
 
     Args:
         name: The name for the checkpoint to be trained. The warmup checkpoint is saved
@@ -86,6 +87,7 @@ def semisupervised_training(
         sample_mask_key: The key to the sample mask dataset inside each file.
         supervised_sampler:  Sampler to accept or reject patches for the supervised data stream.
         unsupervised_sampler:  Sampler to accept or reject patches for the unsupervised data stream.
+        separate_backward: Whether to backpropagate each loss term separately to reduce peak memory.
         check: Whether to check the training and validation loaders instead of running training.
     """
     raw_transform = get_raw_transform(backbone)[0] if backbone is not None else None
@@ -169,6 +171,7 @@ def semisupervised_training(
         backbone=backbone,
         model_type=model_type,
         check=False,
+        separate_backward=separate_backward,
     )
 
 def semisupervised_training_v0( #TODO remove old unused version?

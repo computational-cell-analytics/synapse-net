@@ -20,7 +20,7 @@ from ..inference.util import _Scaler
 # configure weak augmentations
 from torch_em.transform.invertible_augmentations import DEFAULT_WEAK_AUGMENTATIONS
 
-# TODO - test settings - fixed kernel size for `RandomGaussianBlur`, fixed std for `RandomGaussianBlur`
+# fixed kernel size for `RandomGaussianBlur`, fixed std for `RandomGaussianBlur`
 DEFAULT_WEAK_AUGMENTATIONS["intensity"] = {
     "RandomGaussianBlur": {"kernel_size": (19, 19), "sigma": (0.1, 3.0)},
     "RandomGaussianNoise": {"mean": (0.0), "std": (0.1)},
@@ -51,6 +51,7 @@ def mean_teacher_adaptation(
     supervised_sampler: Optional[callable] = None,
     backbone: Optional[str] = None,
     model_type: Optional[str] = None,
+    separate_backward: bool = False,
     check: bool = False,
 ) -> None:
     """Run domain adaptation to transfer a network trained on a source domain for a supervised
@@ -106,6 +107,7 @@ def mean_teacher_adaptation(
             Must be set together with `model_type`.
         model_type: Model type for the selected `backbone` model family, for example "vit_b" or "vit_t".
             Must be set together with `backbone`.
+        separate_backward: Whether to backpropagate each loss term separately to reduce peak memory.
         check: Whether to check the training and validation loaders instead of running training.
     """
     assert (supervised_train_paths is None) == (supervised_val_paths is None)
@@ -234,6 +236,7 @@ def mean_teacher_adaptation(
         reinit_teacher=reinit_teacher,
         save_root=save_root,
         augmenter=augmenters,
+        separate_backward=separate_backward,
     )
     trainer.fit(n_iterations)
 
