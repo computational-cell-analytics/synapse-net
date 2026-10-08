@@ -74,7 +74,7 @@ def semisupervised_training(
             based on the patch_shape and size of the volumes used for training.
         n_samples_val: The number of val samples per epoch. By default this will be estimated
             based on the patch_shape and size of the volumes used for validation.
-        backbone: The pretrained ViT encoder of a UNETR model. Options: "sam", "sam2", "dinov2" or "dinov3".
+        backbone: The pretrained ViT encoder of a UNETR model. Options: "sam", "dinov2", or "dinov3".
             Must be set together with `model_type`.
         model_type: Model type for the selected `backbone` model family, for example "vit_b" or "vit_t".
             Must be set together with `backbone`.

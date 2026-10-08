@@ -82,7 +82,7 @@ def supervised_training(
         out_channels: The number of output channels of the UNet.
         mask_channel: Whether the last channels in the labels should be used for masking the loss.
             This can be used to implement more complex masking operations and is not compatible with `ignore_label`.
-        backbone: The pretrained ViT encoder of a UNETR model. Options: "sam", "sam2", "dinov2" or "dinov3".
+        backbone: The pretrained ViT encoder of a UNETR model. Options: "sam", "dinov2", or "dinov3".
             Must be set together with `model_type`.
         model_type: Model type for the selected `backbone` model family, for example "vit_b" or "vit_t".
             Must be set together with `backbone`.

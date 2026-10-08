@@ -23,7 +23,7 @@ except ImportError:
 
 def get_unetr_model(
     ndim: int,
-    backbone: Literal["sam", "sam2", "dinov2", "dinov3"],
+    backbone: Literal["sam", "dinov2", "dinov3"],
     model_type: str,
     out_channels: int = 1,
     init_decoder: bool = False,
@@ -33,16 +33,16 @@ def get_unetr_model(
 
     Args:
         ndim: The number of spatial dimensions for the model; must be 2 or 3.
-        backbone: The pretrained ViT encoder of the UNETR model. Options: "sam", "sam2", "dinov2" or "dinov3".
+        backbone: The pretrained ViT encoder of the UNETR model. Options: "sam", "dinov2", or "dinov3".
         model_type: Model type for the selected `backbone` model family, for example "vit_b" or "vit_t".
         out_channels: The number of output channels of the network.
-        init_decoder: Whether to initialize the decoder with pretrained microSAM or microSAM2 weights.
+        init_decoder: Whether to initialize the decoder with pretrained microSAM weights.
         final_activation: The activation applied to the last output layer.
 
     Returns:
         The UNETR model.
     """
-    if backbone not in ("sam", "sam2", "dinov2", "dinov3"):
+    if backbone not in ("sam", "dinov2", "dinov3"):
         raise ValueError(f"Unsupported backbone '{backbone}'.")
 
     # Get the model class.
@@ -69,9 +69,6 @@ def get_unetr_model(
     _get_checkpoint(backbone, model_type, return_decoder_path=False)
 
     if init_decoder and ndim == 2:
-        model = _init_microsam_decoder(model, backbone, model_type, out_channels)
-    # Init decoder for microSAM2 model
-    elif init_decoder and backbone == "sam2" and model_type == "hvit_t_em_organelles":
         model = _init_microsam_decoder(model, backbone, model_type, out_channels)
 
     return model
@@ -148,11 +145,11 @@ def get_raw_transform(backbone):
     """Get the raw transform and the maximum input value for a pretrained ViT backbone.
 
     Args:
-        backbone: The pretrained ViT encoder. Options: "sam", "sam2", "dinov2", "dinov3" or None.
+        backbone: The pretrained ViT encoder. Options: "sam", "dinov2", "dinov3", or None.
 
     Returns:
         The raw transform. It normalizes the raw data with percentiles to [0, 255] for "sam",
-            and to [0, 1] for "sam2", "dinov2" and "dinov3". None if `backbone` is None,
+            and to [0, 1] for "dinov2" and "dinov3". None if `backbone` is None,
             so the loaders use the default torch-em standardization.
         The maximum input value `clip_max`. The intensity augmentations clip their output to
             [0, clip_max], so that the input stays expected range. None if `backbone` is None.
@@ -161,7 +158,7 @@ def get_raw_transform(backbone):
         raw_transform = _normalize_percentile_to_0_255
         clip_max = 255
 
-    elif backbone in ("sam2", "dinov2", "dinov3"):
+    elif backbone in ("dinov2", "dinov3"):
         raw_transform = _normalize_percentile_to_0_1
         clip_max = 1
 
@@ -234,59 +231,6 @@ def _get_dinov3_checkpoint(model_type: str):
     return checkpoint_path
 
 
-def _get_microsam2_checkpoint(model_type: str, cache_dir=None):
-    """Download MicroSAM2 weights and split into encoder/decoder checkpoints.
-
-    Args:
-        cache_dir: Directory to cache the weights. Defaults to the micro_sam
-            pooch cache (``~/.cache/micro_sam/v2/models`` or OS equivalent).
-
-    Returns:
-        Absolute path to the cached model file.
-    """
-    if cache_dir is None:
-        cache_dir = os.path.expanduser(pooch.os_cache("synapse_net/microsam2_models"))
-
-    urls = {"hvit_t_em_organelles": "https://owncloud.gwdg.de/index.php/s/kMxqsRL1FG9pslC/download"}
-    hashes = {"hvit_t_em_organelles": "a34b4a4e9360d48eafe7995438610bf656325acae71cd1f3f512e236511b212e"}
-
-    full_checkpoint = pooch.retrieve(
-        url=urls[model_type],
-        known_hash=hashes[model_type],
-        fname=model_type,
-        path=cache_dir,
-        progressbar=True,
-    )
-
-    encoder_path = os.path.join(cache_dir, f"{model_type}_encoder.pt")
-    decoder_path = os.path.join(cache_dir, f"{model_type}_decoder.pt")
-
-    if not (os.path.exists(encoder_path) and os.path.exists(decoder_path)):
-        state = torch.load(
-            full_checkpoint,
-            map_location="cpu",
-            weights_only=True,
-        )
-        encoder_state = {
-            k.removeprefix("encoder."): v
-            for k, v in state.items()
-            if k.startswith("encoder.")
-        }
-        decoder_state = {
-            k: v
-            for k, v in state.items()
-            if (
-                not k.startswith("encoder.")
-                and not k.startswith("out_conv")
-            )
-        }
-
-        torch.save(encoder_state, encoder_path)
-        torch.save(decoder_state, decoder_path)
-
-    return encoder_path, decoder_path
-
-
 def _get_checkpoint(backbone, model_type, return_decoder_path=False):
 
     if backbone == "sam":
@@ -302,14 +246,6 @@ def _get_checkpoint(backbone, model_type, return_decoder_path=False):
             decoder_path = model_registry.fetch(
                 decoder_name, progressbar=True
             ) if decoder_name in model_registry.registry else None
-
-    elif backbone == "sam2":
-        if model_type == 'hvit_t_em_organelles':  # Not yet in the zoo
-            checkpoint_path, decoder_path = _get_microsam2_checkpoint(model_type)
-        else:
-            from micro_sam.v2.util import _get_checkpoint as _get_sam2_checkpoint
-            checkpoint_path = _get_sam2_checkpoint(model_type)
-            decoder_path = None
 
     elif backbone == "dinov2":
         checkpoint_path = _get_dinov2_checkpoint(model_type)
@@ -330,12 +266,10 @@ def _get_checkpoint(backbone, model_type, return_decoder_path=False):
 def _get_embed_dim(backbone):
     embed_dim = None
 
-    if backbone == "sam2":
-        embed_dim = 256
-    elif backbone in ["sam", "dinov2", "dinov3"]:
+    if backbone in ["sam", "dinov2", "dinov3"]:
         embed_dim = 768
-    elif backbone == "sam3":
-        embed_dim = 1024
+    else:
+        raise ValueError(f"Unsupported backbone '{backbone}'.")
 
     return embed_dim
 
