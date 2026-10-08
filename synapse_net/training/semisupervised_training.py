@@ -39,7 +39,7 @@ def semisupervised_training(
 
         1. If no `source_checkpoint` is given, run supervised training to
             warmup the teacher.
-        2. Run semisupervised training using mean teacher setup with invertible 
+        2. Run semisupervised training using mean teacher setup with invertible
             augumentations, using the warmup checkpoint to initialize the teacher.
 
     Args:
@@ -124,7 +124,10 @@ def semisupervised_training(
         warmup_checkpoint = os.path.join(save_root, "checkpoints", warmup_name, "best.pt")
 
         if not os.path.exists(warmup_checkpoint):
-            print(f"No warmup checkpoint was found, initiating supervised warmup for teacher model with {teacher_warmup_iterations} iterations.")
+            print(
+                "No warmup checkpoint was found, initiating supervised warmup for teacher model "
+                f"with {teacher_warmup_iterations} iterations."
+            )
 
             supervised_training(
                 name=warmup_name,

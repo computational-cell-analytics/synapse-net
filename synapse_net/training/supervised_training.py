@@ -120,25 +120,20 @@ def supervised_training(
         return
 
     is_2d, _ = _determine_ndim(patch_shape)
-    
-    if backbone is not None:
-        assert in_channels == 1
 
-        if checkpoint_path is not None:
-            model = torch_em.util.load_model(checkpoint=checkpoint_path)
-        else:
-            model = get_unetr_model(
-                ndim=2 if is_2d else 3,
-                backbone=backbone, model_type=model_type,
-                out_channels=out_channels
-            )
+    if checkpoint_path is not None:
+        model = torch_em.util.load_model(checkpoint=checkpoint_path)
+    elif backbone is not None:
+        assert in_channels == 1
+        model = get_unetr_model(
+            ndim=2 if is_2d else 3,
+            backbone=backbone, model_type=model_type,
+            out_channels=out_channels,
+        )
+    elif is_2d:
+        model = get_2d_model(out_channels=out_channels, in_channels=in_channels)
     else:
-        if checkpoint_path is not None:
-            model = torch_em.util.load_model(checkpoint=checkpoint_path)
-        elif is_2d:
-            model = get_2d_model(out_channels=out_channels, in_channels=in_channels)
-        else:
-            model = get_3d_model(out_channels=out_channels, in_channels=in_channels)
+        model = get_3d_model(out_channels=out_channels, in_channels=in_channels)
 
     base_loss = loss_fn if loss_fn is not None else torch_em.loss.DiceLoss()
     metric = base_loss
