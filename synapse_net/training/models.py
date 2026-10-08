@@ -138,14 +138,16 @@ def _normalize_percentile_to_0_255(raw):
 
 def get_raw_transform(backbone):
     """Get the raw transform and the maximum input value for a pretrained ViT backbone.
-    
-    If no backbone is specified, the callers default to torch-em standarization.
 
-    Args: 
-        backbone: The pretrained ViT encoder.
-            Options: "sam", "sam2", "dinov2", "dinov3" or None.
+    Args:
+        backbone: The pretrained ViT encoder. Options: "sam", "sam2", "dinov2", "dinov3" or None.
 
-    Returns: Tuple with (raw_transform, clip_max)
+    Returns:
+        The raw transform. It normalizes the raw data with percentiles to [0, 255] for "sam",
+            and to [0, 1] for "sam2", "dinov2" and "dinov3". None if `backbone` is None,
+            so the loaders use the default torch-em standardization.
+        The maximum input value `clip_max`. The intensity augmentations clip their output to
+            [0, clip_max], so that the input stays expected range. None if `backbone` is None.
     """
     if backbone == "sam":
         raw_transform = _normalize_percentile_to_0_255
