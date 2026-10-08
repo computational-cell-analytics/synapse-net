@@ -105,7 +105,8 @@ def mean_teacher_adaptation(
             Pass `False` to disable.
         backbone: The pretrained ViT encoder of a UNETR model. Options: "sam", "dinov2", or "dinov3".
             Must be set together with `model_type`.
-        model_type: Model type for the selected `backbone` model family, for example "vit_b" or "vit_t".
+        model_type: Model type for the selected `backbone` model family,
+            for example "vit_b" or "vit_b_em_organelles" for "sam".
             Must be set together with `backbone`.
         separate_backward: Whether to backpropagate each loss term separately to reduce peak memory.
         check: Whether to check the training and validation loaders instead of running training.

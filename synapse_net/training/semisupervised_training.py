@@ -76,7 +76,8 @@ def semisupervised_training(
             based on the patch_shape and size of the volumes used for validation.
         backbone: The pretrained ViT encoder of a UNETR model. Options: "sam", "dinov2", or "dinov3".
             Must be set together with `model_type`.
-        model_type: Model type for the selected `backbone` model family, for example "vit_b" or "vit_t".
+        model_type: Model type for the selected `backbone` model family,
+            for example "vit_b" or "vit_b_em_organelles" for "sam".
             Must be set together with `backbone`.
         source_checkpoint: Warmup checkpoint used to initialize the teacher model. If not provided,
             run supervised training `teacher_warmup_iterations`.

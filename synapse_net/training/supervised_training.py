@@ -84,7 +84,8 @@ def supervised_training(
             This can be used to implement more complex masking operations and is not compatible with `ignore_label`.
         backbone: The pretrained ViT encoder of a UNETR model. Options: "sam", "dinov2", or "dinov3".
             Must be set together with `model_type`.
-        model_type: Model type for the selected `backbone` model family, for example "vit_b" or "vit_t".
+        model_type: Model type for the selected `backbone` model family,
+            for example "vit_b" or "vit_b_em_organelles" for "sam".
             Must be set together with `backbone`.
         checkpoint_path: Path to the directory where 'best.pt' resides; continue training this model.
         save_every_kth_epoch: Save checkpoints after every kth epoch in a separate file.

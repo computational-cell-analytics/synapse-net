@@ -34,7 +34,8 @@ def get_unetr_model(
     Args:
         ndim: The number of spatial dimensions for the model; must be 2 or 3.
         backbone: The pretrained ViT encoder of the UNETR model. Options: "sam", "dinov2", or "dinov3".
-        model_type: Model type for the selected `backbone` model family, for example "vit_b" or "vit_t".
+        model_type: Model type for the selected `backbone` model family,
+            for example "vit_b" or "vit_b_em_organelles" for "sam".
         out_channels: The number of output channels of the network.
         init_decoder: Whether to initialize the decoder with pretrained microSAM weights.
         final_activation: The activation applied to the last output layer.
@@ -64,7 +65,6 @@ def get_unetr_model(
         use_conv_transpose=False,
         use_sam_stats="sam" in backbone,
         use_dino_stats="dino" in backbone,
-        embed_dim=_get_embed_dim(backbone=backbone),
     )
     _get_checkpoint(backbone, model_type, return_decoder_path=False)
 
@@ -261,17 +261,6 @@ def _get_checkpoint(backbone, model_type, return_decoder_path=False):
         return checkpoint_path, decoder_path
     else:
         return checkpoint_path
-
-
-def _get_embed_dim(backbone):
-    embed_dim = None
-
-    if backbone in ["sam", "dinov2", "dinov3"]:
-        embed_dim = 768
-    else:
-        raise ValueError(f"Unsupported backbone '{backbone}'.")
-
-    return embed_dim
 
 
 def _get_vit_type(model_type: str) -> str:
