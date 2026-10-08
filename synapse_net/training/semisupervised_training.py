@@ -1,9 +1,7 @@
 import os
 from typing import Optional, Tuple
 
-from .dataloaders import get_supervised_loader, get_unsupervised_loader
 from .domain_adaptation import mean_teacher_adaptation
-from .models import get_raw_transform
 from .supervised_training import supervised_training
 
 
@@ -89,35 +87,36 @@ def semisupervised_training(
         separate_backward: Whether to backpropagate each loss term separately to reduce peak memory.
         check: Whether to check the training and validation loaders instead of running training.
     """
-    raw_transform = get_raw_transform(backbone)[0]
-
     # check both sets of loaders before teacher warmup
     if check:
-        from torch_em.util.debug import check_loader
-
-        unsupervised_train_loader = get_unsupervised_loader(
-            unsupervised_train_paths, raw_key, patch_shape, batch_size, n_samples_train,
-            sample_mask_paths=train_mask_paths, sample_mask_key=sample_mask_key,
-            sampler=unsupervised_sampler, raw_transform=raw_transform,
+        mean_teacher_adaptation(
+            name=name,
+            unsupervised_train_paths=unsupervised_train_paths,
+            unsupervised_val_paths=unsupervised_val_paths,
+            supervised_train_paths=supervised_train_paths,
+            supervised_val_paths=supervised_val_paths,
+            raw_key=raw_key,
+            raw_key_supervised=raw_key,
+            label_key=label_key,
+            patch_shape=patch_shape,
+            save_root=save_root,
+            source_checkpoint=source_checkpoint,
+            confidence_threshold=confidence_threshold,
+            batch_size=batch_size,
+            lr=lr,
+            n_iterations=n_iterations,
+            n_samples_train=n_samples_train,
+            n_samples_val=n_samples_val,
+            train_mask_paths=train_mask_paths,
+            val_mask_paths=val_mask_paths,
+            sample_mask_key=sample_mask_key,
+            supervised_sampler=supervised_sampler,
+            unsupervised_sampler=unsupervised_sampler,
+            backbone=backbone,
+            model_type=model_type,
+            check=True,
+            separate_backward=separate_backward,
         )
-        unsupervised_val_loader = get_unsupervised_loader(
-            unsupervised_val_paths, raw_key, patch_shape, batch_size, n_samples_val,
-            sample_mask_paths=val_mask_paths, sample_mask_key=sample_mask_key,
-            sampler=unsupervised_sampler, raw_transform=raw_transform,
-        )
-        supervised_train_loader = get_supervised_loader(
-            supervised_train_paths, raw_key, label_key, patch_shape, batch_size, n_samples_train,
-            sampler=supervised_sampler, raw_transform=raw_transform,
-        )
-        supervised_val_loader = get_supervised_loader(
-            supervised_val_paths, raw_key, label_key, patch_shape, batch_size, n_samples_val,
-            sampler=supervised_sampler, raw_transform=raw_transform,
-        )
-        check_loader(unsupervised_train_loader, n_samples=2)
-        check_loader(unsupervised_val_loader, n_samples=2)
-        check_loader(supervised_train_loader, n_samples=2)
-        check_loader(supervised_val_loader, n_samples=2)
-        
         return
 
     warmup_name = f"{name}-warmup"
