@@ -1,6 +1,6 @@
 """
 Code ported from micro-match.
-Author: Marei Freitag
+Author: Marei Freitag and Anwai Archit
 """
 import os
 import pooch
@@ -13,7 +13,7 @@ import torch
 
 from torch_em.model.unetr import UNETR2D, UNETR3D
 from torch_em.model import UNet2d, AnisotropicUNet
-from torch_em.transform.raw import normalize_percentile, normalize
+from torch_em.transform.raw import normalize_percentile
 
 def get_unetr_model(
     ndim: int,
@@ -127,40 +127,40 @@ def get_2d_model(
     )
     return model
 
-def normalize_percentile_to_0_1(raw):
+def _normalize_percentile_to_0_1(raw):
     raw = normalize_percentile(raw)
-    if torch.is_tensor(raw):
-        return torch.clamp(raw, 0, 1)
-    raw = np.clip(raw, 0, 1)
-    return raw
+    return torch.clamp(raw, 0, 1) if torch.is_tensor(raw) else np.clip(raw, 0, 1)
 
 
-def normalize_to_0_1(raw):
-    return normalize_percentile_to_0_1(raw)
-
-
-def normalize_percentile_to_0_255(raw):
-    raw = normalize_percentile_to_0_1(raw)
-    raw = raw * 255.0
-    return raw
-
-
-def normalize_to_0_255(raw):
-    raw = normalize(raw)
-    raw = raw * 255.0
-    return raw
+def _normalize_percentile_to_0_255(raw):
+    return _normalize_percentile_to_0_1(raw) * 255.0
 
 
 def get_raw_transform(backbone):
-    if backbone in ("sam2", "dinov2", "dinov3"):
-        raw_transform = normalize_percentile_to_0_1
-        clip_max = 1
-    elif backbone is not None:
-        raw_transform = normalize_percentile_to_0_255
+    """Get the raw transform and the maximum input value for a pretrained ViT backbone.
+    
+    If no backbone is specified, the callers default to torch-em standarization.
+
+    Args: 
+        backbone: The pretrained ViT encoder.
+            Options: "sam", "sam2", "dinov2", "dinov3" or None.
+
+    Returns: Tuple with (raw_transform, clip_max)
+    """
+    if backbone == "sam":
+        raw_transform = _normalize_percentile_to_0_255
         clip_max = 255
-    else:
-        raw_transform = normalize_percentile_to_0_1
+
+    elif backbone in ("sam2", "dinov2", "dinov3"):
+        raw_transform = _normalize_percentile_to_0_1
         clip_max = 1
+
+    elif backbone is None:
+        raw_transform, clip_max = None, None
+
+    else:
+        raise ValueError(f"Unsupported backbone '{backbone}'")
+    
     return (raw_transform, clip_max)
 
 

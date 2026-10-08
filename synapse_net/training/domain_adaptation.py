@@ -157,10 +157,7 @@ def mean_teacher_adaptation(
     loss = self_training.SelfTrainingLossWithInvertibleAugmentations()
     loss_and_metric = self_training.SelfTrainingLossAndMetricWithInvertibleAugmentations()
 
-    if backbone is not None:
-        raw_transform, clip_max = get_raw_transform(backbone)
-    else:
-        raw_transform, clip_max = None, None
+    raw_transform, clip_max = get_raw_transform(backbone)
 
     ndim = 2 if is_2d else 3
     augmenters = torch_em.transform.invertible_augmentations.MeanTeacherAugmenters(ndim=ndim, clip_max=clip_max)

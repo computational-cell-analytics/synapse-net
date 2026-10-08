@@ -93,7 +93,7 @@ def supervised_training(
     """
     assert (backbone is None) == (model_type is None)
 
-    raw_transform = get_raw_transform(backbone)[0] if backbone is not None else None
+    raw_transform = get_raw_transform(backbone)[0]
 
     train_loader = get_supervised_loader(
         train_paths, raw_key, label_key, patch_shape, batch_size,
