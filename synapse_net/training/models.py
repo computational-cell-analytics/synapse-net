@@ -1,7 +1,4 @@
-"""
-Code ported from micro-match.
-Author: Marei Freitag and Anwai Archit
-"""
+"""Model factories and pretrained backbone utilities for training."""
 import os
 import pooch
 import warnings
