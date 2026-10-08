@@ -5,181 +5,10 @@ from typing import Optional, Tuple, Union
 import torch
 import torch_em
 from sklearn.model_selection import train_test_split
-from torch_em.model import AnisotropicUNet, UNet2d
 
 from synapse_net.inference.inference import get_model_path, get_available_models
-
-
-def get_3d_model(
-    out_channels: int,
-    in_channels: int = 1,
-    scale_factors: Tuple[Tuple[int, int, int]] = [[1, 2, 2], [2, 2, 2], [2, 2, 2], [2, 2, 2]],
-    initial_features: int = 32,
-    final_activation: str = "Sigmoid",
-) -> torch.nn.Module:
-    """Get the U-Net model for 3D segmentation tasks.
-
-    Args:
-        out_channels: The number of output channels of the network.
-        scale_factors: The downscaling factors for each level of the U-Net encoder.
-        initial_features: The number of features in the first level of the U-Net.
-            The number of features increases by a factor of two in each level.
-        final_activation: The activation applied to the last output layer.
-
-    Returns:
-        The U-Net.
-    """
-    model = AnisotropicUNet(
-        scale_factors=scale_factors,
-        in_channels=in_channels,
-        out_channels=out_channels,
-        initial_features=initial_features,
-        gain=2,
-        final_activation=final_activation,
-    )
-    return model
-
-
-def get_2d_model(
-    out_channels: int,
-    in_channels: int = 1,
-    initial_features: int = 32,
-    final_activation: str = "Sigmoid",
-) -> torch.nn.Module:
-    """Get the U-Net model for 2D segmentation tasks.
-
-    Args:
-        out_channels: The number of output channels of the network.
-        initial_features: The number of features in the first level of the U-Net.
-            The number of features increases by a factor of two in each level.
-        final_activation: The activation applied to the last output layer.
-
-    Returns:
-        The U-Net.
-    """
-    model = UNet2d(
-        in_channels=in_channels,
-        out_channels=out_channels,
-        initial_features=initial_features,
-        gain=2,
-        depth=4,
-        final_activation=final_activation,
-    )
-    return model
-
-
-def _adjust_patch_shape(data_shape, patch_shape):
-    # If data is 2D and patch_shape is 3D, drop the extra dimension in patch_shape
-    if data_shape == 2 and len(patch_shape) == 3:
-        return patch_shape[1:]  # Remove the leading dimension in patch_shape
-    return patch_shape  # Return the original patch_shape for 3D data
-
-
-def _determine_ndim(patch_shape):
-    # Check for 2D or 3D training
-    try:
-        z, y, x = patch_shape
-    except ValueError:
-        y, x = patch_shape
-        z = 1
-    is_2d = z == 1
-    ndim = 2 if is_2d else 3
-    return is_2d, ndim
-
-
-def get_supervised_loader(
-    data_paths: Tuple[str],
-    raw_key: str,
-    label_key: str,
-    patch_shape: Tuple[int, int, int],
-    batch_size: int,
-    n_samples: Optional[int],
-    add_boundary_transform: bool = True,
-    label_dtype=torch.float32,
-    rois: Optional[Tuple[Tuple[slice]]] = None,
-    sampler: Optional[Union[callable, bool]] = None,
-    ignore_label: Optional[int] = None,
-    label_transform: Optional[callable] = None,
-    label_paths: Optional[Tuple[str]] = None,
-    **loader_kwargs,
-) -> torch.utils.data.DataLoader:
-    """Get a dataloader for supervised segmentation training.
-
-    Args:
-        data_paths: The filepaths to the hdf5 files containing the training data.
-        raw_key: The key that holds the raw data inside of the hdf5.
-        label_key: The key that holds the labels inside of the hdf5.
-        patch_shape: The patch shape used for a training example.
-            In order to run 2d training pass a patch shape with a singleton in the z-axis,
-            e.g. 'patch_shape = [1, 512, 512]'.
-        batch_size: The batch size for training.
-        n_samples: The number of samples per epoch. By default this will be estimated
-            based on the patch_shape and size of the volumes used for training.
-        add_boundary_transform: Whether to add a boundary channel to the training data.
-        label_dtype: The datatype of the labels returned by the dataloader.
-        rois: Optional region of interests for training.
-        sampler: Optional sampler to accept or reject patches for training. 
-            By default a minimum instance sampler will be used, pass `False` to disable.
-        ignore_label: Ignore label in the ground-truth. The areas marked by this label will be
-            ignored in the loss computation. By default this option is not used.
-        label_transform: Label transform that is applied to the segmentation to compute the targets.
-            If no label transform is passed (the default) a boundary transform is used.
-        label_paths: Optional paths containing the labels / annotations for training.
-            If not given, the labels are expected to be contained in the `data_paths`.
-        loader_kwargs: Additional keyword arguments for the dataloader.
-
-    Returns:
-        The PyTorch dataloader.
-    """
-    _, ndim = _determine_ndim(patch_shape)
-    if label_transform is not None:  # A specific label transform was passed, do nothing.
-        pass
-    elif add_boundary_transform:
-        if ignore_label is None:
-            label_transform = torch_em.transform.BoundaryTransform(add_binary_target=True)
-        else:
-            label_transform = torch_em.transform.label.BoundaryTransformWithIgnoreLabel(
-                add_binary_target=True, ignore_label=ignore_label
-            )
-
-    else:
-        if ignore_label is not None:
-            raise NotImplementedError
-        label_transform = torch_em.transform.label.connected_components
-
-    if ndim == 2:
-        adjusted_patch_shape = _adjust_patch_shape(ndim, patch_shape)
-        transform = torch_em.transform.Compose(
-            torch_em.transform.PadIfNecessary(adjusted_patch_shape), torch_em.transform.get_augmentations(2)
-        )
-    else:
-        transform = torch_em.transform.Compose(
-            torch_em.transform.PadIfNecessary(patch_shape), torch_em.transform.get_augmentations(3)
-        )
-
-    num_workers = loader_kwargs.pop("num_workers", 4 * batch_size)
-    shuffle = loader_kwargs.pop("shuffle", True)
-
-    if sampler is None:
-        sampler = torch_em.data.sampler.MinInstanceSampler(min_num_instances=4)
-    elif sampler is False:
-        sampler = None
-
-    if label_paths is None:
-        label_paths = data_paths
-    elif len(label_paths) != len(data_paths):
-        raise ValueError(f"Data paths and label paths don't match: {len(data_paths)} != {len(label_paths)}")
-
-    loader = torch_em.default_segmentation_loader(
-        data_paths, raw_key,
-        label_paths, label_key, sampler=sampler,
-        batch_size=batch_size, patch_shape=patch_shape, ndim=ndim,
-        is_seg_dataset=True, label_transform=label_transform, transform=transform,
-        num_workers=num_workers, shuffle=shuffle, n_samples=n_samples,
-        label_dtype=label_dtype, rois=rois, **loader_kwargs,
-    )
-    return loader
-
+from synapse_net.training.models import get_2d_model, get_3d_model, get_unetr_model, get_raw_transform
+from synapse_net.training.dataloaders import get_supervised_loader, _determine_ndim
 
 def supervised_training(
     name: str,
@@ -206,6 +35,8 @@ def supervised_training(
     in_channels: int = 1,
     out_channels: int = 2,
     mask_channel: bool = False,
+    backbone: Optional[str] = None,
+    model_type: Optional[str] = None,
     checkpoint_path: Optional[str] = None,
     save_every_kth_epoch: Optional[int] = None,
     **loader_kwargs,
@@ -251,19 +82,31 @@ def supervised_training(
         out_channels: The number of output channels of the UNet.
         mask_channel: Whether the last channels in the labels should be used for masking the loss.
             This can be used to implement more complex masking operations and is not compatible with `ignore_label`.
+        backbone: The pretrained ViT encoder of a UNETR model. Options: "sam", "dinov2", or "dinov3".
+            Must be set together with `model_type`.
+        model_type: Model type for the selected `backbone` model family, for example "vit_b" or "vit_t".
+            Must be set together with `backbone`.
         checkpoint_path: Path to the directory where 'best.pt' resides; continue training this model.
         save_every_kth_epoch: Save checkpoints after every kth epoch in a separate file.
             The corresponding checkpoints will be saved with the naming scheme 'epoch-{epoch}.pt'.
         loader_kwargs: Additional keyword arguments for the dataloader.
     """
-    train_loader = get_supervised_loader(train_paths, raw_key, label_key, patch_shape, batch_size,
-                                         n_samples=n_samples_train, rois=train_rois, sampler=sampler,
-                                         ignore_label=ignore_label, label_transform=label_transform,
-                                         label_paths=train_label_paths, **loader_kwargs)
-    val_loader = get_supervised_loader(val_paths, raw_key, label_key, patch_shape, batch_size,
-                                       n_samples=n_samples_val, rois=val_rois, sampler=sampler,
-                                       ignore_label=ignore_label, label_transform=label_transform,
-                                       label_paths=val_label_paths, **loader_kwargs)
+    assert (backbone is None) == (model_type is None)
+
+    raw_transform = get_raw_transform(backbone)[0]
+
+    train_loader = get_supervised_loader(
+        train_paths, raw_key, label_key, patch_shape, batch_size,
+        n_samples=n_samples_train, rois=train_rois, sampler=sampler, ignore_label=ignore_label,
+        label_transform=label_transform, label_paths=train_label_paths, raw_transform=raw_transform,
+        **loader_kwargs,
+    )
+    val_loader = get_supervised_loader(
+        val_paths, raw_key, label_key, patch_shape, batch_size,
+        n_samples=n_samples_val, rois=val_rois, sampler=sampler, ignore_label=ignore_label,
+        label_transform=label_transform, label_paths=val_label_paths, raw_transform=raw_transform,
+        **loader_kwargs,
+    )
 
     if check:
         from torch_em.util.debug import check_loader
@@ -272,12 +115,25 @@ def supervised_training(
         return
 
     is_2d, _ = _determine_ndim(patch_shape)
-    if checkpoint_path is not None:
-        model = torch_em.util.load_model(checkpoint=checkpoint_path)
-    elif is_2d:
-        model = get_2d_model(out_channels=out_channels, in_channels=in_channels)
+    
+    if backbone is not None:
+        assert in_channels == 1
+
+        if checkpoint_path is not None:
+            model = torch_em.util.load_model(checkpoint=checkpoint_path)
+        else:
+            model = get_unetr_model(
+                ndim=2 if is_2d else 3,
+                backbone=backbone, model_type=model_type,
+                out_channels=out_channels
+            )
     else:
-        model = get_3d_model(out_channels=out_channels, in_channels=in_channels)
+        if checkpoint_path is not None:
+            model = torch_em.util.load_model(checkpoint=checkpoint_path)
+        elif is_2d:
+            model = get_2d_model(out_channels=out_channels, in_channels=in_channels)
+        else:
+            model = get_3d_model(out_channels=out_channels, in_channels=in_channels)
 
     base_loss = loss_fn if loss_fn is not None else torch_em.loss.DiceLoss()
     metric = base_loss

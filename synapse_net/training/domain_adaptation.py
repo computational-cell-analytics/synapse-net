@@ -11,17 +11,16 @@ import torch_em.self_training as self_training
 from elf.io import open_file
 from sklearn.model_selection import train_test_split
 
-from .semisupervised_training import get_unsupervised_loader
-from .supervised_training import (
-    get_2d_model, get_3d_model, get_supervised_loader, _determine_ndim, _derive_key_from_files
-)
+from .dataloaders import get_supervised_loader, get_unsupervised_loader, _determine_ndim
+from .models import get_2d_model, get_3d_model, get_unetr_model, get_raw_transform
+from .supervised_training import _derive_key_from_files
 from ..inference.inference import get_model_path, compute_scale_from_voxel_size, get_available_models
 from ..inference.util import _Scaler
 
 # configure weak augmentations
 from torch_em.transform.invertible_augmentations import DEFAULT_WEAK_AUGMENTATIONS
 
-# TODO - test settings - fixed kernel size for `RandomGaussianBlur`, fixed std for `RandomGaussianBlur`
+# fixed kernel size for `RandomGaussianBlur`, fixed std for `RandomGaussianBlur`
 DEFAULT_WEAK_AUGMENTATIONS["intensity"] = {
     "RandomGaussianBlur": {"kernel_size": (19, 19), "sigma": (0.1, 3.0)},
     "RandomGaussianNoise": {"mean": (0.0), "std": (0.1)},
@@ -50,6 +49,9 @@ def mean_teacher_adaptation(
     sample_mask_key: Optional[str] = None,
     unsupervised_sampler: Optional[callable] = None,
     supervised_sampler: Optional[callable] = None,
+    backbone: Optional[str] = None,
+    model_type: Optional[str] = None,
+    separate_backward: bool = False,
     check: bool = False,
 ) -> None:
     """Run domain adaptation to transfer a network trained on a source domain for a supervised
@@ -101,28 +103,51 @@ def mean_teacher_adaptation(
         unsupervised_sampler: Sampler to accept or reject patches for the unsupervised data stream.
         supervised_sampler: Sampler to accept or reject patches for the supervised data stream.
             Pass `False` to disable.
+        backbone: The pretrained ViT encoder of a UNETR model. Options: "sam", "dinov2", or "dinov3".
+            Must be set together with `model_type`.
+        model_type: Model type for the selected `backbone` model family, for example "vit_b" or "vit_t".
+            Must be set together with `backbone`.
+        separate_backward: Whether to backpropagate each loss term separately to reduce peak memory.
         check: Whether to check the training and validation loaders instead of running training.
-    """  # noqa
+    """
     assert (supervised_train_paths is None) == (supervised_val_paths is None)
+    assert (backbone is None) == (model_type is None)
     is_2d, _ = _determine_ndim(patch_shape)
 
-    if source_checkpoint is None:
-        # training from scratch only makes sense if we have supervised training data
-        # that's why we have the assertion here.
-        assert supervised_train_paths is not None
-        print("Mean teacher training from scratch (AdaMT)")
+    # for now supported backbones are UNETR
+    if backbone is not None: 
+        model = get_unetr_model(
+            ndim=2 if is_2d else 3,
+            backbone=backbone, 
+            model_type=model_type,
+            out_channels=2,
+        )
+        if source_checkpoint is not None:
+            print("Load UNETR model from checkpoint:", source_checkpoint)
+            model = torch_em.util.load_model(checkpoint=source_checkpoint, model=model)
+
+        reinit_teacher = False
+
+    # load or initialize UNET if not using UNETR backbones
+    else:
         if is_2d:
             model = get_2d_model(out_channels=2)
         else:
             model = get_3d_model(out_channels=2)
-        reinit_teacher = True
-    else:
-        print("Mean teacher training initialized from source model:", source_checkpoint)
-        if os.path.isdir(source_checkpoint):
-            model = torch_em.util.load_model(source_checkpoint)
+
+        if source_checkpoint is not None:
+            print("Load UNET model from checkpoint:", source_checkpoint)
+            if os.path.isdir(source_checkpoint):
+                model = torch_em.util.load_model(source_checkpoint)
+            else:
+                model = torch.load(source_checkpoint, weights_only=False)
+            reinit_teacher = False
         else:
-            model = torch.load(source_checkpoint, weights_only=False)
-        reinit_teacher = False
+            # training from scratch only makes sense if we have supervised training data
+            # that's why we have the assertion here.
+            assert supervised_train_paths is not None
+            print("Mean teacher training from scratch (AdaMT)")
+            reinit_teacher = True
 
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=5)
@@ -132,8 +157,10 @@ def mean_teacher_adaptation(
     loss = self_training.SelfTrainingLossWithInvertibleAugmentations()
     loss_and_metric = self_training.SelfTrainingLossAndMetricWithInvertibleAugmentations()
 
+    raw_transform, clip_max = get_raw_transform(backbone)
+
     ndim = 2 if is_2d else 3
-    augmenters = torch_em.transform.invertible_augmentations.MeanTeacherAugmenters(ndim=ndim)
+    augmenters = torch_em.transform.invertible_augmentations.MeanTeacherAugmenters(ndim=ndim, clip_max=clip_max)
 
     unsupervised_train_loader = get_unsupervised_loader(
         data_paths=unsupervised_train_paths,
@@ -144,6 +171,7 @@ def mean_teacher_adaptation(
         sample_mask_paths=train_mask_paths,
         sample_mask_key=sample_mask_key,
         sampler=unsupervised_sampler,
+        raw_transform=raw_transform,
     )
     unsupervised_val_loader = get_unsupervised_loader(
         data_paths=unsupervised_val_paths,
@@ -154,6 +182,7 @@ def mean_teacher_adaptation(
         sample_mask_paths=val_mask_paths,
         sample_mask_key=sample_mask_key,
         sampler=unsupervised_sampler,
+        raw_transform=raw_transform,
     )
 
     if supervised_train_paths is not None:
@@ -161,12 +190,12 @@ def mean_teacher_adaptation(
         supervised_train_loader = get_supervised_loader(
             supervised_train_paths, raw_key_supervised, label_key,
             patch_shape, batch_size, n_samples=n_samples_train,
-            sampler=supervised_sampler,
+            sampler=supervised_sampler, raw_transform=raw_transform,
         )
         supervised_val_loader = get_supervised_loader(
             supervised_val_paths, raw_key_supervised, label_key,
             patch_shape, batch_size, n_samples=n_samples_val,
-            sampler=supervised_sampler,
+            sampler=supervised_sampler, raw_transform=raw_transform,
         )
     else:
         supervised_train_loader = None
@@ -204,6 +233,7 @@ def mean_teacher_adaptation(
         reinit_teacher=reinit_teacher,
         save_root=save_root,
         augmenter=augmenters,
+        separate_backward=separate_backward,
     )
     trainer.fit(n_iterations)
 
