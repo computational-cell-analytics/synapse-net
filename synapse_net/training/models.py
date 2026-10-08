@@ -280,7 +280,7 @@ def _init_microsam_decoder(model, backbone, model_type, out_channels):
         return model
 
     # Load the pretrained decoder weights.
-    decoder_state = torch.load(decoder_path, map_location="cpu")
+    decoder_state = torch.load(decoder_path, map_location="cpu", weights_only=True)
 
     # Super hacky way of initializing decoder weights - please don't try this at home.
     unetr_state_dict = model.state_dict()
