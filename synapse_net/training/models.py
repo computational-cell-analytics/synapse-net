@@ -15,6 +15,12 @@ from torch_em.model.unetr import UNETR2D, UNETR3D
 from torch_em.model import UNet2d, AnisotropicUNet
 from torch_em.transform.raw import normalize_percentile
 
+try:
+    from micro_sam.util import models as microsam_models
+except ImportError:
+    microsam_models = None
+
+
 def get_unetr_model(
     ndim: int,
     backbone: Literal["sam", "sam2", "dinov2", "dinov3"],
@@ -38,7 +44,7 @@ def get_unetr_model(
     """
     if backbone not in ("sam", "sam2", "dinov2", "dinov3"):
         raise ValueError(f"Unsupported backbone '{backbone}'.")
-    
+
     # Get the model class.
     if ndim == 2:
         model_class = UNETR2D
@@ -69,6 +75,7 @@ def get_unetr_model(
         model = _init_microsam_decoder(model, backbone, model_type, out_channels)
 
     return model
+
 
 def get_3d_model(
     out_channels: int,
@@ -127,6 +134,7 @@ def get_2d_model(
     )
     return model
 
+
 def _normalize_percentile_to_0_1(raw):
     raw = normalize_percentile(raw)
     return torch.clamp(raw, 0, 1) if torch.is_tensor(raw) else np.clip(raw, 0, 1)
@@ -161,8 +169,8 @@ def get_raw_transform(backbone):
         raw_transform, clip_max = None, None
 
     else:
-        raise ValueError(f"Unsupported backbone '{backbone}'")
-    
+        raise ValueError(f"Unsupported backbone '{backbone}'.")
+
     return (raw_transform, clip_max)
 
 
@@ -282,8 +290,18 @@ def _get_microsam2_checkpoint(model_type: str, cache_dir=None):
 def _get_checkpoint(backbone, model_type, return_decoder_path=False):
 
     if backbone == "sam":
-        from micro_sam.util import _download_sam_model
-        checkpoint_path, _, decoder_path = _download_sam_model(model_type)
+        if microsam_models is None:
+            raise RuntimeError(
+                "The 'sam' backbone requires micro_sam. Install it with 'conda install -c conda-forge micro_sam'."
+                )
+        model_registry = microsam_models()
+        checkpoint_path = model_registry.fetch(model_type, progressbar=True)
+
+        if return_decoder_path:
+            decoder_name = f"{model_type}_decoder"
+            decoder_path = model_registry.fetch(
+                decoder_name, progressbar=True
+            ) if decoder_name in model_registry.registry else None
 
     elif backbone == "sam2":
         if model_type == 'hvit_t_em_organelles':  # Not yet in the zoo
@@ -291,18 +309,17 @@ def _get_checkpoint(backbone, model_type, return_decoder_path=False):
         else:
             from micro_sam.v2.util import _get_checkpoint as _get_sam2_checkpoint
             checkpoint_path = _get_sam2_checkpoint(model_type)
+            decoder_path = None
 
     elif backbone == "dinov2":
         checkpoint_path = _get_dinov2_checkpoint(model_type)
+        decoder_path = None
 
     elif backbone == "dinov3":
         checkpoint_path = _get_dinov3_checkpoint(model_type)
-    # elif backbone == "sam3":
-    #     assert model_type == "vit_pe"
-    #     import micro_sam3
-    #     checkpoint_path = micro_sam3.util._get_checkpoint()
+        decoder_path = None
     else:
-        raise ValueError()
+        raise ValueError(f"Unsupported backbone '{backbone}'.")
 
     if return_decoder_path:
         return checkpoint_path, decoder_path
