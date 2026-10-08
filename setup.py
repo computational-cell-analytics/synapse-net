@@ -14,7 +14,7 @@ setup(
     install_requires=[
         "bioimage-cpp",
         "python-elf>=0.9.0",
-        "torch_em>=0.9.0",
+        "torch_em>=0.10.8",
         "numpy",
         "scipy",
         "scikit-image",
