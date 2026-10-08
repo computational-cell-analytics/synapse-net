@@ -2,7 +2,6 @@ from typing import Optional, Tuple, Union
 
 import torch
 import torch_em
-from torchvision import transforms
 from torch_em.data import RawDatasetWithMasks
 
 
@@ -24,27 +23,6 @@ def _determine_ndim(patch_shape):
     ndim = 2 if is_2d else 3
     return is_2d, ndim
 
-def weak_augmentations(p: float = 0.75) -> callable:
-    """The weak augmentations used in the unsupervised data loader.
-
-    This function is deprecated, since `MeanTeacherWithInvertibleAugmentations`
-    now handles intenstiy as well as geometric augmentations.
-
-    Args:
-        p: The probability for applying one of the augmentations.
-
-    Returns:
-        The transformation function applying the augmentation.
-    """
-    norm = torch_em.transform.raw.standardize
-    aug = transforms.Compose([
-        norm,
-        transforms.RandomApply([torch_em.transform.raw.GaussianBlur()], p=p),
-        transforms.RandomApply([torch_em.transform.raw.AdditiveGaussianNoise(
-            scale=(0, 0.15), clip_kwargs=False)], p=p
-        ),
-    ])
-    return torch_em.transform.raw.get_raw_transform(normalizer=norm, augmentation1=aug)
 
 def get_supervised_loader(
     data_paths: Tuple[str],
@@ -195,7 +173,6 @@ def get_unsupervised_loader(
     if raw_transform is None:
         raw_transform = torch_em.transform.get_raw_transform()
     transform = torch_em.transform.get_augmentations(ndim=ndim)
-    # augmentations = (weak_augmentations(), weak_augmentations())
 
     if n_samples is None:
         n_samples_per_ds = None
