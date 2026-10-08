@@ -30,6 +30,7 @@ def supervised_training(
     n_samples_val: Optional[int] = None,
     check: bool = False,
     ignore_label: Optional[int] = None,
+    raw_transform: Optional[callable] = None,
     label_transform: Optional[callable] = None,
     loss_fn: Optional[torch.nn.Module] = None,
     in_channels: int = 1,
@@ -76,6 +77,8 @@ def supervised_training(
         check: Whether to check the training and validation loaders instead of running training.
         ignore_label: Ignore label in the ground-truth. The areas marked by this label will be
             ignored in the loss computation. By default this option is not used.
+        raw_transform: Normalization applied to the raw data. By default the transform for `backbone` is used.
+            When `backbone` is None, torch_em standardization is used.
         label_transform: Label transform that is applied to the segmentation to compute the targets.
             If no label transform is passed (the default) a boundary transform is used.
         loss_fn: Custom loss function. If None, will default to `torch_em.loss.DiceLoss`.
@@ -94,7 +97,8 @@ def supervised_training(
     """
     assert (backbone is None) == (model_type is None)
 
-    raw_transform = get_raw_transform(backbone)[0]
+    if raw_transform is None:
+        raw_transform = get_raw_transform(backbone)[0]
 
     train_loader = get_supervised_loader(
         train_paths, raw_key, label_key, patch_shape, batch_size,

@@ -66,7 +66,6 @@ def get_unetr_model(
         use_sam_stats="sam" in backbone,
         use_dino_stats="dino" in backbone,
     )
-    _get_checkpoint(backbone, model_type, return_decoder_path=False)
 
     if init_decoder and ndim == 2:
         model = _init_microsam_decoder(model, backbone, model_type, out_channels)
