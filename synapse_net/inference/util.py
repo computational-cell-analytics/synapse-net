@@ -147,6 +147,9 @@ def get_prediction(
             If not given, the prediction will be computed in moemory.
         devices: The devices for running prediction. If not given will use the GPU
             if available, otherwise the CPU.
+        preprocess: The function used to normalize the input. It should match the `raw_transform`
+            used during training. By default, torch_em standardization is used.
+            Applied to the whole volume if the input is np.ndarray, otherwise applied per block.
 
     Returns:
         The predicted volume.
@@ -167,7 +170,11 @@ def get_prediction(
     # Otherwise we have a zarr array or similar as input, and can't normalize it en-block.
     # Normalization will be applied later per block in this case.
     if isinstance(input_volume, np.ndarray):
-        input_volume = _preprocess(input_volume, with_channels, channels_to_standardize)
+        if preprocess is None:
+            input_volume = _preprocess(input_volume, with_channels, channels_to_standardize)
+        else:
+            input_volume = preprocess(input_volume.astype(np.float32))
+            preprocess = None
 
     # Run prediction with the bioimage.io library.
     if is_bioimageio:
@@ -226,6 +233,9 @@ def get_prediction_torch_em(
             If not given, the prediction will be computed in moemory.
         devices: The devices for running prediction. If not given will use the GPU
             if available, otherwise the CPU.
+        preprocess: The function used to normalize the input. It should match the `raw_transform`
+            used during training. By default, torch_em standardization is used.
+            Applied to the whole volume if the input is np.ndarray, otherwise applied per block.
 
     Returns:
         The predicted volume.
