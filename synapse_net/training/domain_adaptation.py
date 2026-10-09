@@ -4,12 +4,15 @@ from glob import glob
 from pathlib import Path
 from typing import Optional, Tuple
 
+from sklearn.model_selection import train_test_split
+
 import mrcfile
 import torch
 import torch_em
 import torch_em.self_training as self_training
 from elf.io import open_file
-from sklearn.model_selection import train_test_split
+
+from torch_em.transform.invertible_augmentations import MeanTeacherAugmenters, DEFAULT_WEAK_AUGMENTATIONS
 
 from .dataloaders import get_supervised_loader, get_unsupervised_loader, _determine_ndim
 from .models import get_2d_model, get_3d_model, get_unetr_model, get_raw_transform
@@ -17,14 +20,6 @@ from .supervised_training import _derive_key_from_files
 from ..inference.inference import get_model_path, compute_scale_from_voxel_size, get_available_models
 from ..inference.util import _Scaler
 
-# configure weak augmentations
-from torch_em.transform.invertible_augmentations import DEFAULT_WEAK_AUGMENTATIONS
-
-# fixed kernel size for `RandomGaussianBlur`, fixed std for `RandomGaussianBlur`
-DEFAULT_WEAK_AUGMENTATIONS["intensity"] = {
-    "RandomGaussianBlur": {"kernel_size": (19, 19), "sigma": (0.1, 3.0)},
-    "RandomGaussianNoise": {"mean": (0.0), "std": (0.1)},
-}    
 
 def mean_teacher_adaptation(
     name: str,
@@ -51,6 +46,7 @@ def mean_teacher_adaptation(
     supervised_sampler: Optional[callable] = None,
     backbone: Optional[str] = None,
     model_type: Optional[str] = None,
+    aug_dict: Optional[dict] = None,
     separate_backward: bool = False,
     check: bool = False,
 ) -> None:
@@ -62,10 +58,10 @@ def mean_teacher_adaptation(
      'supervised_val_paths' are not given.
     - semi-supervised domain adaptation: domain adaptation on unlabeled and labeled data,
       when 'supervised_train_paths' and 'supervised_val_paths' are given.
-    
+
     Args:
         name: The name for the checkpoint to be trained.
-        unsupervsied_train_paths: Filepaths to the hdf5 files or similar file formats
+        unsupervised_train_paths: Filepaths to the hdf5 files or similar file formats
             for the training data in the target domain.
             This training data is used for unsupervised learning, so it does not require labels.
         unsupervised_val_paths: Filepaths to the hdf5 files or similar file formats
@@ -81,13 +77,14 @@ def mean_teacher_adaptation(
             from scratch. In this case `supervised_train_paths` and `supervised_val_paths` have to
             be given in order to provide training data from the source domain.
         supervised_train_paths: Filepaths to the hdf5 files for the training data in the source domain.
-            This training data is optional. If given, it is used for unsupervised learnig and requires labels.
-        supervised_val_paths: Filepaths to the df5 files for the validation data in the source domain.
-            This validation data is optional. If given, it is used for unsupervised learnig and requires labels.
+            This training data is optional. If given, it is used for supervised learning and requires labels.
+        supervised_val_paths: Filepaths to the hdf5 files for the validation data in the source domain.
+            This validation data is optional. If given, it is used for supervised learning and requires labels.
         confidence_threshold: The threshold for filtering data in the unsupervised loss.
             The label filtering is done based on the uncertainty of network predictions, and only
             the data with higher certainty than this threshold is used for training.
         raw_key: The key that holds the raw data inside of the hdf5 or similar files.
+        raw_key_supervised: The key that holds the raw data inside of the hdf5 files for supervised learning.
         label_key: The key that holds the labels inside of the hdf5 files for supervised learning.
             This is only required if `supervised_train_paths` and `supervised_val_paths` are given.
         batch_size: The batch size for training.
@@ -105,9 +102,11 @@ def mean_teacher_adaptation(
             Pass `False` to disable.
         backbone: The pretrained ViT encoder of a UNETR model. Options: "sam", "dinov2", or "dinov3".
             Must be set together with `model_type`.
-        model_type: Model type for the selected `backbone` model family,
-            for example "vit_b" or "vit_b_em_organelles" for "sam".
-            Must be set together with `backbone`.
+        model_type: Model type for the selected `backbone` model family, for example "vit_b" or
+            "vit_b_em_organelles" for "sam". Must be set together with `backbone`.
+        aug_dict: The augmentations for the teacher and the student, with keys "intensity" and "geometrical".
+            Defaults to Gaussian blur and noise, plus random flips and 90-degree rotations.
+            The noise is scaled with `clip_max` to match the range of `raw_transform`.
         separate_backward: Whether to backpropagate each loss term separately to reduce peak memory.
         check: Whether to check the training and validation loaders instead of running training.
     """
@@ -150,7 +149,15 @@ def mean_teacher_adaptation(
     raw_transform, clip_max = get_raw_transform(backbone)
 
     ndim = 2 if is_2d else 3
-    augmenters = torch_em.transform.invertible_augmentations.MeanTeacherAugmenters(ndim=ndim, clip_max=clip_max)
+    if aug_dict is None:
+        aug_dict = {
+            "intensity": {
+                "RandomGaussianBlur": {"kernel_size": (19, 19), "sigma": (0.1, 3.0)},
+                "RandomGaussianNoise": {"mean": 0.0, "std": 0.1 if clip_max is None else 0.015 * clip_max},
+            },
+            "geometrical": DEFAULT_WEAK_AUGMENTATIONS["geometrical"],
+        }
+    augmenters = MeanTeacherAugmenters(ndim=ndim, clip_max=clip_max, aug_dict=aug_dict)
 
     unsupervised_train_loader = get_unsupervised_loader(
         data_paths=unsupervised_train_paths,
