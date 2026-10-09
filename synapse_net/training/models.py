@@ -128,13 +128,15 @@ def get_2d_model(
     return model
 
 
-def _normalize_percentile_to_0_1(raw):
+def normalize_percentile_to_0_1(raw):
+    """Normalize the raw data with percentiles to [0, 1]."""
     raw = normalize_percentile(raw)
     return torch.clamp(raw, 0, 1) if torch.is_tensor(raw) else np.clip(raw, 0, 1)
 
 
-def _normalize_percentile_to_0_255(raw):
-    return _normalize_percentile_to_0_1(raw) * 255.0
+def normalize_percentile_to_0_255(raw):
+    """Normalize the raw data with percentiles to [0, 255]."""
+    return normalize_percentile_to_0_1(raw) * 255.0
 
 
 def get_raw_transform(backbone):
@@ -151,11 +153,11 @@ def get_raw_transform(backbone):
             [0, clip_max], so that the input stays expected range. None if `backbone` is None.
     """
     if backbone == "sam":
-        raw_transform = _normalize_percentile_to_0_255
+        raw_transform = normalize_percentile_to_0_255
         clip_max = 255
 
     elif backbone in ("dinov2", "dinov3"):
-        raw_transform = _normalize_percentile_to_0_1
+        raw_transform = normalize_percentile_to_0_1
         clip_max = 1
 
     elif backbone is None:
