@@ -7,7 +7,7 @@ import napari
 import numpy as np
 import torch
 
-from napari.utils.notifications import show_info
+from napari.utils.notifications import show_info, show_warning
 from qtpy.QtWidgets import QCheckBox, QComboBox, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from .base_widget import BaseWidget
@@ -29,19 +29,15 @@ from ..inference.vesicles import VESICLE_SEGMENTATION_MODES, segment_vesicles
 
 
 _MAX_MIN_SIZE = 100_000_000
-# Training voxel size (nm, isotropic) of the LDCV v4 checkpoint, from the mrc headers of its
-# training data (49.2 A). Used as the default for custom models.
-_DEFAULT_CUSTOM_MODEL_VOXEL_SIZE = 4.92
 _POSTPROCESSING_PARAMETER_SPECS = {
     segment_vesicles: {
         "min_size": {"type": "int", "min": 0, "max": _MAX_MIN_SIZE, "step": 1},
         "mode": {"type": "choice", "options": list(VESICLE_SEGMENTATION_MODES)},
         "threshold": {"type": "float", "min": 0.0, "max": 1.0, "step": 0.01, "decimals": 2},
-        "split_ldcvs": {
-            "type": "bool", "title": "split LDCVs", "requires_3d": True,
-            "tooltip": "Split touching dense-core vesicles that were segmented as one instance. "
-                       "The cut follows the 3D neck between them, so it curves around each vesicle "
-                       "instead of slicing straight through z. Requires a 3D volume.",
+        "ldcv_postprocessing": {
+            "type": "bool", "title": "LDCV postprocessing", "model_types": ("vesicles_3d",),
+            "tooltip": "Post-processing for large dense-core vesicles: splits touching vesicles that were "
+                       "segmented as one instance, along the neck of their 2D footprint.",
         },
     },
     segment_mitochondria: {
@@ -210,7 +206,7 @@ class SegmentationWidget(BaseWidget):
         function_parameters = inspect.signature(segmentation_function).parameters
 
         for name, spec in parameter_specs.items():
-            if spec.get("requires_3d") and "2d" in model_type:
+            if "model_types" in spec and model_type not in spec["model_types"]:
                 continue
             if name not in function_parameters or function_parameters[name].default is inspect.Parameter.empty:
                 raise ValueError(
@@ -303,15 +299,29 @@ class SegmentationWidget(BaseWidget):
         with self._computing(
             self.predict_button, "Computing…", "Run Segmentation", "INFO: Running segmentation…"
         ):
+            # Get the voxel size.
+            metadata = self._get_layer_selector_data(self.image_selector_name, return_metadata=True)
+            voxel_size = self._handle_resolution(metadata, self.voxel_size_param, image.ndim, return_as_list=False)
+
+            # Custom models are not in the training-resolution table, so rescaling them by the voxel size
+            # needs the training voxel size from the user.
+            rescale_input = bool(voxel_size)
+            training_voxel_size = None
+            if custom_model_path and voxel_size:
+                custom_model_voxel_size = self.custom_model_voxel_size_param.value()
+                if custom_model_voxel_size > 0.0:
+                    training_voxel_size = {ax: custom_model_voxel_size for ax in voxel_size}
+                else:  # Without it no scale can be computed, so custom models run unscaled as before.
+                    show_warning(
+                        "WARNING: A voxel size is set (entered or from the image metadata), but no custom model "
+                        "voxel size is given, so the image is not rescaled. Enter the custom model voxel size "
+                        "if you want the image to be rescaled to the model's training voxel size."
+                    )
+                    rescale_input = False
+
             # Load the model. Override if user chose custom model.
-            rescale_input = True
-            custom_training_voxel_size = None
             if custom_model_path:
                 model = _load_custom_model(custom_model_path, device)
-                # Custom models are not in the training-resolution table, so the user supplies it.
-                # A value of 0 means "don't rescale".
-                custom_training_voxel_size = self.custom_model_voxel_size_param.value()
-                rescale_input = custom_training_voxel_size > 0.0
                 if model:
                     show_info(f"INFO: Using custom model from path: {custom_model_path}")
                 else:
@@ -323,16 +333,10 @@ class SegmentationWidget(BaseWidget):
             # Get the current tiling.
             self.tiling = _get_current_tiling(self.tiling, self.default_tiling, model_type)
 
-            # Get the voxel size.
-            metadata = self._get_layer_selector_data(self.image_selector_name, return_metadata=True)
-            voxel_size = self._handle_resolution(metadata, self.voxel_size_param, image.ndim, return_as_list=False)
-
             # Determine the scaling based on the voxel size.
             scale = None
-            if voxel_size and rescale_input:
+            if rescale_input:
                 # Calculate scale so voxel_size is the same as in training.
-                training_voxel_size = None if custom_training_voxel_size is None else \
-                    {ax: custom_training_voxel_size for ax in voxel_size}
                 scale = compute_scale_from_voxel_size(voxel_size, model_type, training_voxel_size)
                 target = training_voxel_size or get_model_training_resolution(model_type)
                 scale_info = [round(float(sc), 2) for sc in scale]
@@ -417,13 +421,13 @@ class SegmentationWidget(BaseWidget):
 
         # Training voxel size of the custom model, which cannot be looked up from the model name.
         self.custom_model_voxel_size_param, layout = self._add_float_param(
-            "custom_model_voxel_size", _DEFAULT_CUSTOM_MODEL_VOXEL_SIZE,
+            "custom_model_voxel_size", 0.0,
             title="custom model voxel size", min_val=0.0, max_val=100.0,
             tooltip="Voxel size (nm) the custom model was trained on; only used together with "
-                    "'Load Custom Model'. The image is rescaled by voxel_size / this value, so the "
-                    "model sees the data at its training resolution. The default is the LDCV v4 "
-                    "value. Set to 0 to disable rescaling. Note that min_size is measured in voxels "
-                    "of the rescaled volume, so it needs adjusting when the scale changes.",
+                    "'Load Custom Model'. If it and a voxel size are given, the image is rescaled by "
+                    "voxel_size / this value so the model sees the data at its training resolution; "
+                    "with 0 the image is not rescaled. Note that min_size is measured in voxels of the "
+                    "rescaled volume.",
         )
         setting_values.layout().addLayout(layout)
 

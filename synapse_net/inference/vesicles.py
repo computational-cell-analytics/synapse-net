@@ -171,12 +171,12 @@ def segment_vesicles(
     verbose: bool = True,
     mode: str = "distance-watershed",
     threshold: float = 0.5,
-    split_ldcvs: bool = False,
     return_predictions: bool = False,
     scale: Optional[List[float]] = None,
     exclude_boundary: bool = False,
     exclude_boundary_vesicles: bool = False,
     mask: Optional[np.ndarray] = None,
+    ldcv_postprocessing: bool = False,
 ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
     """Segment vesicles in an input volume or image.
 
@@ -193,8 +193,6 @@ def segment_vesicles(
         threshold: The threshold for the mode-defining post-processing step. It is applied to the
             boundary predictions for ``distance-watershed``, foreground minus boundary predictions
             for ``simple-watershed``, and foreground predictions for ``label``.
-        split_ldcvs: Whether to split touching dense-core vesicles that were segmented as one
-            instance. The cut follows the 3D neck between them, see `split_touching_vesicles`.
         return_predictions: Whether to return the predictions (foreground, boundaries) alongside the segmentation.
         scale: The scale factor to use for rescaling the input volume before prediction.
         exclude_boundary: Whether to exclude vesicles that touch the upper / lower border in z.
@@ -203,6 +201,8 @@ def segment_vesicles(
             out less vesicles at the boundary and is better suited for volumes with small context in z.
             If `exclude_boundary` is also set to True, then this option will have no effect.
         mask: An optional mask that is used to restrict the segmentation.
+        ldcv_postprocessing: Whether to apply the post-processing for large dense-core vesicles (LDCVs):
+            touching vesicles that were segmented as one instance are split, see `split_touching_vesicles`.
 
     Returns:
         The segmentation mask as a numpy array, or a tuple containing the segmentation mask
@@ -248,9 +248,9 @@ def segment_vesicles(
             foreground, verbose=verbose, min_size=min_size, threshold=threshold, **label_kwargs
         )
 
-    if split_ldcvs:
+    if ldcv_postprocessing:
         if seg.ndim != 3:
-            raise ValueError("Splitting touching vesicles requires a 3D segmentation.")
+            raise ValueError("LDCV post-processing requires a 3D segmentation.")
         seg = split_touching_vesicles(seg, verbose=verbose)
         # The split can leave fragments below min_size, which min_size promises to remove.
         seg = apply_size_filter(seg, min_size, verbose)
