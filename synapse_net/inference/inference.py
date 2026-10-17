@@ -11,7 +11,7 @@ from .mitochondria import segment_mitochondria
 from .ribbon_synapse import segment_ribbon_synapse_structures
 from .vesicles import segment_vesicles
 from .cristae import segment_cristae
-from .util import get_device
+from .util import _restore_legacy_attributes, get_device
 from ..file_utils import get_cache_dir
 
 
@@ -107,7 +107,7 @@ def get_model(model_type: str, device: Optional[Union[str, torch.device]] = None
     if device is None:
         device = get_device(device)
     model_path = get_model_path(model_type)
-    model = torch.load(model_path, weights_only=False)
+    model = _restore_legacy_attributes(torch.load(model_path, weights_only=False))
     model.to(device)
     return model
 
