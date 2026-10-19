@@ -11,7 +11,7 @@ from torch_em.model import UNet2d, AnisotropicUNet
 from torch_em.transform.raw import normalize_percentile, get_raw_transform_for_pretrained_vit
 
 try:
-    from micro_sam.util import models as microsam_models
+    from micro_sam.v1.util import models as microsam_models
 except ImportError:
     microsam_models = None
 
