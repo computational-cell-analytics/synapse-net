@@ -75,6 +75,10 @@ def get_2d_model(
     return model
 
 
+def normalize_percentile_to_0_1_inverted(raw):
+    """Normalize the raw data with percentiles to [0, 1] and invert the contrast."""
+    raw = 1 - normalize_percentile(raw)
+    return torch.clamp(raw, 0, 1) if torch.is_tensor(raw) else np.clip(raw, 0, 1)
 
 
 def get_raw_transform(backbone):
@@ -83,15 +87,18 @@ def get_raw_transform(backbone):
     The ViT backbones are handled by `torch_em.model.unetr.get_vit_raw_transform`.
 
     Args:
-        backbone: The pretrained encoder. Options: "sam", "dinov2", "dinov3", or None.
+        backbone: The pretrained encoder. Options: "sam", "dinov2", "dinov3", "cryosiam", or None.
 
     Returns:
         The raw transform. It normalizes the raw data with percentiles to [0, 255] for "sam",
-            and to [0, 1] for "dinov2" and "dinov3". None if `backbone` is None,
-            so the loaders use the default torch-em standardization.
+            and to [0, 1] for "dinov2" and "dinov3". For "cryosiam" it also inverts the contrast.
+            None if `backbone` is None, so the loaders use the default torch-em standardization.
         The maximum input value `clip_max`. The intensity augmentations clip their output to
             [0, clip_max], so that the input stays in the expected range. None if `backbone` is None.
     """
+    if backbone == "cryosiam":
+        return normalize_percentile_to_0_1_inverted, 1
+    
     if backbone not in ("sam", "dinov2", "dinov3", None):
         raise ValueError(f"Unsupported backbone '{backbone}'.")
     return get_vit_raw_transform(backbone)
