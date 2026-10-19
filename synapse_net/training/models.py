@@ -8,8 +8,7 @@ import numpy as np
 import torch
 
 from torch_em.model import UNet2d, AnisotropicUNet
-from torch_em.model.unetr import get_vit_raw_transform
-from torch_em.transform.raw import normalize_percentile
+from torch_em.transform.raw import normalize_percentile, get_raw_transform_for_pretrained_vit
 
 try:
     from micro_sam.util import models as microsam_models
@@ -84,7 +83,7 @@ def normalize_percentile_to_0_1_inverted(raw):
 def get_raw_transform(backbone):
     """Get the raw transform and the maximum input value for a pretrained backbone.
 
-    The ViT backbones are handled by `torch_em.model.unetr.get_vit_raw_transform`.
+    The ViT backbones are handled by `torch_em.transform.raw.get_raw_transform_for_pretrained_vit`.
 
     Args:
         backbone: The pretrained encoder. Options: "sam", "dinov2", "dinov3", "cryosiam", or None.
@@ -98,10 +97,10 @@ def get_raw_transform(backbone):
     """
     if backbone == "cryosiam":
         return normalize_percentile_to_0_1_inverted, 1
-    
+     
     if backbone not in ("sam", "dinov2", "dinov3", None):
         raise ValueError(f"Unsupported backbone '{backbone}'.")
-    return get_vit_raw_transform(backbone)
+    return get_raw_transform_for_pretrained_vit(backbone)
 
 
 def _get_dinov2_checkpoint(model_type: str):
