@@ -15,6 +15,11 @@ try:
 except ImportError:
     microsam_models = None
 
+try:
+    from micro_sam.models.vfm import get_vfm_model
+except ImportError:
+    get_vfm_model = None
+
 
 def get_3d_model(
     out_channels: int,
@@ -103,36 +108,6 @@ def get_raw_transform(backbone):
     return get_raw_transform_for_pretrained_vit(backbone)
 
 
-def _get_dinov2_checkpoint(model_type: str):
-    """Downloads the model checkpoints and returns filepath to it.
-    """
-    assert isinstance(model_type, str), "Watch out, we need the 'model_type' name."
-
-    # Let's create a cache directory.
-    save_directory = os.path.expanduser(pooch.os_cache("synapse_net/dinov2_models"))
-
-    # The weights are stored on owncloud for now
-    urls = {"vit_b": "https://dl.fbaipublicfiles.com/dinov2/dinov2_vitb14/dinov2_vitb14_pretrain.pth"}
-    hashes = {"vit_b": "0b8b82f85de91b424aded121c7e1dcc2b7bc6d0adeea651bf73a13307fad8c73"}
-
-    # Make an explicit check
-    assert model_type in urls, "Oops, seems like the specific DINOv2 model is not worked out atm."
-
-    # Download the model weights
-    pooch.retrieve(
-        url=urls[model_type],
-        known_hash=hashes[model_type],
-        fname=model_type,
-        path=save_directory,
-        progressbar=True,
-    )
-
-    # Get the checkpoint path
-    checkpoint_path = os.path.join(save_directory, model_type)
-
-    return checkpoint_path
-
-
 def _get_dinov3_checkpoint(model_type: str):
     """Downloads the model checkpoint and returns filepath to it.
     """
@@ -171,7 +146,7 @@ def _get_checkpoint(backbone, model_type, return_decoder_path=False):
                 "The 'sam' backbone requires micro_sam. Install it with 'conda install -c conda-forge micro_sam'."
                 )
         model_registry = microsam_models()
-        checkpoint_path = model_registry.fetch(model_type, progressbar=True)
+        encoder_checkpoint = model_registry.fetch(model_type, progressbar=True)
 
         if return_decoder_path:
             decoder_name = f"{model_type}_decoder"
@@ -180,19 +155,21 @@ def _get_checkpoint(backbone, model_type, return_decoder_path=False):
             ) if decoder_name in model_registry.registry else None
 
     elif backbone == "dinov2":
-        checkpoint_path = _get_dinov2_checkpoint(model_type)
+        if get_vfm_model is None:
+            raise RuntimeError("The 'dinov2' backbone requires micro_sam with the 'micro_sam.models.vfm' module.")
+        encoder_checkpoint = get_vfm_model(f"{model_type}_dinov2", device="cpu").model.state_dict()
         decoder_path = None
 
     elif backbone == "dinov3":
-        checkpoint_path = _get_dinov3_checkpoint(model_type)
+        encoder_checkpoint = _get_dinov3_checkpoint(model_type)
         decoder_path = None
     else:
         raise ValueError(f"Unsupported backbone '{backbone}'.")
 
     if return_decoder_path:
-        return checkpoint_path, decoder_path
+        return encoder_checkpoint, decoder_path
     else:
-        return checkpoint_path
+        return encoder_checkpoint
 
 
 def _init_microsam_decoder(model, backbone, model_type, out_channels):
