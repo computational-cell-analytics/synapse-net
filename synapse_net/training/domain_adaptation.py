@@ -12,10 +12,11 @@ import torch_em
 import torch_em.self_training as self_training
 from elf.io import open_file
 
+from torch_em.model.unetr import get_unetr_model
 from torch_em.transform.invertible_augmentations import MeanTeacherAugmenters, DEFAULT_WEAK_AUGMENTATIONS
 
 from .dataloaders import get_supervised_loader, get_unsupervised_loader, _determine_ndim
-from .models import get_2d_model, get_3d_model, get_unetr_model, get_raw_transform
+from .models import get_2d_model, get_3d_model, get_raw_transform, _get_checkpoint
 from .supervised_training import _derive_key_from_files
 from ..inference.inference import get_model_path, compute_scale_from_voxel_size, get_available_models
 from ..inference.util import _Scaler
@@ -124,6 +125,7 @@ def mean_teacher_adaptation(
                 ndim=2 if is_2d else 3,
                 backbone=backbone,
                 model_type=model_type,
+                encoder_checkpoint=_get_checkpoint(backbone=backbone, model_type=model_type),
                 out_channels=2,
             )
         elif is_2d:

@@ -5,9 +5,10 @@ from typing import Optional, Tuple, Union
 import torch
 import torch_em
 from sklearn.model_selection import train_test_split
+from torch_em.model.unetr import get_unetr_model
 
 from synapse_net.inference.inference import get_model_path, get_available_models
-from synapse_net.training.models import get_2d_model, get_3d_model, get_unetr_model, get_raw_transform
+from synapse_net.training.models import get_2d_model, get_3d_model, get_raw_transform, _get_checkpoint
 from synapse_net.training.dataloaders import get_supervised_loader, _determine_ndim
 
 def supervised_training(
@@ -128,6 +129,7 @@ def supervised_training(
         model = get_unetr_model(
             ndim=2 if is_2d else 3,
             backbone=backbone, model_type=model_type,
+            encoder_checkpoint=_get_checkpoint(backbone=backbone, model_type=model_type),
             out_channels=out_channels,
         )
     elif is_2d:

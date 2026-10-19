@@ -2,72 +2,19 @@
 import os
 import pooch
 import warnings
-from typing import Literal, Tuple
-from functools import partial
+from typing import Tuple
 import numpy as np
 
 import torch
 
-from torch_em.model.unetr import UNETR2D, UNETR3D
 from torch_em.model import UNet2d, AnisotropicUNet
+from torch_em.model.unetr import get_vit_raw_transform
 from torch_em.transform.raw import normalize_percentile
 
 try:
     from micro_sam.util import models as microsam_models
 except ImportError:
     microsam_models = None
-
-
-def get_unetr_model(
-    ndim: int,
-    backbone: Literal["sam", "dinov2", "dinov3"],
-    model_type: str,
-    out_channels: int = 1,
-    init_decoder: bool = False,
-    final_activation="Sigmoid",
-):
-    """Get the UNETR model with a pretrained ViT encoder for 2D or 3D segmentation tasks.
-
-    Args:
-        ndim: The number of spatial dimensions for the model; must be 2 or 3.
-        backbone: The pretrained ViT encoder of the UNETR model. Options: "sam", "dinov2", or "dinov3".
-        model_type: Model type for the selected `backbone` model family,
-            for example "vit_b" or "vit_b_em_organelles" for "sam".
-        out_channels: The number of output channels of the network.
-        init_decoder: Whether to initialize the decoder with pretrained microSAM weights.
-        final_activation: The activation applied to the last output layer.
-
-    Returns:
-        The UNETR model.
-    """
-    if backbone not in ("sam", "dinov2", "dinov3"):
-        raise ValueError(f"Unsupported backbone '{backbone}'.")
-
-    # Get the model class.
-    if ndim == 2:
-        model_class = UNETR2D
-    else:
-        model_class = partial(UNETR3D, use_strip_pooling=False)
-
-    # Load the model
-    model = model_class(
-        img_size=518 if backbone == "dinov2" else 1024,
-        backbone=backbone,
-        encoder=_get_vit_type(model_type),
-        encoder_checkpoint=_get_checkpoint(backbone=backbone, model_type=model_type),
-        out_channels=out_channels,
-        resize_input=True,
-        final_activation=final_activation,
-        use_skip_connection=False,
-        use_conv_transpose=False,
-        use_sam_stats="sam" in backbone,
-        use_dino_stats="dino" in backbone,
-    )
-
-    if init_decoder and ndim == 2:
-        model = _init_microsam_decoder(model, backbone, model_type, out_channels)
-
-    return model
 
 
 def get_3d_model(
@@ -128,45 +75,26 @@ def get_2d_model(
     return model
 
 
-def normalize_percentile_to_0_1(raw):
-    """Normalize the raw data with percentiles to [0, 1]."""
-    raw = normalize_percentile(raw)
-    return torch.clamp(raw, 0, 1) if torch.is_tensor(raw) else np.clip(raw, 0, 1)
-
-
-def normalize_percentile_to_0_255(raw):
-    """Normalize the raw data with percentiles to [0, 255]."""
-    return normalize_percentile_to_0_1(raw) * 255.0
 
 
 def get_raw_transform(backbone):
-    """Get the raw transform and the maximum input value for a pretrained ViT backbone.
+    """Get the raw transform and the maximum input value for a pretrained backbone.
+
+    The ViT backbones are handled by `torch_em.model.unetr.get_vit_raw_transform`.
 
     Args:
-        backbone: The pretrained ViT encoder. Options: "sam", "dinov2", "dinov3", or None.
+        backbone: The pretrained encoder. Options: "sam", "dinov2", "dinov3", or None.
 
     Returns:
         The raw transform. It normalizes the raw data with percentiles to [0, 255] for "sam",
             and to [0, 1] for "dinov2" and "dinov3". None if `backbone` is None,
             so the loaders use the default torch-em standardization.
         The maximum input value `clip_max`. The intensity augmentations clip their output to
-            [0, clip_max], so that the input stays expected range. None if `backbone` is None.
+            [0, clip_max], so that the input stays in the expected range. None if `backbone` is None.
     """
-    if backbone == "sam":
-        raw_transform = normalize_percentile_to_0_255
-        clip_max = 255
-
-    elif backbone in ("dinov2", "dinov3"):
-        raw_transform = normalize_percentile_to_0_1
-        clip_max = 1
-
-    elif backbone is None:
-        raw_transform, clip_max = None, None
-
-    else:
+    if backbone not in ("sam", "dinov2", "dinov3", None):
         raise ValueError(f"Unsupported backbone '{backbone}'.")
-
-    return (raw_transform, clip_max)
+    return get_vit_raw_transform(backbone)
 
 
 def _get_dinov2_checkpoint(model_type: str):
@@ -259,15 +187,6 @@ def _get_checkpoint(backbone, model_type, return_decoder_path=False):
         return checkpoint_path, decoder_path
     else:
         return checkpoint_path
-
-
-def _get_vit_type(model_type: str) -> str:
-    if model_type is None:
-        return model_type
-    else:
-        parts = model_type.split("_")
-        model_type = "_".join(parts[:2])
-        return model_type
 
 
 def _init_microsam_decoder(model, backbone, model_type, out_channels):
