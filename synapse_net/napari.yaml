@@ -10,6 +10,12 @@ contributions:
     - id: synapse_net.segment
       python_name: synapse_net.tools.segmentation_widget:SegmentationWidget
       title: Segmentation
+    - id: synapse_net.classification
+      python_name: synapse_net.tools.classification_widget:ClassificationWidget
+      title: Classification
+    - id: synapse_net.refine_classification
+      python_name: synapse_net.tools.refine_classification_widget:RefineClassificationWidget
+      title: Refine Classification
     - id: synapse_net.distance_measure
       python_name: synapse_net.tools.distance_measure_widget:DistanceMeasureWidget
       title: Distance Measurement
@@ -57,6 +63,10 @@ contributions:
   widgets:
     - command: synapse_net.segment
       display_name: Segmentation
+    - command: synapse_net.classification
+      display_name: Classification
+    - command: synapse_net.refine_classification
+      display_name: Refine Classification
     - command: synapse_net.distance_measure
       display_name: Distance Measurement
     - command: synapse_net.morphology
