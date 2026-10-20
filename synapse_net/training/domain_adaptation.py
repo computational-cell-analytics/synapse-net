@@ -12,6 +12,7 @@ import torch_em
 import torch_em.self_training as self_training
 from elf.io import open_file
 
+from torch_em.model.cryozoo import get_cryozoounet
 from torch_em.model.unetr import get_unetr_model
 from torch_em.transform.invertible_augmentations import MeanTeacherAugmenters, DEFAULT_WEAK_AUGMENTATIONS
 
@@ -101,10 +102,11 @@ def mean_teacher_adaptation(
         unsupervised_sampler: Sampler to accept or reject patches for the unsupervised data stream.
         supervised_sampler: Sampler to accept or reject patches for the supervised data stream.
             Pass `False` to disable.
-        backbone: The pretrained ViT encoder of a UNETR model. Options: "sam", "dinov2", or "dinov3".
-            Must be set together with `model_type`.
-        model_type: Model type for the selected `backbone` model family, for example "vit_b" or
-            "vit_b_em_organelles" for "sam". Must be set together with `backbone`.
+        backbone: The pretrained encoder. Options: "sam", "dinov2", "dinov3" (ViT encoders of a UNETR),
+            or "cryosiam" (3D CNN encoder of a CryoZooUNet).
+            The ViT backbones must be set together with `model_type`.
+        model_type: Model type for the selected ViT `backbone` model family, for example "vit_b" or
+            "vit_b_em_organelles" for "sam".
         aug_dict: The augmentations for the teacher and the student, with keys "intensity" and "geometrical".
             Defaults to Gaussian blur and noise, plus random flips and 90-degree rotations.
             The noise is scaled with `clip_max` to match the range of `raw_transform`.
@@ -112,7 +114,18 @@ def mean_teacher_adaptation(
         check: Whether to check the training and validation loaders instead of running training.
     """
     assert (supervised_train_paths is None) == (supervised_val_paths is None)
-    assert (backbone is None) == (model_type is None)
+    if backbone == "cryosiam":
+        if model_type is not None:
+            raise ValueError(f"The 'cryosiam' backbone has no model_type; got model_type='{model_type}'.")
+        if _determine_ndim(patch_shape)[0]:
+            raise ValueError(f"The 'cryosiam' backbone supports only 3D training; got patch_shape={patch_shape}.")
+        if any(s % 8 for s in patch_shape):
+            raise ValueError(f"The patch_shape for 'cryosiam' backbone must be divisible by 8; got {patch_shape}.")
+    elif (backbone is None) != (model_type is None):
+        raise ValueError(
+            "backbone and model_type must both be set for ViT backbones; "
+            f"got backbone={backbone} and model_type={model_type}."
+        )
     is_2d, _ = _determine_ndim(patch_shape)
 
     if source_checkpoint is None:
@@ -120,13 +133,15 @@ def mean_teacher_adaptation(
         # that's why we have the assertion here.
         assert supervised_train_paths is not None
         print("Mean teacher training from scratch (AdaMT).")
-        if backbone is not None:
+        if backbone == "cryosiam":
+            model = get_cryozoounet(out_channels=2, encoder=backbone, final_activation="Sigmoid")
+        elif backbone is not None:
             model = get_unetr_model(
                 ndim=2 if is_2d else 3,
                 backbone=backbone,
                 model_type=model_type,
                 encoder_checkpoint=_get_checkpoint(backbone=backbone, model_type=model_type),
-                out_channels=2,
+                out_channels=2, final_activation="Sigmoid",
             )
         elif is_2d:
             model = get_2d_model(out_channels=2)

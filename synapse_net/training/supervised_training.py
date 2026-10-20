@@ -5,11 +5,13 @@ from typing import Optional, Tuple, Union
 import torch
 import torch_em
 from sklearn.model_selection import train_test_split
+from torch_em.model.cryozoo import get_cryozoounet
 from torch_em.model.unetr import get_unetr_model
 
 from synapse_net.inference.inference import get_model_path, get_available_models
 from synapse_net.training.models import get_2d_model, get_3d_model, get_raw_transform, _get_checkpoint
 from synapse_net.training.dataloaders import get_supervised_loader, _determine_ndim
+
 
 def supervised_training(
     name: str,
@@ -86,17 +88,28 @@ def supervised_training(
         out_channels: The number of output channels of the UNet.
         mask_channel: Whether the last channels in the labels should be used for masking the loss.
             This can be used to implement more complex masking operations and is not compatible with `ignore_label`.
-        backbone: The pretrained ViT encoder of a UNETR model. Options: "sam", "dinov2", or "dinov3".
-            Must be set together with `model_type`.
-        model_type: Model type for the selected `backbone` model family,
-            for example "vit_b" or "vit_b_em_organelles" for "sam".
-            Must be set together with `backbone`.
+        backbone: The pretrained encoder. Options: "sam", "dinov2", "dinov3" (ViT encoders of a UNETR),
+            or "cryosiam" (3D CNN encoder of a CryoZooUNet).
+            The ViT backbones must be set together with `model_type`.
+        model_type: Model type for the selected ViT `backbone` model family, for example "vit_b" or
+            "vit_b_em_organelles" for "sam".
         checkpoint_path: Path to the directory where 'best.pt' resides; continue training this model.
         save_every_kth_epoch: Save checkpoints after every kth epoch in a separate file.
             The corresponding checkpoints will be saved with the naming scheme 'epoch-{epoch}.pt'.
         loader_kwargs: Additional keyword arguments for the dataloader.
     """
-    assert (backbone is None) == (model_type is None)
+    if backbone == "cryosiam":
+        if model_type is not None:
+            raise ValueError(f"The 'cryosiam' backbone has no model_type; got model_type='{model_type}'.")
+        if _determine_ndim(patch_shape)[0]:
+            raise ValueError(f"The 'cryosiam' backbone supports only 3D training; got patch_shape={patch_shape}.")
+        if any(s % 8 for s in patch_shape):
+            raise ValueError(f"The patch_shape for 'cryosiam' backbone must be divisible by 8; got {patch_shape}.")
+    elif (backbone is None) != (model_type is None):
+        raise ValueError(
+            "backbone and model_type must both be set for ViT backbones; "
+            f"got backbone={backbone} and model_type={model_type}."
+        )
 
     if raw_transform is None:
         raw_transform = get_raw_transform(backbone)[0]
@@ -124,13 +137,16 @@ def supervised_training(
 
     if checkpoint_path is not None:
         model = torch_em.util.load_model(checkpoint=checkpoint_path)
+    elif backbone == "cryosiam":
+        assert in_channels == 1
+        model = get_cryozoounet(out_channels=out_channels, encoder=backbone, final_activation="Sigmoid")
     elif backbone is not None:
         assert in_channels == 1
         model = get_unetr_model(
             ndim=2 if is_2d else 3,
             backbone=backbone, model_type=model_type,
             encoder_checkpoint=_get_checkpoint(backbone=backbone, model_type=model_type),
-            out_channels=out_channels,
+            out_channels=out_channels, final_activation="Sigmoid",
         )
     elif is_2d:
         model = get_2d_model(out_channels=out_channels, in_channels=in_channels)
@@ -143,7 +159,7 @@ def supervised_training(
     # No ignore label -> we can use default loss.
     if ignore_label is None and not mask_channel:
         loss = base_loss
-        
+
     # If we have an ignore label the loss and metric have to be modified
     # so that the ignore mask is not used in the gradient calculation.
     elif ignore_label is not None:
@@ -162,10 +178,8 @@ def supervised_training(
         )
         metric = loss
     else:
-        #raise ValueError
         loss = base_loss
         metric = loss
-        
 
     trainer = torch_em.default_segmentation_trainer(
         name=name,
