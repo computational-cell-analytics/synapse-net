@@ -14,6 +14,11 @@ except ImportError:
     microsam_models = None
 
 try:
+    from micro_sam.v2.util import models as microsam2_models
+except ImportError:
+    microsam2_models = None
+
+try:
     from micro_sam.models.vfm import get_vfm_model
 except ImportError:
     get_vfm_model = None
@@ -89,11 +94,11 @@ def get_raw_transform(backbone):
     The ViT backbones are handled by `torch_em.transform.raw.get_raw_transform_for_pretrained_vit`.
 
     Args:
-        backbone: The pretrained encoder. Options: "sam", "dinov2", "dinov3", "cryosiam", or None.
+        backbone: The pretrained encoder. Options: "sam", "sam2", "dinov2", "dinov3", "cryosiam", or None.
 
     Returns:
         The raw transform. It normalizes the raw data with percentiles to [0, 255] for "sam",
-            and to [0, 1] for "dinov2" and "dinov3". For "cryosiam" it also inverts the contrast.
+            and to [0, 1] for "sam2", "dinov2" and "dinov3". For "cryosiam" it also inverts the contrast.
             None if `backbone` is None, so the loaders use the default torch-em standardization.
         The maximum input value `clip_max`. The intensity augmentations clip their output to
             [0, clip_max], so that the input stays in the expected range. None if `backbone` is None.
@@ -101,7 +106,7 @@ def get_raw_transform(backbone):
     if backbone == "cryosiam":
         return normalize_percentile_to_0_1_inverted, 1
      
-    if backbone not in ("sam", "dinov2", "dinov3", None):
+    if backbone not in ("sam", "sam2", "dinov2", "dinov3", None):
         raise ValueError(f"Unsupported backbone '{backbone}'.")
     return get_raw_transform_for_pretrained_vit(backbone)
 
@@ -114,6 +119,20 @@ def _get_checkpoint(backbone, model_type, return_decoder_path=False):
                 "The 'sam' backbone requires micro_sam. Install it with 'conda install -c conda-forge micro_sam'."
                 )
         model_registry = microsam_models()
+        encoder_checkpoint = model_registry.fetch(model_type, progressbar=True)
+
+        if return_decoder_path:
+            decoder_name = f"{model_type}_decoder"
+            decoder_path = model_registry.fetch(
+                decoder_name, progressbar=True
+            ) if decoder_name in model_registry.registry else None
+
+    elif backbone == "sam2":
+        if microsam2_models is None:
+            raise RuntimeError(
+                "The 'sam2' backbone requires micro_sam with SAM2 support ('micro_sam.v2') and sam2."
+                )
+        model_registry = microsam2_models()
         encoder_checkpoint = model_registry.fetch(model_type, progressbar=True)
 
         if return_decoder_path:

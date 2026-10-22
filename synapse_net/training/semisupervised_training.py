@@ -81,7 +81,7 @@ def semisupervised_training(
         sample_mask_key: The key to the sample mask dataset inside each file.
         unsupervised_sampler: Sampler to accept or reject patches for the unsupervised data stream.
         supervised_sampler: Sampler to accept or reject patches for the supervised data stream.
-        backbone: The pretrained encoder. Options: "sam", "dinov2", "dinov3" (ViT encoders of a UNETR),
+        backbone: The pretrained encoder. Options: "sam", "sam2", "dinov2", "dinov3" (ViT encoders of a UNETR),
             or "cryosiam" (3D CNN encoder of a CryoZooUNet).
             The ViT backbones must be set together with `model_type`.
         model_type: Model type for the selected ViT `backbone` model family, for example "vit_b" or
