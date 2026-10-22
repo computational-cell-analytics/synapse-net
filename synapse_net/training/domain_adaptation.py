@@ -242,7 +242,7 @@ def _get_paths(input_folder, pattern, resize_training_data, model_name, tmp_dir,
             voxel_size = {ax: vox_size / 10.0 for ax, vox_size in zip("xyz", voxel_size.item())}
             scale = compute_scale_from_voxel_size(voxel_size, model_name)
             scaler = _Scaler(scale, verbose=False)
-            data = scaler.sale_input(data)
+            data = scaler.scale_input(data)
 
         if resave_val_crops:
             n_slices = data.shape[0]
