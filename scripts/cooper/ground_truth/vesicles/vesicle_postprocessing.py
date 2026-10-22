@@ -85,7 +85,7 @@ def postprocess_vesicle_gt(raw, vesicle_gt, refine_shapes):
 
     # Get the model predictions and segmentation for this data.
     segmentation, prediction = segment_vesicles(
-        raw, MODEL_PATH, return_predictions=True, distance_based_segmentation=True,
+        raw, MODEL_PATH, return_predictions=True, mode="distance-watershed",
         verbose=False,
     )
     # Get vesicles in the prediction that are not part of the ground-truth.

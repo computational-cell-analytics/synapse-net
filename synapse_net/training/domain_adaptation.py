@@ -20,7 +20,7 @@ from .dataloaders import get_supervised_loader, get_unsupervised_loader, _determ
 from .models import get_2d_model, get_3d_model, get_raw_transform, _get_checkpoint
 from .supervised_training import _derive_key_from_files
 from ..inference.inference import get_model_path, compute_scale_from_voxel_size, get_available_models
-from ..inference.util import _Scaler
+from ..inference.util import _restore_legacy_attributes, _Scaler
 
 
 def mean_teacher_adaptation(
@@ -150,9 +150,11 @@ def mean_teacher_adaptation(
 
         reinit_teacher = True
     else:
-        print("Mean teacher training from source model:", source_checkpoint)
-
-        model = torch_em.util.load_model(checkpoint=source_checkpoint)
+        print("Mean teacher training initialized from source model:", source_checkpoint)
+        if os.path.isdir(source_checkpoint):
+            model = torch_em.util.load_model(source_checkpoint)
+        else:
+            model = _restore_legacy_attributes(torch.load(source_checkpoint, weights_only=False))
         reinit_teacher = False
 
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
@@ -286,7 +288,7 @@ def _get_paths(input_folder, pattern, resize_training_data, model_name, tmp_dir,
             voxel_size = {ax: vox_size / 10.0 for ax, vox_size in zip("xyz", voxel_size.item())}
             scale = compute_scale_from_voxel_size(voxel_size, model_name)
             scaler = _Scaler(scale, verbose=False)
-            data = scaler.sale_input(data)
+            data = scaler.scale_input(data)
 
         if resave_val_crops:
             n_slices = data.shape[0]
@@ -321,6 +323,14 @@ def _parse_patch_shape(patch_shape, model_name):
     return patch_shape
 
 
+def _resolve_source_checkpoint(source_model, source_checkpoint):
+    if source_checkpoint is None:
+        return get_model_path(source_model)
+    if not os.path.exists(source_checkpoint):
+        raise ValueError(f"The source checkpoint does not exist: {source_checkpoint}")
+    return source_checkpoint
+
+
 def main():
     """@private
     """
@@ -344,9 +354,15 @@ def main():
     parser.add_argument(
         "--source_model",
         default="vesicles_3d",
-        help="The source model used for weight initialization of teacher and student model. "
+        help="The source model sets the default checkpoint and the metadata for patch size and data resizing. "
         "By default the model 'vesicles_3d' for vesicle segmentation in volumetric data is used.\n"
+        "The --source_checkpoint argument overrides the default checkpoint.\n"
         f"The following source models are available: {available_models}"
+    )
+    parser.add_argument(
+        "--source_checkpoint",
+        help="Path to a custom source checkpoint directory or serialized PyTorch model. "
+        "If not given, the command downloads the checkpoint for --source_model."
     )
     parser.add_argument(
         "--resize_training_data", action="store_true",
@@ -368,7 +384,10 @@ def main():
 
     args = parser.parse_args()
 
-    source_checkpoint = get_model_path(args.source_model)
+    try:
+        source_checkpoint = _resolve_source_checkpoint(args.source_model, args.source_checkpoint)
+    except ValueError as error:
+        parser.error(str(error))
     patch_shape = _parse_patch_shape(args.patch_shape, args.source_model)
     with tempfile.TemporaryDirectory() as tmp_dir:
         unsupervised_train_paths, unsupervised_val_paths = _get_paths(

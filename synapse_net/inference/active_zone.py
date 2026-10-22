@@ -46,11 +46,12 @@ def _run_segmentation(
     foreground, verbose, min_size,
     # blocking shapes for parallel computation
     block_shape=(128, 256, 256),
+    foreground_threshold=0.5,
 ):
 
     # get the segmentation via seeded watershed
     t0 = time.time()
-    seg = parallel.label(foreground > 0.5, block_shape=block_shape, verbose=verbose)
+    seg = parallel.label(foreground > foreground_threshold, block_shape=block_shape, verbose=verbose)
     if verbose:
         print("Compute connected components in", time.time() - t0, "s")
 
@@ -76,6 +77,7 @@ def segment_active_zone(
     scale: Optional[List[float]] = None,
     mask: Optional[np.ndarray] = None,
     compartment: Optional[np.ndarray] = None,
+    foreground_threshold: float = 0.5,
 ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
     """Segment active zones in an input volume.
 
@@ -89,6 +91,7 @@ def segment_active_zone(
         mask: An optional mask that is used to restrict the segmentation.
         compartment: Pass a compartment segmentation, to intersect the boundaries of the
             compartments with the active zone prediction.
+        foreground_threshold: The threshold for binarizing the foreground prediction.
 
     Returns:
         The foreground mask as a numpy array.
@@ -107,7 +110,9 @@ def segment_active_zone(
     # Run segmentation and rescale the result if necessary.
     foreground = pred[0]
 
-    segmentation = _run_segmentation(foreground, verbose=verbose, min_size=min_size)
+    segmentation = _run_segmentation(
+        foreground, verbose=verbose, min_size=min_size, foreground_threshold=foreground_threshold
+    )
     segmentation = scaler.rescale_output(segmentation, is_segmentation=True)
 
     # Returning prediciton and intersection currently not possible.

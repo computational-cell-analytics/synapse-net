@@ -12,6 +12,13 @@ from synapse_net.inference.postprocessing.vesicles import filter_border_objects,
 from skimage.segmentation import relabel_sequential
 
 
+VESICLE_SEGMENTATION_MODES = (
+    "distance-watershed",
+    "simple-watershed",
+    "label",
+)
+
+
 def distance_based_vesicle_segmentation(
     foreground: np.ndarray,
     boundaries: np.ndarray,
@@ -81,6 +88,7 @@ def simple_vesicle_segmentation(
     boundaries: np.ndarray,
     verbose: bool,
     min_size: int,
+    threshold: float = 0.5,
     block_shape: Tuple[int, int, int] = (128, 256, 256),
     halo: Tuple[int, int, int] = (48, 48, 48),
 ) -> np.ndarray:
@@ -92,6 +100,7 @@ def simple_vesicle_segmentation(
         boundaries: The boundary prediction.
         verbose: Whether to print timing information.
         min_size: The minimal vesicle size.
+        threshold: The threshold for deriving seeds from foreground and boundary predictions.
         block_shape: Block shape for parallelizing the operations.
         halo: Halo for parallelizing the operations.
 
@@ -100,7 +109,7 @@ def simple_vesicle_segmentation(
     """
 
     t0 = time.time()
-    seeds = parallel.label((foreground - boundaries) > 0.5, block_shape=block_shape, verbose=verbose)
+    seeds = parallel.label((foreground - boundaries) > threshold, block_shape=block_shape, verbose=verbose)
     if verbose:
         print("Compute connected components in", time.time() - t0, "s")
 
@@ -123,6 +132,34 @@ def simple_vesicle_segmentation(
     return seg
 
 
+def label_vesicle_segmentation(
+    foreground: np.ndarray,
+    verbose: bool,
+    min_size: int,
+    threshold: float = 0.5,
+    block_shape: Tuple[int, int, int] = (128, 256, 256),
+) -> np.ndarray:
+    """Segment vesicles by thresholding and labeling the foreground prediction.
+
+    Args:
+        foreground: The foreground prediction.
+        verbose: Whether to print timing information.
+        min_size: The minimal vesicle size.
+        threshold: The threshold for binarizing the foreground prediction.
+        block_shape: Block shape for parallelizing the operations.
+
+    Returns:
+        The vesicle segmentation.
+    """
+    t0 = time.time()
+    seg = parallel.label(foreground > threshold, block_shape=block_shape, verbose=verbose)
+    if verbose:
+        print("Compute connected components in", time.time() - t0, "s")
+
+    seg = apply_size_filter(seg, min_size, verbose, block_shape)
+    return seg
+
+
 def segment_vesicles(
     input_volume: np.ndarray,
     model_path: Optional[str] = None,
@@ -130,7 +167,8 @@ def segment_vesicles(
     tiling: Optional[Dict[str, Dict[str, int]]] = None,
     min_size: int = 500,
     verbose: bool = True,
-    distance_based_segmentation: bool = True,
+    mode: str = "distance-watershed",
+    threshold: float = 0.5,
     return_predictions: bool = False,
     scale: Optional[List[float]] = None,
     exclude_boundary: bool = False,
@@ -146,7 +184,12 @@ def segment_vesicles(
         tiling: The tiling configuration for the prediction.
         min_size: The minimum size of a vesicle to be considered.
         verbose: Whether to print timing information.
-        distance_based_segmentation: Whether to use distance-based segmentation.
+        mode: The post-processing mode. ``distance-watershed`` derives watershed seeds from the
+            distance to predicted boundaries, ``simple-watershed`` derives watershed seeds from
+            foreground minus boundary predictions, and ``label`` labels the thresholded foreground.
+        threshold: The threshold for the mode-defining post-processing step. It is applied to the
+            boundary predictions for ``distance-watershed``, foreground minus boundary predictions
+            for ``simple-watershed``, and foreground predictions for ``label``.
         return_predictions: Whether to return the predictions (foreground, boundaries) alongside the segmentation.
         scale: The scale factor to use for rescaling the input volume before prediction.
         exclude_boundary: Whether to exclude vesicles that touch the upper / lower border in z.
@@ -160,6 +203,14 @@ def segment_vesicles(
         The segmentation mask as a numpy array, or a tuple containing the segmentation mask
         and the predictions if return_predictions is True.
     """
+    if mode not in VESICLE_SEGMENTATION_MODES:
+        raise ValueError(
+            f"Invalid vesicle segmentation mode '{mode}'. "
+            f"Expected one of {VESICLE_SEGMENTATION_MODES}."
+        )
+    if not 0.0 <= threshold <= 1.0:
+        raise ValueError(f"The vesicle segmentation threshold must be between 0 and 1, got {threshold}.")
+
     if verbose:
         print("Segmenting vesicles in volume of shape", input_volume.shape)
     # Create the scaler to handle prediction with a different scaling factor.
@@ -178,13 +229,18 @@ def segment_vesicles(
         kwargs["block_shape"] = (256, 256)
         kwargs["halo"] = (48, 48)
 
-    if distance_based_segmentation:
+    if mode == "distance-watershed":
         seg = distance_based_vesicle_segmentation(
-            foreground, boundaries, verbose=verbose, min_size=min_size, **kwargs
+            foreground, boundaries, verbose=verbose, min_size=min_size, boundary_threshold=threshold, **kwargs
+        )
+    elif mode == "simple-watershed":
+        seg = simple_vesicle_segmentation(
+            foreground, boundaries, verbose=verbose, min_size=min_size, threshold=threshold, **kwargs
         )
     else:
-        seg = simple_vesicle_segmentation(
-            foreground, boundaries, verbose=verbose, min_size=min_size, **kwargs
+        label_kwargs = {"block_shape": kwargs["block_shape"]} if "block_shape" in kwargs else {}
+        seg = label_vesicle_segmentation(
+            foreground, verbose=verbose, min_size=min_size, threshold=threshold, **label_kwargs
         )
 
     if exclude_boundary and exclude_boundary_vesicles:

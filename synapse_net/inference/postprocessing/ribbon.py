@@ -27,7 +27,7 @@ def segment_ribbon(
     original_shape = ribbon_prediction.shape
 
     # Cut away the exclude mask.
-    slice_mask = np.s_[n_slices_exclude:-n_slices_exclude]
+    slice_mask = np.s_[:] if n_slices_exclude == 0 else np.s_[n_slices_exclude:-n_slices_exclude]
     ribbon_prediction = ribbon_prediction[slice_mask]
     vesicle_segmentation = vesicle_segmentation[slice_mask]
 

@@ -1,13 +1,16 @@
 import os
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 import napari
+import numpy as np
 import qtpy.QtWidgets as QtWidgets
 
 from napari.utils.notifications import show_info
+from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSpinBox, QComboBox, QCheckBox
+    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSpinBox, QComboBox, QCheckBox
 )
 from superqt import QCollapsible
 
@@ -33,12 +36,16 @@ class BaseWidget(QWidget):
         self.viewer = napari.current_viewer()
         self.attribute_dict = {}
 
-    def _create_layer_selector(self, selector_name, layer_type="Image"):
+    def _create_layer_selector(self, selector_name, layer_type="Image", prefer_substring=None):
         """Create a layer selector for an image or labels and store it in a dictionary.
 
         Args:
             selector_name (str): The name of the selector, used as a key in the dictionary.
             layer_type (str): The type of layer to filter for ("Image" or "Labels").
+            prefer_substring (str, optional): If given, the selector auto-defaults to the first
+                layer whose name contains this substring (case-insensitive); falls back to the first
+                layer otherwise. Applied only when there is no valid current selection (initial
+                population or the selected layer was removed); a user's manual choice is preserved.
         """
         if not hasattr(self, "layer_selectors"):
             self.layer_selectors = {}
@@ -58,11 +65,15 @@ class BaseWidget(QWidget):
         layer_label = QtWidgets.QLabel(f"{selector_name}:")
 
         # Populate initial options
-        self._update_selector(selector=image_selector, layer_filter=layer_filter)
+        self._update_selector(selector=image_selector, layer_filter=layer_filter, prefer_substring=prefer_substring)
 
         # Update selector on layer events
-        self.viewer.layers.events.inserted.connect(lambda event: self._update_selector(image_selector, layer_filter))
-        self.viewer.layers.events.removed.connect(lambda event: self._update_selector(image_selector, layer_filter))
+        self.viewer.layers.events.inserted.connect(
+            lambda event: self._update_selector(image_selector, layer_filter, prefer_substring)
+        )
+        self.viewer.layers.events.removed.connect(
+            lambda event: self._update_selector(image_selector, layer_filter, prefer_substring)
+        )
 
         # Store the selector in the dictionary
         self.layer_selectors[selector_name] = selector_widget
@@ -74,11 +85,52 @@ class BaseWidget(QWidget):
         selector_widget.setLayout(layout)
         return selector_widget
 
-    def _update_selector(self, selector, layer_filter):
-        """Update a single selector with the current image layers in the viewer."""
+    def _update_selector(self, selector, layer_filter, prefer_substring=None):
+        """Update a single selector with the current image layers in the viewer.
+
+        The user's current selection is preserved if that layer still exists. Only when there is
+        no valid current selection (initial population, or the selected layer was removed) does the
+        default apply: the first layer whose name contains ``prefer_substring`` (case-insensitive)
+        if given, otherwise the first layer (QComboBox default).
+        """
+        previous = selector.currentText()
         selector.clear()
         image_layers = [layer.name for layer in self.viewer.layers if isinstance(layer, layer_filter)]
         selector.addItems(image_layers)
+        if previous in image_layers:
+            selector.setCurrentText(previous)
+        elif prefer_substring:
+            needle = prefer_substring.lower()
+            match = next((name for name in image_layers if needle in name.lower()), None)
+            if match is not None:
+                selector.setCurrentText(match)
+
+    @contextmanager
+    def _computing(self, button, busy_text, idle_text, message):
+        """Show a busy state around a synchronous, GUI-thread-blocking action, then restore it.
+
+        Disables and relabels ``button``, sets a wait cursor, shows ``message`` and forces one repaint
+        so the busy state is painted *before* the blocking call — otherwise none of it would render
+        until the call returned and the button would just look stuck. The cursor, button label and
+        enabled state are restored on exit (also on error). Disabling the button also blocks a
+        re-entrant second click while the action is in flight. All Qt calls are guarded so they no-op
+        without a running QApplication.
+        """
+        app = QApplication.instance()
+        button.setEnabled(False)
+        button.setText(busy_text)
+        if app is not None:
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+        show_info(message)
+        if app is not None:
+            app.processEvents()
+        try:
+            yield
+        finally:
+            if app is not None:
+                QApplication.restoreOverrideCursor()
+            button.setEnabled(True)
+            button.setText(idle_text)
 
     def _get_layer_selector_layer(self, selector_name):
         """Return the layer currently selected in a given selector."""
@@ -337,3 +389,91 @@ class BaseWidget(QWidget):
         if save_path != "":
             file_path = self._save_table(self.save_path.text(), table_data)
             show_info(f"INFO: Added table and saved file to {file_path}.")
+
+    def _add_or_update_layer(self, add_fn, name, data, scale, translate, layer_kwargs):
+        """Add a layer via ``add_fn`` (e.g. ``self.viewer.add_labels``), or refresh it in place if a
+        layer with this name already exists.
+
+        On refresh the ``scale``/``translate`` are reapplied (when provided) because a persisted layer
+        keeps its original transform, which may be stale if the source layer / voxel size changed
+        between runs; any ``layer_kwargs`` (e.g. ``opacity``, ``blending``, ``colormap``) are reapplied
+        too. On first add these go through the layer constructor. Returns the (new or existing) layer.
+
+        A layer of a *different* type carrying this name is replaced rather than refreshed: assigning
+        e.g. an (n, 2, ndim) vectors array to a Points layer left over from an earlier run would raise
+        deep inside napari.
+        """
+        if name in self.viewer.layers:
+            expected = f"add_{type(self.viewer.layers[name]).__name__.lower()}"
+            if getattr(add_fn, "__name__", expected) != expected:
+                del self.viewer.layers[name]
+        if name in self.viewer.layers:
+            layer = self.viewer.layers[name]
+            layer.data = data
+            if scale is not None:
+                layer.scale = scale
+            if translate is not None:
+                layer.translate = translate
+            for key, value in layer_kwargs.items():
+                setattr(layer, key, value)
+        else:
+            ctor_kwargs = dict(layer_kwargs)
+            if scale is not None:
+                ctor_kwargs["scale"] = scale
+            if translate is not None:
+                ctor_kwargs["translate"] = translate
+            layer = add_fn(data, name=name, **ctor_kwargs)
+        return layer
+
+    def add_or_update_labels(self, name, data, *, scale=None, translate=None, **layer_kwargs):
+        """Add a Labels layer, or refresh it in place if one with this name already exists.
+
+        See :meth:`_add_or_update_layer` for the refresh/transform semantics. Extra keyword arguments
+        (``opacity``, ``blending``, ``colormap``, …) are forwarded to the layer. Returns the layer.
+        """
+        return self._add_or_update_layer(
+            self.viewer.add_labels, name, data, scale, translate, layer_kwargs
+        )
+
+    def add_or_update_surface(self, name, vertices, faces, *, scale=None, translate=None,
+                              values=None, **layer_kwargs):
+        """Add a Surface layer, or refresh it in place if one with this name already exists.
+
+        Surface layers colour by per-vertex ``values``; a constant array (the default) gives a
+        flat-coloured surface. See :meth:`_add_or_update_layer` for the refresh/transform semantics.
+        Returns the layer.
+        """
+        if values is None:
+            values = np.ones(len(vertices), dtype="float32")
+        return self._add_or_update_layer(
+            self.viewer.add_surface, name, (vertices, faces, values), scale, translate, layer_kwargs
+        )
+
+    def add_or_update_points(self, name, points, *, scale=None, translate=None, **layer_kwargs):
+        """Add a Points layer, or refresh it in place if one with this name already exists.
+
+        ``points`` is an (n, ndim) array in the same coordinate frame as the other layers — i.e. voxel
+        indices, with the physical placement left to ``scale``/``translate``. See
+        :meth:`_add_or_update_layer` for the refresh/transform semantics. Returns the layer.
+
+        For line-like data such as a skeleton, use :meth:`add_or_update_vectors` rather than Shapes: a
+        Shapes layer needs ``shape_type``, which is a constructor-only argument and so cannot be
+        reapplied on the refresh path, and thousands of individual line shapes render slowly.
+        """
+        return self._add_or_update_layer(
+            self.viewer.add_points, name, points, scale, translate, layer_kwargs
+        )
+
+    def add_or_update_vectors(self, name, vectors, *, scale=None, translate=None, **layer_kwargs):
+        """Add a Vectors layer, or refresh it in place if one with this name already exists.
+
+        ``vectors`` is an (n, 2, ndim) array of ``[start, direction]`` pairs, in the same coordinate
+        frame as the other layers — i.e. voxel indices, with the physical placement left to
+        ``scale``/``translate``. This is the layer to use for the edges of a graph such as a skeleton:
+        one instanced segment per edge, no constructor-only ``shape_type`` to reapply, and it stays
+        responsive at edge counts where a Shapes layer does not. See :meth:`_add_or_update_layer` for
+        the refresh/transform semantics. Returns the layer.
+        """
+        return self._add_or_update_layer(
+            self.viewer.add_vectors, name, vectors, scale, translate, layer_kwargs
+        )

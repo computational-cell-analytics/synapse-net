@@ -240,12 +240,7 @@ class VesiclePoolWidget(BaseWidget):
         vesicle_colors[None] = "gray"
 
         # Add or replace the pool layer and properties.
-        if pool_layer_name in self.viewer.layers:
-            pool_layer = self.viewer.layers[pool_layer_name]
-            pool_layer.data = vesicle_pools
-            pool_layer.colormap = vesicle_colors
-        else:
-            pool_layer = self.viewer.add_labels(vesicle_pools, name=pool_layer_name, colormap=vesicle_colors)
+        pool_layer = self.add_or_update_labels(pool_layer_name, vesicle_pools, colormap=vesicle_colors)
 
         pool_properties = self._add_colors(pool_properties, vesicle_colors)
         self._add_properties_and_table(pool_layer, pool_properties, save_path=self.save_path.text())

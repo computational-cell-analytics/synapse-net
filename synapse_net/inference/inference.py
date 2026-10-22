@@ -1,5 +1,5 @@
 import os
-from typing import Dict, List, Optional, Union
+from typing import Callable, Dict, List, Optional, Union
 
 import torch
 import numpy as np
@@ -11,7 +11,7 @@ from .mitochondria import segment_mitochondria
 from .ribbon_synapse import segment_ribbon_synapse_structures
 from .vesicles import segment_vesicles
 from .cristae import segment_cristae
-from .util import get_device
+from .util import _restore_legacy_attributes, get_device
 from ..file_utils import get_cache_dir
 
 
@@ -30,6 +30,7 @@ def _get_model_registry():
         "cristae2": "0864945698862df043adc51c0034289a579b0622a61164e5ebd00a24ee25d075",
         "cristae3": "5cb8699487bd21204071cbfb784a7f5c2bb6ab5f347a9d02a913aa27ae70eca4",
         "cristae4": "214bf0848c2c3c7459a576c5d46416750e1b9947002674545904f069ddc75066",
+        "cristae5": "fcef96640a8223a11cec72fa129566d9c31deee71c99929d1f246d46f567d0b7",
         "ribbon": "7c947f0ddfabe51a41d9d05c0a6ca7d6b238f43df2af8fffed5552d09bb075a9",
         "vesicles_2d": "eb0b74f7000a0e6a25b626078e76a9452019f2d1ea6cf2033073656f4f055df1",
         "vesicles_3d": "b329ec1f57f305099c984fbb3d7f6ae4b0ff51ec2fa0fa586df52dad6b84cf29",
@@ -48,6 +49,7 @@ def _get_model_registry():
         "cristae2": "https://owncloud.gwdg.de/index.php/s/qe0R5pRgH2m0pQ5/download",
         "cristae3": "https://owncloud.gwdg.de/index.php/s/51X1et8d7pOfdhU/download",
         "cristae4": "https://owncloud.gwdg.de/index.php/s/XoepbLjeT4csq1t/download",
+        "cristae5": "https://owncloud.gwdg.de/index.php/s/XD0ns5wrBrBdLub/download",
         "ribbon": "https://owncloud.gwdg.de/index.php/s/S3b5l0liPP1XPYA/download",
         "vesicles_2d": "https://owncloud.gwdg.de/index.php/s/d72QIvdX6LsgXip/download",
         "vesicles_3d": "https://owncloud.gwdg.de/index.php/s/A425mkAOSqePDhx/download",
@@ -105,7 +107,7 @@ def get_model(model_type: str, device: Optional[Union[str, torch.device]] = None
     if device is None:
         device = get_device(device)
     model_path = get_model_path(model_type)
-    model = torch.load(model_path, weights_only=False)
+    model = _restore_legacy_attributes(torch.load(model_path, weights_only=False))
     model.to(device)
     return model
 
@@ -133,6 +135,7 @@ def get_model_training_resolution(model_type: str) -> Dict[str, float]:
         "cristae2": {"x": 1.44, "y": 1.44, "z": 1.44},
         "cristae3": {"x": 1.44, "y": 1.44, "z": 1.44},
         "cristae4": {"x": 1.74, "y": 1.74, "z": 1.74},
+        "cristae5": {"x": 1.74, "y": 1.74, "z": 1.74},
         "ribbon": {"x": 1.188, "y": 1.188, "z": 1.188},
         "vesicles_2d": {"x": 1.35, "y": 1.35},
         "vesicles_3d": {"x": 1.35, "y": 1.35, "z": 1.35},
@@ -197,14 +200,22 @@ def _ribbon_AZ_postprocessing(predictions, vesicles, n_slices_exclude, n_ribbons
     return segmentations
 
 
-def _segment_ribbon_AZ(image, model, tiling, scale, verbose, return_predictions=False, **kwargs):
+def _segment_ribbon_AZ(
+    image,
+    model,
+    tiling,
+    scale,
+    verbose,
+    return_predictions=False,
+    threshold=0.5,
+    n_slices_exclude=20,
+    min_membrane_size=0,
+    n_ribbons=1,
+    **kwargs,
+):
     # Parse additional keyword arguments from the kwargs.
     vesicles = kwargs.pop("extra_segmentation")
-    threshold = kwargs.pop("threshold", 0.5)
-    n_slices_exclude = kwargs.pop("n_slices_exclude", 20)
-    n_ribbons = kwargs.pop("n_slices_exclude", 1)
     resolution = kwargs.pop("resolution", None)
-    min_membrane_size = kwargs.pop("min_membrane_size", 0)
 
     predictions = segment_ribbon_synapse_structures(
         image, model=model, tiling=tiling, scale=scale, verbose=verbose, threshold=threshold, **kwargs
@@ -227,6 +238,33 @@ def _segment_ribbon_AZ(image, model, tiling, scale, verbose, return_predictions=
     if return_predictions:
         return segmentations, predictions
     return segmentations
+
+
+def get_segmentation_function(model_type: str) -> Callable:
+    """Get the segmentation function associated with a model type.
+
+    Args:
+        model_type: The name of the pretrained model.
+
+    Returns:
+        The segmentation function used for the model type.
+
+    Raises:
+        ValueError: If the model type is unknown.
+    """
+    if model_type.startswith("vesicles"):
+        return segment_vesicles
+    if model_type in ("mitochondria", "mitochondria2"):
+        return segment_mitochondria
+    if model_type == "active_zone":
+        return segment_active_zone
+    if model_type == "compartments":
+        return segment_compartments
+    if model_type == "ribbon":
+        return _segment_ribbon_AZ
+    if "cristae" in model_type:
+        return segment_cristae
+    raise ValueError(f"Unknown model type: {model_type}")
 
 
 def run_segmentation(
@@ -253,21 +291,15 @@ def run_segmentation(
     Returns:
         The segmentation. For models that return multiple segmentations, this function returns a dictionary.
     """
-    if model_type.startswith("vesicles"):
-        segmentation = segment_vesicles(image, model=model, tiling=tiling, scale=scale, verbose=verbose, **kwargs)
-    elif model_type == "mitochondria" or model_type == "mitochondria2":
-        segmentation = segment_mitochondria(image, model=model, tiling=tiling, scale=scale, verbose=verbose, **kwargs)
-    elif model_type == "active_zone":
-        segmentation = segment_active_zone(image, model=model, tiling=tiling, scale=scale, verbose=verbose, **kwargs)
-    elif model_type == "compartments":
-        segmentation = segment_compartments(image, model=model, tiling=tiling, scale=scale, verbose=verbose, **kwargs)
-    elif model_type == "ribbon":
-        segmentation = _segment_ribbon_AZ(image, model=model, tiling=tiling, scale=scale, verbose=verbose, **kwargs)
-    elif "cristae" in model_type:
+    segmentation_function = get_segmentation_function(model_type)
+    if segmentation_function is segment_cristae:
         training_resolution = get_model_training_resolution(model_type)
         voxel_size = np.mean(list(training_resolution.values()))
-        segmentation = segment_cristae(image, model=model, tiling=tiling, scale=scale, verbose=verbose,
-                                       voxel_size=voxel_size, **kwargs)
+        segmentation = segmentation_function(
+            image, model=model, tiling=tiling, scale=scale, verbose=verbose, voxel_size=voxel_size, **kwargs
+        )
     else:
-        raise ValueError(f"Unknown model type: {model_type}")
+        segmentation = segmentation_function(
+            image, model=model, tiling=tiling, scale=scale, verbose=verbose, **kwargs
+        )
     return segmentation
