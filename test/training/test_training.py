@@ -69,7 +69,7 @@ class TestTraining(unittest.TestCase):
             n_iterations=6,
             teacher_warmup_iterations=6,
             n_samples_train=5,
-            n_samples_val=1,
+            n_samples_val=2,
         )
         semisupervised_training(**kwargs)
 
