@@ -30,6 +30,7 @@ def semisupervised_training(
     supervised_sampler: Optional[callable] = None,
     backbone: Optional[str] = None,
     model_type: Optional[str] = None,
+    encoder_checkpoint: Optional[str] = None,
     aug_dict: Optional[dict] = None,
     separate_backward: bool = False,
     check: bool = False,
@@ -85,6 +86,8 @@ def semisupervised_training(
             The ViT backbones must be set together with `model_type`.
         model_type: Model type for the selected ViT `backbone` model family, for example "vit_b" or
             "vit_b_em_organelles" for "sam".
+        encoder_checkpoint: Path to the pretrained encoder weights for `backbone`.
+            By default they are fetched for `backbone` and `model_type`.
         aug_dict: The augmentations for the teacher and the student, with keys "intensity" and "geometrical".
             Defaults to Gaussian blur and noise, plus random flips and 90-degree rotations.
         separate_backward: Whether to backpropagate each loss term separately to reduce peak memory.
@@ -116,6 +119,7 @@ def semisupervised_training(
             supervised_sampler=supervised_sampler,
             backbone=backbone,
             model_type=model_type,
+            encoder_checkpoint=encoder_checkpoint,
             aug_dict=aug_dict,
             separate_backward=separate_backward,
             check=True,
@@ -148,6 +152,7 @@ def semisupervised_training(
                 n_samples_val=n_samples_val,
                 backbone=backbone,
                 model_type=model_type,
+                encoder_checkpoint=encoder_checkpoint,
                 check=False,
             )
         source_checkpoint = os.path.dirname(warmup_checkpoint)
@@ -180,6 +185,7 @@ def semisupervised_training(
         supervised_sampler=supervised_sampler,
         backbone=backbone,
         model_type=model_type,
+        encoder_checkpoint=encoder_checkpoint,
         aug_dict=aug_dict,
         separate_backward=separate_backward,
         check=False,

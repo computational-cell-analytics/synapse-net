@@ -48,6 +48,7 @@ def mean_teacher_adaptation(
     supervised_sampler: Optional[callable] = None,
     backbone: Optional[str] = None,
     model_type: Optional[str] = None,
+    encoder_checkpoint: Optional[str] = None,
     aug_dict: Optional[dict] = None,
     separate_backward: bool = False,
     check: bool = False,
@@ -107,6 +108,8 @@ def mean_teacher_adaptation(
             The ViT backbones must be set together with `model_type`.
         model_type: Model type for the selected ViT `backbone` model family, for example "vit_b" or
             "vit_b_em_organelles" for "sam".
+        encoder_checkpoint: Path to the pretrained encoder weights for `backbone`.
+            By default they are fetched for `backbone` and `model_type`.
         aug_dict: The augmentations for the teacher and the student, with keys "intensity" and "geometrical".
             Defaults to Gaussian blur and noise, plus random flips and 90-degree rotations.
             The noise is scaled with `clip_max` to match the range of `raw_transform`.
@@ -136,11 +139,13 @@ def mean_teacher_adaptation(
         if backbone == "cryosiam":
             model = get_cryozoounet(out_channels=2, encoder=backbone, final_activation="Sigmoid")
         elif backbone is not None:
+            if encoder_checkpoint is None:
+                encoder_checkpoint = _get_checkpoint(backbone=backbone, model_type=model_type)
             model = get_unetr_model(
                 ndim=2 if is_2d else 3,
                 backbone=backbone,
                 model_type=model_type,
-                encoder_checkpoint=_get_checkpoint(backbone=backbone, model_type=model_type),
+                encoder_checkpoint=encoder_checkpoint,
                 out_channels=2, final_activation="Sigmoid",
             )
         elif is_2d:

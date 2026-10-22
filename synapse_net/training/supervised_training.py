@@ -41,6 +41,7 @@ def supervised_training(
     mask_channel: bool = False,
     backbone: Optional[str] = None,
     model_type: Optional[str] = None,
+    encoder_checkpoint: Optional[str] = None,
     checkpoint_path: Optional[str] = None,
     save_every_kth_epoch: Optional[int] = None,
     **loader_kwargs,
@@ -93,7 +94,9 @@ def supervised_training(
             The ViT backbones must be set together with `model_type`.
         model_type: Model type for the selected ViT `backbone` model family, for example "vit_b" or
             "vit_b_em_organelles" for "sam".
-        checkpoint_path: Path to the directory where 'best.pt' resides; continue training this model.
+        encoder_checkpoint: Path to the pretrained encoder weights for `backbone`.
+            By default they are fetched for `backbone` and `model_type`.
+        checkpoint_path: Path to the directory with 'best.pt'; continue training this model.
         save_every_kth_epoch: Save checkpoints after every kth epoch in a separate file.
             The corresponding checkpoints will be saved with the naming scheme 'epoch-{epoch}.pt'.
         loader_kwargs: Additional keyword arguments for the dataloader.
@@ -142,10 +145,12 @@ def supervised_training(
         model = get_cryozoounet(out_channels=out_channels, encoder=backbone, final_activation="Sigmoid")
     elif backbone is not None:
         assert in_channels == 1
+        if encoder_checkpoint is None:
+            encoder_checkpoint = _get_checkpoint(backbone=backbone, model_type=model_type)
         model = get_unetr_model(
             ndim=2 if is_2d else 3,
             backbone=backbone, model_type=model_type,
-            encoder_checkpoint=_get_checkpoint(backbone=backbone, model_type=model_type),
+            encoder_checkpoint=encoder_checkpoint,
             out_channels=out_channels, final_activation="Sigmoid",
         )
     elif is_2d:
