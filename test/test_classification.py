@@ -94,6 +94,22 @@ class TestClassification(unittest.TestCase):
             "bbox_size": 25, "halo": 2, "idx_to_label": {0: "a", 1: "b"}, "normalization": None,
         })
 
+    def test_export(self):
+        from synapse_net.inference.classification import export_classification_model, load_classification_model
+
+        self._save_checkpoint_without_json(
+            bbox_size=25, halo=2, label_to_index={"b": 1, "a": 0}, normalization=None,
+        )
+        model, metadata = load_classification_model(self.tmp_folder, device="cpu")
+        export_path = os.path.join(self.tmp_folder, "exported.pt")
+        export_classification_model(self.tmp_folder, export_path)
+        os.remove(os.path.join(self.tmp_folder, "best.pt"))
+
+        exported_model, exported_metadata = load_classification_model(export_path, device="cpu")
+        self.assertEqual(exported_metadata, metadata)
+        for key, value in model.state_dict().items():
+            self.assertTrue(torch.equal(exported_model.state_dict()[key], value))
+
     def test_resized_training_is_rejected(self):
         from synapse_net.inference.classification import load_classification_model
 

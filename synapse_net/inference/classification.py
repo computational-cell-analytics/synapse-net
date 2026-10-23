@@ -70,7 +70,10 @@ def _get_metadata(checkpoint: Dict, checkpoint_path: str) -> Dict:
     if idx_to_label is None or bbox_size is None:
         raise ValueError(f"Could not find the class names or the cut-out size (bbox_size) in {checkpoint_path}.")
 
-    normalization = getattr(dataset, "normalization", DEFAULT_NORMALIZATION)
+    # Exported checkpoints store it in init; None there means no normalization.
+    normalization = init["normalization"] if "normalization" in init else getattr(
+        dataset, "normalization", DEFAULT_NORMALIZATION
+    )
     if normalization is not None and not isinstance(normalization, dict):
         if type(normalization).__name__ != "CryoETNormalize":
             raise ValueError(f"Unsupported normalization {type(normalization).__name__} in {checkpoint_path}.")
@@ -120,6 +123,20 @@ def load_classification_model(
     model.load_state_dict(state)
     model.eval().to(device)
     return model, metadata
+
+
+def export_classification_model(checkpoint_path: str, output_path: str) -> None:
+    """Export a training checkpoint to a small checkpoint that only contains what inference needs.
+
+    Training checkpoints also store the optimizer state and the pickled training dataset, which make
+    them ~3x larger and contain absolute paths to the training data.
+
+    Args:
+        checkpoint_path: A checkpoint folder containing 'best.pt', or the path to a checkpoint file.
+        output_path: Where to save the exported checkpoint (.pt), which `load_classification_model` can load.
+    """
+    model, metadata = load_classification_model(checkpoint_path, device="cpu")
+    torch.save({"model_state": model.state_dict(), "init": metadata}, output_path)
 
 
 def _extract_cube(image: np.ndarray, center: Tuple[int, ...], size: int) -> np.ndarray:
