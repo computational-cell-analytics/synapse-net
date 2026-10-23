@@ -10,7 +10,7 @@ from skimage.data import binary_blobs
 from skimage.measure import label
 
 from synapse_net.training.domain_adaptation import main as domain_adaptation_main, _resolve_source_checkpoint
-from synapse_net.training.supervised_training import get_3d_model
+from synapse_net.training.models import get_3d_model
 
 
 class TestTrainingCLI(unittest.TestCase):
