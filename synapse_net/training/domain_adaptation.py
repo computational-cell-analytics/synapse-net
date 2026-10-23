@@ -221,7 +221,9 @@ def mean_teacher_adaptation(
         supervised_loss=loss,
         supervised_loss_and_metric=loss_and_metric,
         logger=self_training.SelfTrainingTensorboardLogger,
-        mixed_precision=True,
+        # On the CPU, mixed precision uses bfloat16. It is very slow without hardware support,
+        # and the kornia augmentations do not accept it.
+        mixed_precision=device.type == "cuda",
         log_image_interval=100,
         compile_model=False,
         device=device,
