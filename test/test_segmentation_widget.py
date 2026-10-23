@@ -71,7 +71,7 @@ class TestSegmentationFunctionResolver(unittest.TestCase):
             ("active_zone",): segment_active_zone,
             ("compartments",): segment_compartments,
             ("ribbon",): _segment_ribbon_AZ,
-            ("cristae", "cristae2", "cristae3", "cristae4"): segment_cristae,
+            ("cristae", "cristae2", "cristae3", "cristae4", "cristae5"): segment_cristae,
         }
         for model_types, expected_function in expected_functions.items():
             for model_type in model_types:
