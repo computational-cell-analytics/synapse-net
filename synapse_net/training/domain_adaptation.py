@@ -12,12 +12,10 @@ import torch_em
 import torch_em.self_training as self_training
 from elf.io import open_file
 
-from torch_em.model.cryozoo import get_cryozoounet
-from torch_em.model.unetr import get_unetr_model
 from torch_em.transform.invertible_augmentations import MeanTeacherAugmenters, DEFAULT_WEAK_AUGMENTATIONS
 
 from .dataloaders import get_supervised_loader, get_unsupervised_loader, _determine_ndim
-from .models import get_2d_model, get_3d_model, get_raw_transform, _get_checkpoint
+from .models import get_raw_transform, _check_backbone, _get_model
 from .supervised_training import _derive_key_from_files
 from ..inference.inference import get_model_path, compute_scale_from_voxel_size, get_available_models
 from ..inference.util import _restore_legacy_attributes, _Scaler
@@ -117,18 +115,7 @@ def mean_teacher_adaptation(
         check: Whether to check the training and validation loaders instead of running training.
     """
     assert (supervised_train_paths is None) == (supervised_val_paths is None)
-    if backbone == "cryosiam":
-        if model_type is not None:
-            raise ValueError(f"The 'cryosiam' backbone has no model_type; got model_type='{model_type}'.")
-        if _determine_ndim(patch_shape)[0]:
-            raise ValueError(f"The 'cryosiam' backbone supports only 3D training; got patch_shape={patch_shape}.")
-        if any(s % 8 for s in patch_shape):
-            raise ValueError(f"The patch_shape for 'cryosiam' backbone must be divisible by 8; got {patch_shape}.")
-    elif (backbone is None) != (model_type is None):
-        raise ValueError(
-            "backbone and model_type must both be set for ViT backbones; "
-            f"got backbone={backbone} and model_type={model_type}."
-        )
+    _check_backbone(backbone, model_type, patch_shape)
     is_2d, _ = _determine_ndim(patch_shape)
 
     if source_checkpoint is None:
@@ -136,23 +123,10 @@ def mean_teacher_adaptation(
         # that's why we have the assertion here.
         assert supervised_train_paths is not None
         print("Mean teacher training from scratch (AdaMT).")
-        if backbone == "cryosiam":
-            model = get_cryozoounet(out_channels=2, encoder=backbone, final_activation="Sigmoid")
-        elif backbone is not None:
-            if encoder_checkpoint is None:
-                encoder_checkpoint = _get_checkpoint(backbone=backbone, model_type=model_type)
-            model = get_unetr_model(
-                ndim=2 if is_2d else 3,
-                backbone=backbone,
-                model_type=model_type,
-                encoder_checkpoint=encoder_checkpoint,
-                out_channels=2, final_activation="Sigmoid",
-            )
-        elif is_2d:
-            model = get_2d_model(out_channels=2)
-        else:
-            model = get_3d_model(out_channels=2)
-
+        model = _get_model(
+            patch_shape, out_channels=2, backbone=backbone,
+            model_type=model_type, encoder_checkpoint=encoder_checkpoint,
+        )
         reinit_teacher = True
     else:
         print("Mean teacher training initialized from source model:", source_checkpoint)

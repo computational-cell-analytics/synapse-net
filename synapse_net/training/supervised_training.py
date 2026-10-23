@@ -5,12 +5,10 @@ from typing import Optional, Tuple, Union
 import torch
 import torch_em
 from sklearn.model_selection import train_test_split
-from torch_em.model.cryozoo import get_cryozoounet
-from torch_em.model.unetr import get_unetr_model
 
 from synapse_net.inference.inference import get_model_path, get_available_models
-from synapse_net.training.models import get_2d_model, get_3d_model, get_raw_transform, _get_checkpoint
-from synapse_net.training.dataloaders import get_supervised_loader, _determine_ndim
+from synapse_net.training.models import get_raw_transform, _check_backbone, _get_model
+from synapse_net.training.dataloaders import get_supervised_loader
 
 
 def supervised_training(
@@ -101,18 +99,7 @@ def supervised_training(
             The corresponding checkpoints will be saved with the naming scheme 'epoch-{epoch}.pt'.
         loader_kwargs: Additional keyword arguments for the dataloader.
     """
-    if backbone == "cryosiam":
-        if model_type is not None:
-            raise ValueError(f"The 'cryosiam' backbone has no model_type; got model_type='{model_type}'.")
-        if _determine_ndim(patch_shape)[0]:
-            raise ValueError(f"The 'cryosiam' backbone supports only 3D training; got patch_shape={patch_shape}.")
-        if any(s % 8 for s in patch_shape):
-            raise ValueError(f"The patch_shape for 'cryosiam' backbone must be divisible by 8; got {patch_shape}.")
-    elif (backbone is None) != (model_type is None):
-        raise ValueError(
-            "backbone and model_type must both be set for ViT backbones; "
-            f"got backbone={backbone} and model_type={model_type}."
-        )
+    _check_backbone(backbone, model_type, patch_shape)
 
     if raw_transform is None:
         raw_transform = get_raw_transform(backbone)[0]
@@ -136,27 +123,13 @@ def supervised_training(
         check_loader(val_loader, n_samples=4)
         return
 
-    is_2d, _ = _determine_ndim(patch_shape)
-
     if checkpoint_path is not None:
         model = torch_em.util.load_model(checkpoint=checkpoint_path)
-    elif backbone == "cryosiam":
-        assert in_channels == 1
-        model = get_cryozoounet(out_channels=out_channels, encoder=backbone, final_activation="Sigmoid")
-    elif backbone is not None:
-        assert in_channels == 1
-        if encoder_checkpoint is None:
-            encoder_checkpoint = _get_checkpoint(backbone=backbone, model_type=model_type)
-        model = get_unetr_model(
-            ndim=2 if is_2d else 3,
-            backbone=backbone, model_type=model_type,
-            encoder_checkpoint=encoder_checkpoint,
-            out_channels=out_channels, final_activation="Sigmoid",
-        )
-    elif is_2d:
-        model = get_2d_model(out_channels=out_channels, in_channels=in_channels)
     else:
-        model = get_3d_model(out_channels=out_channels, in_channels=in_channels)
+        model = _get_model(
+            patch_shape, out_channels, in_channels=in_channels, backbone=backbone,
+            model_type=model_type, encoder_checkpoint=encoder_checkpoint,
+        )
 
     base_loss = loss_fn if loss_fn is not None else torch_em.loss.DiceLoss()
     metric = base_loss

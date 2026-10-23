@@ -6,7 +6,11 @@ import numpy as np
 import torch
 
 from torch_em.model import UNet2d, AnisotropicUNet
+from torch_em.model.cryozoo import get_cryozoounet
+from torch_em.model.unetr import get_unetr_model
 from torch_em.transform.raw import normalize_percentile, get_raw_transform_for_pretrained_vit
+
+from .dataloaders import _determine_ndim
 
 try:
     from micro_sam.v1.util import models as microsam_models
@@ -82,6 +86,49 @@ def get_2d_model(
     return model
 
 
+def _check_backbone(backbone, model_type, patch_shape):
+    if backbone == "cryosiam":
+        if model_type is not None:
+            raise ValueError(f"The 'cryosiam' backbone has no model_type; got model_type='{model_type}'.")
+        if _determine_ndim(patch_shape)[0]:
+            raise ValueError(f"The 'cryosiam' backbone only supports 3D training; got patch_shape={patch_shape}.")
+        if any(s % 8 for s in patch_shape):
+            raise ValueError(
+                f"The patch_shape for 'cryosiam' backbone must be divisible by 8; got patch_shape={patch_shape}."
+            )
+    elif (backbone is None) != (model_type is None):
+        raise ValueError(
+            "backbone and model_type must both be set for ViT backbones; "
+            f"got backbone={backbone} and model_type={model_type}."
+        )
+
+
+def _get_model(
+    patch_shape, out_channels, in_channels=1, backbone=None, model_type=None,
+    encoder_checkpoint=None, final_activation="Sigmoid",
+):
+    is_2d, ndim = _determine_ndim(patch_shape)
+
+    if backbone == "cryosiam":
+        assert in_channels == 1
+        return get_cryozoounet(out_channels=out_channels, encoder=backbone, final_activation=final_activation)
+
+    if backbone is not None:
+        assert in_channels == 1
+        if encoder_checkpoint is None:
+            encoder_checkpoint = _get_checkpoint(backbone=backbone, model_type=model_type)
+        return get_unetr_model(
+            ndim=ndim, backbone=backbone, model_type=model_type,
+            encoder_checkpoint=encoder_checkpoint,
+            out_channels=out_channels, final_activation=final_activation,
+        )
+
+    if is_2d:
+        return get_2d_model(out_channels=out_channels, in_channels=in_channels, final_activation=final_activation)
+
+    return get_3d_model(out_channels=out_channels, in_channels=in_channels, final_activation=final_activation)
+
+
 def normalize_percentile_to_0_1_inverted(raw):
     """Normalize the raw data with percentiles to [0, 1] and invert the contrast."""
     raw = 1 - normalize_percentile(raw)
@@ -105,7 +152,7 @@ def get_raw_transform(backbone):
     """
     if backbone == "cryosiam":
         return normalize_percentile_to_0_1_inverted, 1
-     
+
     if backbone not in ("sam", "sam2", "dinov2", "dinov3", None):
         raise ValueError(f"Unsupported backbone '{backbone}'.")
     return get_raw_transform_for_pretrained_vit(backbone)
