@@ -16,6 +16,10 @@ contributions:
     - id: synapse_net.refine_classification
       python_name: synapse_net.tools.refine_classification_widget:RefineClassificationWidget
       title: Refine Classification
+    # Temporary: LDCV split-A label check, remove once the verdicts are in.
+    - id: synapse_net.ldcv_label_review
+      python_name: synapse_net.tools.label_review_widget:LabelReviewWidget
+      title: LDCV Label Review
     - id: synapse_net.distance_measure
       python_name: synapse_net.tools.distance_measure_widget:DistanceMeasureWidget
       title: Distance Measurement
@@ -67,6 +71,8 @@ contributions:
       display_name: Classification
     - command: synapse_net.refine_classification
       display_name: Refine Classification
+    - command: synapse_net.ldcv_label_review
+      display_name: LDCV Label Review (temporary)
     - command: synapse_net.distance_measure
       display_name: Distance Measurement
     - command: synapse_net.morphology
