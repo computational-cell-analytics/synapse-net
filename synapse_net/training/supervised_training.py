@@ -7,6 +7,7 @@ import torch_em
 from sklearn.model_selection import train_test_split
 
 from synapse_net.inference.inference import get_model_path, get_available_models
+from synapse_net.inference.util import _restore_legacy_attributes
 from synapse_net.training.models import get_raw_transform, _check_backbone, _get_model
 from synapse_net.training.dataloaders import get_supervised_loader
 
@@ -124,7 +125,7 @@ def supervised_training(
         return
 
     if checkpoint_path is not None:
-        model = torch_em.util.load_model(checkpoint=checkpoint_path)
+        model = _restore_legacy_attributes(torch_em.util.load_model(checkpoint=checkpoint_path))
     else:
         model = _get_model(
             patch_shape, out_channels, in_channels=in_channels, backbone=backbone,
