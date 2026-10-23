@@ -156,6 +156,9 @@ def get_prediction(
             If not given, the prediction will be computed in moemory.
         devices: The devices for running prediction. If not given will use the GPU
             if available, otherwise the CPU.
+        preprocess: The function used to normalize the input. It should match the `raw_transform`
+            used during training. Applied per block during prediction. If not given, torch_em 
+            standardization is used.
 
     Returns:
         The predicted volume.
@@ -235,6 +238,9 @@ def get_prediction_torch_em(
             If not given, the prediction will be computed in moemory.
         devices: The devices for running prediction. If not given will use the GPU
             if available, otherwise the CPU.
+        preprocess: The function used to normalize the input. It should match the `raw_transform`
+            used during training. By default, torch_em standardization is used.
+            Applied to the whole volume if the input is np.ndarray, otherwise applied per block.
 
     Returns:
         The predicted volume.

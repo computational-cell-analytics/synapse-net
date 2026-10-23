@@ -4,28 +4,22 @@ from glob import glob
 from pathlib import Path
 from typing import Optional, Tuple
 
+from sklearn.model_selection import train_test_split
+
 import mrcfile
 import torch
 import torch_em
 import torch_em.self_training as self_training
 from elf.io import open_file
-from sklearn.model_selection import train_test_split
 
-from .semisupervised_training import get_unsupervised_loader
-from .supervised_training import (
-    get_2d_model, get_3d_model, get_supervised_loader, _determine_ndim, _derive_key_from_files
-)
+from torch_em.transform.invertible_augmentations import MeanTeacherAugmenters, DEFAULT_WEAK_AUGMENTATIONS
+
+from .dataloaders import get_supervised_loader, get_unsupervised_loader, _determine_ndim
+from .models import get_raw_transform, _check_backbone, _get_model
+from .supervised_training import _derive_key_from_files
 from ..inference.inference import get_model_path, compute_scale_from_voxel_size, get_available_models
 from ..inference.util import _restore_legacy_attributes, _Scaler
 
-# configure weak augmentations
-from torch_em.transform.invertible_augmentations import DEFAULT_WEAK_AUGMENTATIONS
-
-# TODO - test settings - fixed kernel size for `RandomGaussianBlur`, fixed std for `RandomGaussianBlur`
-DEFAULT_WEAK_AUGMENTATIONS["intensity"] = {
-    "RandomGaussianBlur": {"kernel_size": (19, 19), "sigma": (0.1, 3.0)},
-    "RandomGaussianNoise": {"mean": (0.0), "std": (0.1)},
-}    
 
 def mean_teacher_adaptation(
     name: str,
@@ -50,6 +44,11 @@ def mean_teacher_adaptation(
     sample_mask_key: Optional[str] = None,
     unsupervised_sampler: Optional[callable] = None,
     supervised_sampler: Optional[callable] = None,
+    backbone: Optional[str] = None,
+    model_type: Optional[str] = None,
+    encoder_checkpoint: Optional[str] = None,
+    aug_dict: Optional[dict] = None,
+    separate_backward: bool = False,
     check: bool = False,
 ) -> None:
     """Run domain adaptation to transfer a network trained on a source domain for a supervised
@@ -60,10 +59,10 @@ def mean_teacher_adaptation(
      'supervised_val_paths' are not given.
     - semi-supervised domain adaptation: domain adaptation on unlabeled and labeled data,
       when 'supervised_train_paths' and 'supervised_val_paths' are given.
-    
+
     Args:
         name: The name for the checkpoint to be trained.
-        unsupervsied_train_paths: Filepaths to the hdf5 files or similar file formats
+        unsupervised_train_paths: Filepaths to the hdf5 files or similar file formats
             for the training data in the target domain.
             This training data is used for unsupervised learning, so it does not require labels.
         unsupervised_val_paths: Filepaths to the hdf5 files or similar file formats
@@ -79,13 +78,14 @@ def mean_teacher_adaptation(
             from scratch. In this case `supervised_train_paths` and `supervised_val_paths` have to
             be given in order to provide training data from the source domain.
         supervised_train_paths: Filepaths to the hdf5 files for the training data in the source domain.
-            This training data is optional. If given, it is used for unsupervised learnig and requires labels.
-        supervised_val_paths: Filepaths to the df5 files for the validation data in the source domain.
-            This validation data is optional. If given, it is used for unsupervised learnig and requires labels.
+            This training data is optional. If given, it is used for supervised learning and requires labels.
+        supervised_val_paths: Filepaths to the hdf5 files for the validation data in the source domain.
+            This validation data is optional. If given, it is used for supervised learning and requires labels.
         confidence_threshold: The threshold for filtering data in the unsupervised loss.
             The label filtering is done based on the uncertainty of network predictions, and only
             the data with higher certainty than this threshold is used for training.
         raw_key: The key that holds the raw data inside of the hdf5 or similar files.
+        raw_key_supervised: The key that holds the raw data inside of the hdf5 files for supervised learning.
         label_key: The key that holds the labels inside of the hdf5 files for supervised learning.
             This is only required if `supervised_train_paths` and `supervised_val_paths` are given.
         batch_size: The batch size for training.
@@ -101,20 +101,32 @@ def mean_teacher_adaptation(
         unsupervised_sampler: Sampler to accept or reject patches for the unsupervised data stream.
         supervised_sampler: Sampler to accept or reject patches for the supervised data stream.
             Pass `False` to disable.
+        backbone: The pretrained encoder. Options: "sam", "sam2", "dinov2", "dinov3" (ViT encoders of a UNETR),
+            or "cryosiam" (3D CNN encoder of a CryoZooUNet).
+            The ViT backbones must be set together with `model_type`.
+        model_type: Model type for the selected ViT `backbone` model family, for example "vit_b" or
+            "vit_b_em_organelles" for "sam".
+        encoder_checkpoint: Path to the pretrained encoder weights for `backbone`.
+            By default they are fetched for `backbone` and `model_type`.
+        aug_dict: The augmentations for the teacher and the student, with keys "intensity" and "geometrical".
+            Defaults to Gaussian blur and noise, plus random flips and 90-degree rotations.
+            The noise is scaled with `clip_max` to match the range of `raw_transform`.
+        separate_backward: Whether to backpropagate each loss term separately to reduce peak memory.
         check: Whether to check the training and validation loaders instead of running training.
-    """  # noqa
+    """
     assert (supervised_train_paths is None) == (supervised_val_paths is None)
+    _check_backbone(backbone, model_type, patch_shape)
     is_2d, _ = _determine_ndim(patch_shape)
 
     if source_checkpoint is None:
         # training from scratch only makes sense if we have supervised training data
         # that's why we have the assertion here.
         assert supervised_train_paths is not None
-        print("Mean teacher training from scratch (AdaMT)")
-        if is_2d:
-            model = get_2d_model(out_channels=2)
-        else:
-            model = get_3d_model(out_channels=2)
+        print("Mean teacher training from scratch (AdaMT).")
+        model = _get_model(
+            patch_shape, out_channels=2, backbone=backbone,
+            model_type=model_type, encoder_checkpoint=encoder_checkpoint,
+        )
         reinit_teacher = True
     else:
         print("Mean teacher training initialized from source model:", source_checkpoint)
@@ -132,8 +144,18 @@ def mean_teacher_adaptation(
     loss = self_training.SelfTrainingLossWithInvertibleAugmentations()
     loss_and_metric = self_training.SelfTrainingLossAndMetricWithInvertibleAugmentations()
 
+    raw_transform, clip_max = get_raw_transform(backbone)
+
     ndim = 2 if is_2d else 3
-    augmenters = torch_em.transform.invertible_augmentations.MeanTeacherAugmenters(ndim=ndim)
+    if aug_dict is None:
+        aug_dict = {
+            "intensity": {
+                "RandomGaussianBlur": {"kernel_size": (19, 19), "sigma": (0.1, 3.0)},
+                "RandomGaussianNoise": {"mean": 0.0, "std": 0.1 if clip_max is None else 0.015 * clip_max},
+            },
+            "geometrical": DEFAULT_WEAK_AUGMENTATIONS["geometrical"],
+        }
+    augmenters = MeanTeacherAugmenters(ndim=ndim, clip_max=clip_max, aug_dict=aug_dict)
 
     unsupervised_train_loader = get_unsupervised_loader(
         data_paths=unsupervised_train_paths,
@@ -144,6 +166,7 @@ def mean_teacher_adaptation(
         sample_mask_paths=train_mask_paths,
         sample_mask_key=sample_mask_key,
         sampler=unsupervised_sampler,
+        raw_transform=raw_transform,
     )
     unsupervised_val_loader = get_unsupervised_loader(
         data_paths=unsupervised_val_paths,
@@ -154,6 +177,7 @@ def mean_teacher_adaptation(
         sample_mask_paths=val_mask_paths,
         sample_mask_key=sample_mask_key,
         sampler=unsupervised_sampler,
+        raw_transform=raw_transform,
     )
 
     if supervised_train_paths is not None:
@@ -161,12 +185,12 @@ def mean_teacher_adaptation(
         supervised_train_loader = get_supervised_loader(
             supervised_train_paths, raw_key_supervised, label_key,
             patch_shape, batch_size, n_samples=n_samples_train,
-            sampler=supervised_sampler,
+            sampler=supervised_sampler, raw_transform=raw_transform,
         )
         supervised_val_loader = get_supervised_loader(
             supervised_val_paths, raw_key_supervised, label_key,
             patch_shape, batch_size, n_samples=n_samples_val,
-            sampler=supervised_sampler,
+            sampler=supervised_sampler, raw_transform=raw_transform,
         )
     else:
         supervised_train_loader = None
@@ -197,13 +221,16 @@ def mean_teacher_adaptation(
         supervised_loss=loss,
         supervised_loss_and_metric=loss_and_metric,
         logger=self_training.SelfTrainingTensorboardLogger,
-        mixed_precision=True,
+        # On the CPU, mixed precision uses bfloat16. It is very slow without hardware support,
+        # and the kornia augmentations do not accept it.
+        mixed_precision=device.type == "cuda",
         log_image_interval=100,
         compile_model=False,
         device=device,
         reinit_teacher=reinit_teacher,
         save_root=save_root,
         augmenter=augmenters,
+        separate_backward=separate_backward,
     )
     trainer.fit(n_iterations)
 

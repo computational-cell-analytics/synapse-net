@@ -1,4 +1,5 @@
 import os
+import platform
 import sys
 import unittest
 from shutil import rmtree
@@ -10,7 +11,9 @@ from skimage.data import binary_blobs
 from skimage.measure import label
 
 from synapse_net.training.domain_adaptation import main as domain_adaptation_main, _resolve_source_checkpoint
-from synapse_net.training.supervised_training import get_3d_model
+from synapse_net.training.models import get_3d_model
+
+skip_cli_on_windows = unittest.skipIf(platform.system() == "Windows", "CLI does not work on Windows")
 
 
 class TestTrainingCLI(unittest.TestCase):
@@ -102,6 +105,7 @@ class TestTrainingCLI(unittest.TestCase):
 
         return data_out, label_out
 
+    @skip_cli_on_windows
     def test_supervised_training_with_val_data(self):
         train_image_folder, train_label_folder = self._write_mrc_data(
             self.train_data, os.path.join(self.tmp_folder, "train"), labels=self.train_labels,
@@ -114,12 +118,14 @@ class TestTrainingCLI(unittest.TestCase):
             val_image_folder=val_image_folder, val_label_folder=val_label_folder,
         )
 
+    @skip_cli_on_windows
     def test_supervised_training_without_val_data(self):
         train_image_folder, train_label_folder = self._write_mrc_data(
             self.train_data, os.path.join(self.tmp_folder, "train"), labels=self.train_labels,
         )
         self._test_supervised_training(train_image_folder, train_label_folder, file_pattern="*.mrc")
 
+    @skip_cli_on_windows
     def test_supervised_training_with_initialization(self):
         train_image_folder, train_label_folder = self._write_mrc_data(
             self.train_data, os.path.join(self.tmp_folder, "train"), labels=self.train_labels,
@@ -178,6 +184,7 @@ class TestTrainingCLI(unittest.TestCase):
 
         self.assertEqual(adaptation.call_args.kwargs["source_checkpoint"], checkpoint_path)
 
+    @skip_cli_on_windows
     def test_domain_adaptation(self):
         train_image_folder, _ = self._write_mrc_data(self.train_data, os.path.join(self.tmp_folder, "train"))
         source_checkpoint = os.path.join(self.tmp_folder, "custom-source.pt")
