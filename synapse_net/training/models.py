@@ -195,7 +195,10 @@ def _get_checkpoint(backbone, model_type, return_decoder_path=False):
         decoder_path = None
 
     elif backbone == "dinov3":
-        raise NotImplementedError("The 'dinov3' backbone is not available yet.")
+        if get_vfm_model is None:
+            raise RuntimeError("The 'dinov3' backbone requires micro_sam with the 'micro_sam.models.vfm' module.")
+        encoder_checkpoint = get_vfm_model(f"{model_type}_dinov3", device="cpu").model.state_dict()
+        decoder_path = None
     else:
         raise ValueError(f"Unsupported backbone '{backbone}'.")
 
