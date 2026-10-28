@@ -177,6 +177,8 @@ def get_prediction(
 
     if tiling is None:
         tiling = get_default_tiling()
+    else:
+        print(f"Using tiling: {tiling}")
 
     # Normalize the whole input volume if it is a numpy array.
     # Otherwise we have a zarr array or similar as input, and can't normalize it en-block.
