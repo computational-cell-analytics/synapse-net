@@ -136,6 +136,7 @@ def get_prediction(
     prediction: Optional[ArrayLike] = None,
     devices: Optional[List[str]] = None,
     preprocess: Optional[callable] = None,
+    dtype: torch.dtype = torch.float32,
 ) -> ArrayLike:
     """Run prediction on a given volume.
 
@@ -157,8 +158,10 @@ def get_prediction(
         devices: The devices for running prediction. If not given will use the GPU
             if available, otherwise the CPU.
         preprocess: The function used to normalize the input. It should match the `raw_transform`
-            used during training. Applied per block during prediction. If not given, torch_em 
+            used during training. Applied per block during prediction. If not given, torch_em
             standardization is used.
+        dtype: The dtype for running the model. Pass `torch.bfloat16` to predict with bf16 autocast,
+            which is much faster on GPUs with bf16 support. By default, the model runs in float32.
 
     Returns:
         The predicted volume.
@@ -205,7 +208,7 @@ def get_prediction(
         # print(f"updated_tiling {updated_tiling}")
         prediction = get_prediction_torch_em(
             input_volume, updated_tiling, model_path, model, verbose, with_channels,
-            mask=mask, prediction=prediction, devices=devices, preprocess=preprocess,
+            mask=mask, prediction=prediction, devices=devices, preprocess=preprocess, dtype=dtype,
         )
 
     return prediction
@@ -222,6 +225,7 @@ def get_prediction_torch_em(
     prediction: Optional[ArrayLike] = None,
     devices: Optional[List[str]] = None,
     preprocess: Optional[callable] = None,
+    dtype: torch.dtype = torch.float32,
 ) -> np.ndarray:
     """Run prediction using torch-em on a given volume.
 
@@ -241,6 +245,8 @@ def get_prediction_torch_em(
         preprocess: The function used to normalize the input. It should match the `raw_transform`
             used during training. By default, torch_em standardization is used.
             Applied to the whole volume if the input is np.ndarray, otherwise applied per block.
+        dtype: The dtype for running the model. Pass `torch.bfloat16` to predict with bf16 autocast,
+            which is much faster on GPUs with bf16 support. By default, the model runs in float32.
 
     Returns:
         The predicted volume.
@@ -280,11 +286,18 @@ def get_prediction_torch_em(
             preprocess = None if isinstance(input_volume, np.ndarray) else torch_em.transform.raw.standardize
         else:
             preprocess = preprocess
+
+        def predict_with_autocast(net, inp):
+            with torch.autocast(device_type=torch.device(devices[0]).type, dtype=dtype):
+                return net(inp).float()
+
+        prediction_function = None if dtype == torch.float32 else predict_with_autocast
+
         prediction = predict_with_halo(
             input_volume, model, gpu_ids=devices,
             block_shape=block_shape, halo=halo,
             preprocess=preprocess, with_channels=with_channels, mask=mask,
-            output=prediction,
+            output=prediction, prediction_function=prediction_function,
         )
     if verbose:
         print("Prediction time in", time.time() - t0, "s")
@@ -383,7 +396,7 @@ def inference_helper(
         output_root: The path to the output directory where the segmentation results will be saved.
         segmentation_function: The function performing the segmentation.
             This function must take the input_volume as the only argument and must return only the segmentation.
-            If you want to pass additional arguments to this function the use 'funtools.partial'
+            If you want to pass additional arguments to this function, use 'funtools.partial'
         data_ext: File extension for the image data. By default '.mrc' is used.
         extra_input_path: Filepath to extra inputs that need to be concatenated to the raw data loaded from mrc.
             This enables cristae segmentation with an extra mito channel.
