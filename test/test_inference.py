@@ -81,12 +81,14 @@ class TestTiling(unittest.TestCase):
     def _get_tiling(self, vram=None, **kwargs):
         from synapse_net.inference.util import get_default_tiling
 
+        # The device always defaults to the CPU on CI, which would override the simulated hardware.
+        no_ci = mock.patch.dict(os.environ, {"GITHUB_ACTIONS": "false"})
         if vram is None:  # Simulate the CPU.
-            with mock.patch("torch.cuda.is_available", return_value=False), \
+            with no_ci, mock.patch("torch.cuda.is_available", return_value=False), \
                     mock.patch("torch.backends.mps.is_available", return_value=False):
                 return get_default_tiling(**kwargs)
         properties = mock.Mock(total_memory=vram * 1e9)
-        with mock.patch("torch.cuda.is_available", return_value=True), \
+        with no_ci, mock.patch("torch.cuda.is_available", return_value=True), \
                 mock.patch("torch.cuda.get_device_properties", return_value=properties):
             return get_default_tiling(**kwargs)
 
