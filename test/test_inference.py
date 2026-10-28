@@ -93,7 +93,10 @@ class TestTiling(unittest.TestCase):
     def test_tiling_from_patch_shape(self):
         halo = {"z": 8, "y": 64, "x": 64}
         # The tile is at least the training patch shape, also on the CPU, where the VRAM tiling is smaller.
-        self.assertEqual(self._get_tiling(patch_shape=self.patch_shape), {"tile": self.patch_shape, "halo": halo})
+        # The CPU uses a smaller halo, because a large halo makes the prediction slow.
+        expected = {"tile": self.patch_shape, "halo": {"z": 4, "y": 16, "x": 16}}
+        self.assertEqual(self._get_tiling(patch_shape=self.patch_shape), expected)
+        self.assertEqual(self._get_tiling(12, patch_shape=self.patch_shape)["halo"], halo)
         self.assertEqual(self._get_tiling(12, patch_shape=self.patch_shape)["tile"], self.patch_shape)
         # With enough VRAM it grows by at most 20%, rounded down to the pooling factors (8 in z, 16 in y and x).
         expected = {"tile": {"z": 32, "y": 304, "x": 304}, "halo": halo}
@@ -103,8 +106,9 @@ class TestTiling(unittest.TestCase):
         # A UNETR must not grow beyond the training patch shape.
         self.assertEqual(self._get_tiling(80, patch_shape=self.patch_shape, max_growth=1.0)["tile"], self.patch_shape)
         # 2d models predict single slices.
-        expected = {"tile": {"z": 1, "y": 304, "x": 304}, "halo": {"z": 0, "y": 64, "x": 64}}
+        expected = {"tile": {"z": 1, "y": 304, "x": 304}, "halo": {"z": 0, "y": 16, "x": 16}}
         self.assertEqual(self._get_tiling(patch_shape={"y": 256, "x": 256}), expected)
+        self.assertEqual(self._get_tiling(12, patch_shape={"y": 256, "x": 256})["halo"], {"z": 0, "y": 64, "x": 64})
         # Without a patch shape the tiling only depends on the VRAM.
         self.assertEqual(self._get_tiling(80)["tile"], {"z": 80, "y": 640, "x": 640})
 

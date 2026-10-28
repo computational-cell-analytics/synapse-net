@@ -518,6 +518,7 @@ def get_default_tiling(
 
     If the patch shape that was used for training the model is given, then the tiling is derived from it:
     the tile shape is at least the training patch shape and grows by at most `max_growth` if the VRAM allows it.
+    The halo is derived from the patch shape, on the CPU it is at most 4 in z and 16 in y and x.
 
     Args:
         is_2d: Whether to return tiling settings for 2d inference.
@@ -544,8 +545,10 @@ def get_default_tiling(
         factor = 8 if axis == "z" else 16
         max_size = max(size, int(size * max_growth) // factor * factor)
         tile[axis] = min(max(tiling["tile"][axis], size), max_size)
-    # The halo is derived from the patch shape, so that it is the same for all devices.
     halo = {axis: min(size // 4, 64) for axis, size in patch_shape.items()}
+    # A large halo makes CPU inference slow, because the halo is predicted and then discarded.
+    if get_device() == "cpu":
+        halo = {axis: min(size, 4 if axis == "z" else 16) for axis, size in halo.items()}
 
     tiling = {"tile": tile, "halo": halo}
     print(f"Determined tile size for training patch shape {patch_shape}: {tiling}")

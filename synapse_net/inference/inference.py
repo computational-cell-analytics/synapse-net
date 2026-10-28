@@ -162,13 +162,13 @@ def get_model_training_patch_shape(model_type: str) -> Dict[str, int]:
     patch_shapes = {
         "active_zone": {"z": 48, "y": 384, "x": 384},  # cooper/revision/train_az.py
         "compartments": {"z": 64, "y": 384, "x": 384},  # cooper/training/train_compartments.py
-        "mitochondria": {"z": 32, "y": 256, "x": 256},  # UNCERTAIN: default of cooper/training/train_mitochondria.py
-        "mitochondria2": {"z": 32, "y": 256, "x": 256},  # UNCERTAIN: default of cooper/training/train_mitochondria.py
-        "cristae": {"z": 32, "y": 256, "x": 256},  # UNCERTAIN: assumed to be the same as for mitochondria.
-        "cristae2": {"z": 32, "y": 256, "x": 256},  # UNCERTAIN: assumed to be the same as for mitochondria.
-        "cristae3": {"z": 32, "y": 256, "x": 256},  # UNCERTAIN: assumed to be the same as for mitochondria.
-        "cristae4": {"z": 32, "y": 256, "x": 256},  # UNCERTAIN: assumed to be the same as for mitochondria.
-        "cristae5": {"z": 32, "y": 256, "x": 256},  # UNCERTAIN: assumed to be the same as for mitochondria.
+        "mitochondria": {"z": 32, "y": 256, "x": 256},  # cooper/training/train_mitochondria.py
+        "mitochondria2": {"z": 32, "y": 256, "x": 256},  # cooper/training/train_mitochondria.py
+        "cristae": {"z": 32, "y": 256, "x": 256},  # Confirmed by the model's trainer.
+        "cristae2": {"z": 32, "y": 256, "x": 256},  # Confirmed by the model's trainer.
+        "cristae3": {"z": 32, "y": 256, "x": 256},  # Confirmed by the model's trainer.
+        "cristae4": {"z": 32, "y": 256, "x": 256},  # Confirmed by the model's trainer.
+        "cristae5": {"z": 32, "y": 256, "x": 256},  # Confirmed by the model's trainer.
         "ribbon": {"z": 64, "y": 512, "x": 512},  # inner_ear/training/train_structure_segmentation.py
         "vesicles_2d": {"y": 256, "x": 256},  # cooper/training/train_vesicles.py
         "vesicles_3d": {"z": 48, "y": 256, "x": 256},  # cooper/training/train_vesicles.py
