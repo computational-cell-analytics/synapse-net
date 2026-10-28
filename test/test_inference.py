@@ -68,5 +68,33 @@ class TestInference(unittest.TestCase):
         self.assertEqual(image.shape, seg.shape)
 
 
+class TestMitochondriaSegmentation(unittest.TestCase):
+    # Test that a mitochondrion does not flood along the boundary band of a touching mitochondrion.
+    def test_touching_mitochondria(self):
+        import numpy as np
+        from synapse_net.inference.mitochondria import _run_segmentation
+
+        # Two balls with noisy foreground and boundary predictions and overlapping boundary bands.
+        shape, radius, band_width = (64, 80, 128), 18, 4
+        coords = np.indices(shape)
+        dists = [np.linalg.norm(coords - np.array([32, 40, x])[:, None, None, None], axis=0) for x in (40, 78)]
+        foreground, boundaries = np.zeros(shape, "float32"), np.zeros(shape, "float32")
+        for dist in dists:
+            foreground[dist < radius] = 1.0
+            band = (dist >= radius) & (dist < radius + band_width)
+            foreground[band] = np.maximum(foreground[band], 0.5)
+            boundaries[band] = 0.9
+        rng = np.random.default_rng(0)
+        foreground = np.clip(foreground + (foreground > 0) * 0.1 * rng.standard_normal(shape, dtype="float32"), 0, 1)
+        boundaries = np.clip(boundaries + (boundaries > 0) * 0.1 * rng.standard_normal(shape, dtype="float32"), 0, 1)
+
+        seg = _run_segmentation(foreground, boundaries, verbose=False, min_size=100, area_threshold=0)
+        insides = [dist < radius + band_width for dist in dists]
+        for this, other, dist in zip(insides, insides[::-1], dists[::-1]):
+            other_id = np.bincount(seg[dist < 6]).argmax()
+            # Without a graded boundary band, the other mitochondrion covered about 45% of this one.
+            self.assertLess((seg[this & ~other] == other_id).sum(), 0.01 * this.sum())
+
+
 if __name__ == "__main__":
     unittest.main()
