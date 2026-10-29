@@ -74,6 +74,28 @@ class TestInference(unittest.TestCase):
         image, _ = read_mrc(self.data_path)
         self.assertEqual(image.shape, seg.shape)
 
+    def test_prediction_bfloat16(self):
+        import numpy as np
+        from synapse_net.inference import get_model
+        from synapse_net.inference.util import get_prediction
+
+        image, _ = read_mrc(self.data_path)
+
+        # bf16 convolutions are slow on the CPU, so we predict a single small block.
+        tiling = {"tile": {"z": 1, "y": 256, "x": 256}, "halo": {"z": 0, "y": 32, "x": 32}}
+        image = image[:192, :192]
+        model = get_model(self.model_type)
+        kwargs = dict(model=model, tiling=tiling, verbose=False, devices=["cpu"])
+        pred_fp32 = get_prediction(image, **kwargs)
+        pred_bf16 = get_prediction(image, **kwargs, dtype=torch.bfloat16)
+        diff = np.abs(pred_fp32 - pred_bf16)
+        print(diff.max(), diff.mean(), (diff > 0.05).mean())
+
+        # autocast runs in bfloat16, but returns float32
+        self.assertEqual(pred_bf16.dtype, "float32")
+        self.assertFalse(np.array_equal(pred_fp32, pred_bf16))
+        self.assertTrue(np.allclose(pred_fp32, pred_bf16, atol=0.05))
+
 
 class TestTiling(unittest.TestCase):
     patch_shape = {"z": 32, "y": 256, "x": 256}
