@@ -32,8 +32,10 @@ def _run_segmentation(
         print("Compute connected components in", time.time() - t0, "s")
 
     t0 = time.time()
-    hmap = (dist.max() - dist) / dist.max()
-    hmap[np.logical_and(boundaries > boundary_threshold, foreground < boundary_threshold)] = (hmap + boundaries).max()
+    # Add the boundaries so that the boundary band is graded rather than a plateau of equal height:
+    # within a plateau the flooding order is unspecified, and one mitochondrion can flood along the membrane of another.
+    hmap = (dist.max() - dist) / dist.max() + boundaries
+    hmap[np.logical_and(boundaries > boundary_threshold, foreground < boundary_threshold)] = hmap.max()
     mask = (foreground + boundaries) > 0.5
 
     seg = np.zeros_like(seeds)
