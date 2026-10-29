@@ -1,10 +1,14 @@
 import os
+import tempfile
 import unittest
 from functools import partial
 from shutil import rmtree
+from types import SimpleNamespace
+from unittest import mock
 
 import imageio.v3 as imageio
 import requests
+import torch
 from synapse_net.file_utils import read_mrc
 from synapse_net.sample_data import get_sample_data
 
@@ -26,7 +30,9 @@ class TestInference(unittest.TestCase):
 
     # Test that all models can be accessed by pooch and have the necessary resolution information.
     def test_models(self):
-        from synapse_net.inference.inference import _get_model_registry, get_model_training_resolution
+        from synapse_net.inference.inference import (
+            _get_model_registry, get_model_training_patch_shape, get_model_training_resolution
+        )
 
         def check_url(url):
             try:
@@ -43,6 +49,7 @@ class TestInference(unittest.TestCase):
             url_exists = check_url(registry.get_url(name))
             self.assertTrue(url_exists)
             get_model_training_resolution(name)
+            get_model_training_patch_shape(name)
 
     def test_run_segmentation(self):
         from synapse_net.inference import run_segmentation, get_model
@@ -66,6 +73,64 @@ class TestInference(unittest.TestCase):
         seg = imageio.imread(expected_output_path)
         image, _ = read_mrc(self.data_path)
         self.assertEqual(image.shape, seg.shape)
+
+
+class TestTiling(unittest.TestCase):
+    patch_shape = {"z": 32, "y": 256, "x": 256}
+
+    def _get_tiling(self, vram=None, **kwargs):
+        from synapse_net.inference.util import get_default_tiling
+
+        # The device always defaults to the CPU on CI, which would override the simulated hardware.
+        no_ci = mock.patch.dict(os.environ, {"GITHUB_ACTIONS": "false"})
+        if vram is None:  # Simulate the CPU.
+            with no_ci, mock.patch("torch.cuda.is_available", return_value=False), \
+                    mock.patch("torch.backends.mps.is_available", return_value=False):
+                return get_default_tiling(**kwargs)
+        properties = mock.Mock(total_memory=vram * 1e9)
+        with no_ci, mock.patch("torch.cuda.is_available", return_value=True), \
+                mock.patch("torch.cuda.get_device_properties", return_value=properties):
+            return get_default_tiling(**kwargs)
+
+    def test_tiling_from_patch_shape(self):
+        halo = {"z": 8, "y": 64, "x": 64}
+        # The tile is at least the training patch shape, also on the CPU, where the VRAM tiling is smaller.
+        # The CPU uses a smaller halo, because a large halo makes the prediction slow.
+        expected = {"tile": self.patch_shape, "halo": {"z": 4, "y": 16, "x": 16}}
+        self.assertEqual(self._get_tiling(patch_shape=self.patch_shape), expected)
+        self.assertEqual(self._get_tiling(12, patch_shape=self.patch_shape)["halo"], halo)
+        self.assertEqual(self._get_tiling(12, patch_shape=self.patch_shape)["tile"], self.patch_shape)
+        # With enough VRAM it grows by at most 20%, rounded down to the pooling factors (8 in z, 16 in y and x).
+        expected = {"tile": {"z": 32, "y": 304, "x": 304}, "halo": halo}
+        self.assertEqual(self._get_tiling(80, patch_shape=self.patch_shape), expected)
+        expected = {"z": 72, "y": 608, "x": 608}
+        self.assertEqual(self._get_tiling(80, patch_shape={"z": 64, "y": 512, "x": 512})["tile"], expected)
+        # A UNETR must not grow beyond the training patch shape.
+        self.assertEqual(self._get_tiling(80, patch_shape=self.patch_shape, max_growth=1.0)["tile"], self.patch_shape)
+        # 2d models predict single slices.
+        expected = {"tile": {"z": 1, "y": 304, "x": 304}, "halo": {"z": 0, "y": 16, "x": 16}}
+        self.assertEqual(self._get_tiling(patch_shape={"y": 256, "x": 256}), expected)
+        self.assertEqual(self._get_tiling(12, patch_shape={"y": 256, "x": 256})["halo"], {"z": 0, "y": 64, "x": 64})
+        # Without a patch shape the tiling only depends on the VRAM.
+        self.assertEqual(self._get_tiling(80)["tile"], {"z": 80, "y": 640, "x": 640})
+
+    def test_tiling_from_checkpoint(self):
+        from synapse_net.inference.util import _get_default_tiling_for_model, get_default_tiling
+        from torch_em.model.unetr import UNETRBase
+
+        # torch_em checkpoints store the (concatenated) training dataset, which knows the patch shape.
+        dataset = SimpleNamespace(datasets=[SimpleNamespace(patch_shape=(32, 256, 256))])
+        model_classes = {"torch_em.model.unet.AnisotropicUNet": 1.2, "torch_em.model.unetr.UNETR": 1.0}
+        with tempfile.TemporaryDirectory() as checkpoint:
+            for model_class, max_growth in model_classes.items():
+                init = {"train_dataset": dataset, "model_class": model_class}
+                torch.save({"init": init}, os.path.join(checkpoint, "best.pt"))
+                expected = get_default_tiling(patch_shape=self.patch_shape, max_growth=max_growth)
+                self.assertEqual(_get_default_tiling_for_model(None, checkpoint), expected)
+
+        # The tiling for a UNETR without a checkpoint can't be derived.
+        with self.assertRaises(ValueError):
+            _get_default_tiling_for_model(UNETRBase.__new__(UNETRBase), None)
 
 
 class TestMitochondriaSegmentation(unittest.TestCase):
