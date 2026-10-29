@@ -157,6 +157,7 @@ def segment_compartments(
     n_slices_exclude: int = 0,
     boundary_threshold: float = 0.4,
     min_z_extent: int = 10,
+    batch_size: int = 1,
     **kwargs,
 ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
     """Segment synaptic compartments in an input volume.
@@ -172,6 +173,8 @@ def segment_compartments(
         n_slices_exclude: The number of slices to exclude at the start and end of a 3D volume.
         boundary_threshold: Threshold used to derive compartment seeds from the boundary prediction.
         min_z_extent: The minimum number of slices a 3D compartment must span.
+        batch_size: The number of blocks to stack into a single forward pass during prediction.
+            Larger values can increase GPU throughput at the cost of higher memory usage.
 
     Returns:
         The segmentation mask as a numpy array, or a tuple containing the segmentation mask
@@ -186,7 +189,9 @@ def segment_compartments(
 
     # Run prediction. Support models with a single or multiple channels,
     # assuming that the first channel is the boundary prediction.
-    pred = get_prediction(input_volume, tiling=tiling, model_path=model_path, model=model, verbose=verbose)
+    pred = get_prediction(
+        input_volume, tiling=tiling, model_path=model_path, model=model, verbose=verbose, batch_size=batch_size,
+    )
 
     # Remove channel axis if necessary.
     if pred.ndim != input_volume.ndim:
