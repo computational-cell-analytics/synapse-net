@@ -11,7 +11,7 @@ from .mitochondria import segment_mitochondria
 from .ribbon_synapse import segment_ribbon_synapse_structures
 from .vesicles import segment_vesicles
 from .cristae import segment_cristae
-from .util import _restore_legacy_attributes, get_device
+from .util import _restore_legacy_attributes, get_default_tiling, get_device
 from ..file_utils import get_cache_dir
 
 
@@ -148,6 +148,38 @@ def get_model_training_resolution(model_type: str) -> Dict[str, float]:
     return resolutions[model_type]
 
 
+def get_model_training_patch_shape(model_type: str) -> Dict[str, int]:
+    """Get the patch shape that was used for training a given pretrained model.
+
+    Args:
+        model_type: The name of the pretrained model.
+
+    Returns:
+        Mapping of axis (z, y, x) to the patch size of that axis. Only y and x for 2d models.
+    """
+    # The patch shapes are taken from the training scripts, the paths are relative to 'scripts/'.
+    # UNCERTAIN marks values that were inferred from related models rather than from the actual training run.
+    patch_shapes = {
+        "active_zone": {"z": 48, "y": 384, "x": 384},  # cooper/revision/train_az.py
+        "compartments": {"z": 64, "y": 384, "x": 384},  # cooper/training/train_compartments.py
+        "mitochondria": {"z": 32, "y": 256, "x": 256},  # cooper/training/train_mitochondria.py
+        "mitochondria2": {"z": 32, "y": 256, "x": 256},  # cooper/training/train_mitochondria.py
+        "cristae": {"z": 32, "y": 256, "x": 256},  # Confirmed by the model's trainer.
+        "cristae2": {"z": 32, "y": 256, "x": 256},  # Confirmed by the model's trainer.
+        "cristae3": {"z": 32, "y": 256, "x": 256},  # Confirmed by the model's trainer.
+        "cristae4": {"z": 32, "y": 256, "x": 256},  # Confirmed by the model's trainer.
+        "cristae5": {"z": 32, "y": 256, "x": 256},  # Confirmed by the model's trainer.
+        "ribbon": {"z": 64, "y": 512, "x": 512},  # inner_ear/training/train_structure_segmentation.py
+        "vesicles_2d": {"y": 256, "x": 256},  # cooper/training/train_vesicles.py
+        "vesicles_3d": {"z": 48, "y": 256, "x": 256},  # cooper/training/train_vesicles.py
+        "vesicles_cryo": {"z": 48, "y": 256, "x": 256},  # cryo/vesicles/train_domain_adaptation.py
+        "vesicles_2d_maus": {"y": 256, "x": 256},  # UNCERTAIN: assumed to be the same as for vesicles_2d.
+        "vesicles_3d_endbulb": {"z": 48, "y": 256, "x": 256},  # wichmann/train_domain_adaptation.py
+        "vesicles_3d_innerear": {"z": 48, "y": 256, "x": 256},  # inner_ear/training/train_domain_adaptation_vesicles.py
+    }
+    return patch_shapes[model_type]
+
+
 def compute_scale_from_voxel_size(
     voxel_size: Dict[str, float],
     model_type: str
@@ -282,7 +314,8 @@ def run_segmentation(
         image: The input image or image volume.
         model: The segmentation model.
         model_type: The model type. This will determine which segmentation post-processing is used.
-        tiling: The tiling settings for inference.
+        tiling: The tiling settings for inference. By default, the tiling is derived from the patch shape
+            that was used for training the model.
         scale: A scale factor for resizing the input before applying the model.
             The output will be scaled back to the initial size.
         verbose: Whether to print detailed information about the prediction and segmentation.
@@ -291,6 +324,8 @@ def run_segmentation(
     Returns:
         The segmentation. For models that return multiple segmentations, this function returns a dictionary.
     """
+    if tiling is None:
+        tiling = get_default_tiling(patch_shape=get_model_training_patch_shape(model_type))
     segmentation_function = get_segmentation_function(model_type)
     if segmentation_function is segment_cristae:
         training_resolution = get_model_training_resolution(model_type)
