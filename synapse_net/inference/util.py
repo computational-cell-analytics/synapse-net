@@ -19,8 +19,9 @@ import torch_em
 
 from elf.io import open_file
 from numpy.typing import ArrayLike
+from scipy import ndimage
 from scipy.ndimage import binary_closing
-from skimage.measure import regionprops
+from skimage.measure import euler_number, regionprops
 from skimage.morphology import remove_small_holes
 from skimage.transform import rescale, resize
 from torch_em.model.unet import Decoder
@@ -691,7 +692,79 @@ def apply_size_filter(
     return segmentation
 
 
-def _postprocess_seg_3d(seg, area_threshold=1000, iterations=4, iterations_3d=8):
+def _fill_holes_per_slice(mask, axes=(0, 1, 2)):
+    """Fill the holes in each 2D slice of the mask, along each of the axes in turn."""
+    for axis in axes:
+        moved = np.moveaxis(mask, axis, 0)
+        mask = np.moveaxis(np.stack([ndimage.binary_fill_holes(plane) for plane in moved]), 0, axis)
+    return mask
+
+
+def _count_tunnels(mask):
+    """Count the tunnels (handles) of a 3D mask, with the object 26-connected and the background 6-connected.
+
+    It follows from the Euler number = components - tunnels + cavities.
+    """
+    mask = np.pad(mask, 1)
+    n_components = ndimage.label(mask, structure=np.ones((3, 3, 3)))[1]
+    n_cavities = ndimage.label(~mask)[1] - 1
+    return int(n_components + n_cavities - euler_number(mask, connectivity=3))
+
+
+def _remove_tunnel_bridges(mask, closed):
+    """Remove the parts that the post-processing added to an object and that give it a tunnel.
+
+    Each connected component of closed & ~mask that touches mask in two or more places is a candidate,
+    because only such a component can close a ring. From the largest to the smallest candidate, each is removed
+    if the object has fewer tunnels without it. This undoes bridges between two parts of a mitochondrion that only
+    come close, e.g. the two ends of a curled one ("holding hands").
+    """
+    full = np.ones((3, 3, 3), dtype=bool)
+    added, _ = ndimage.label(closed & ~mask, structure=full)
+    candidates = []
+    for component_id, bb in enumerate(ndimage.find_objects(added), start=1):
+        bb = tuple(slice(max(s.start - 1, 0), min(s.stop + 1, n)) for s, n in zip(bb, mask.shape))
+        component = added[bb] == component_id
+        contact = ndimage.binary_dilation(component, structure=full) & mask[bb]
+        if ndimage.label(contact, structure=full)[1] >= 2:
+            candidates.append((bb, component))
+    if not candidates:
+        return closed
+
+    closed = closed.copy()
+    n_tunnels = _count_tunnels(closed)
+    for bb, component in sorted(candidates, key=lambda candidate: -candidate[1].sum()):
+        closed[bb][component] = False
+        n_tunnels_without = _count_tunnels(closed)
+        if n_tunnels_without < n_tunnels:
+            n_tunnels = n_tunnels_without
+        else:
+            closed[bb][component] = True
+    return closed
+
+
+def _postprocess_seg_3d(
+    seg, area_threshold=1000, iterations=4, iterations_3d=8, fill_holes=False, remove_tunnels=False
+):
+    """Smooth each object of a 3D segmentation in place.
+
+    Each object is processed within its bounding box: small holes are removed, then it is closed with
+    a 3D cross structure (`iterations` times) and a 3x3 structure in the XY plane (`iterations_3d` times).
+    The closing may overwrite other objects.
+
+    Args:
+        seg: The segmentation.
+        area_threshold: The maximal size of the holes that are removed.
+        iterations: The number of iterations for the closing with the 3D cross structure.
+        iterations_3d: The number of iterations for the closing with the 3x3 structure in the XY plane.
+        fill_holes: Whether to fill the holes in each 2D slice of the closed object along z, y and x.
+            Unlike the closing, the hole filling only writes into the background.
+        remove_tunnels: Whether to remove the parts added by the closing and the hole filling that give the object
+            a tunnel, see `_remove_tunnel_bridges`.
+
+    Returns:
+        The post-processed segmentation.
+    """
     # Structure lement for 2d dilation in 3d.
     structure_element = np.ones((3, 3))  # 3x3 structure for XY plane
     structure_3d = np.zeros((1, 3, 3))  # Only applied in the XY plane
@@ -705,9 +778,15 @@ def _postprocess_seg_3d(seg, area_threshold=1000, iterations=4, iterations_3d=8)
 
         # Fill small holes and apply closing.
         mask = remove_small_holes(mask, area_threshold=area_threshold)
-        mask = np.logical_or(binary_closing(mask, iterations=iterations), mask)
-        mask = np.logical_or(binary_closing(mask, iterations=iterations_3d, structure=structure_3d), mask)
-        seg[bb][mask] = prop.label
+        closed = np.logical_or(binary_closing(mask, iterations=iterations), mask)
+        closed = np.logical_or(binary_closing(closed, iterations=iterations_3d, structure=structure_3d), closed)
+
+        if fill_holes:
+            free = np.isin(seg[bb], [0, prop.label]) | closed
+            closed = closed | (_fill_holes_per_slice(closed) & free)
+        if remove_tunnels:
+            closed = _remove_tunnel_bridges(mask, closed)
+        seg[bb][closed] = prop.label
 
     return seg
 

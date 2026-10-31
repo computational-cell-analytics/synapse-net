@@ -47,7 +47,16 @@ def _run_segmentation(
         print("Compute watershed in", time.time() - t0, "s")
 
     seg = apply_size_filter(seg, min_size, verbose=verbose, block_shape=block_shape)
-    seg = _postprocess_seg_3d(seg, area_threshold=area_threshold)
+    # A strong closing joins parts of a mitochondrion that only come close, e.g. the two ends of a curled one,
+    # and gives it a tunnel ("holding hands"). So the closing is weaker than the default (2 and 3 instead of
+    # 4 and 8 iterations), the holes it leaves are filled per slice instead, and added parts that make a tunnel
+    # are removed again.
+    t0 = time.time()
+    seg = _postprocess_seg_3d(
+        seg, area_threshold=area_threshold, iterations=2, iterations_3d=3, fill_holes=True, remove_tunnels=True
+    )
+    if verbose:
+        print("Post-process segmentation in", time.time() - t0, "s")
     return seg
 
 
