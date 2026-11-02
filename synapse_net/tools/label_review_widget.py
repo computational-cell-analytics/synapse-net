@@ -33,6 +33,8 @@ _ALL_MODELS_AGREE = {
 
 
 def _is_priority(item):
+    if "priority" in item:  # newer zips flag priority in the manifest
+        return item["priority"]
     return item["instance_id"] in _ALL_MODELS_AGREE.get(item["tomogram"], ())
 
 
@@ -47,6 +49,8 @@ class _ReviewData:
             self._get = npz.__getitem__
         meta = json.loads(str(self._get("manifest")))
         self.models, self.items = meta["models"], meta["items"]
+        self.review_id = meta.get("review_id")
+        self.priority_note = meta.get("priority_note", "all 6 models agree")
 
     def crop(self, index):
         return self._get(f"raw_{index}"), self._get(f"mask_{index}")
@@ -158,7 +162,9 @@ class LabelReviewWidget(BaseWidget):
         self._data = data
         folder = path if os.path.isdir(path) else os.path.dirname(os.path.abspath(path))
         safe_name = "".join(c if c.isalnum() else "_" for c in reviewer)
-        self._results_path = os.path.join(folder, f"ldcv_label_review_{safe_name}.csv")
+        # review_id keeps different review rounds from resuming each other's CSV
+        prefix = f"ldcv_label_review_{data.review_id}_" if data.review_id else "ldcv_label_review_"
+        self._results_path = os.path.join(folder, f"{prefix}{safe_name}.csv")
         self._decisions = self._read_results(self._results_path)
         self._order = sorted(range(len(data.items)), key=lambda i: not _is_priority(data.items[i]))
 
@@ -179,6 +185,12 @@ class LabelReviewWidget(BaseWidget):
 
     def _priority_left(self):
         return sum(1 for i, item in enumerate(self._data.items) if _is_priority(item) and i not in self._decisions)
+
+    def _priority_summary(self):
+        rows = [d for i, d in self._decisions.items() if _is_priority(self._data.items[i])]
+        unsure = sum(d["final_label"] == "unsure" for d in rows)
+        changed = sum(d["final_label"] not in (d["gt_label"], "unsure") for d in rows)
+        return f"Label changed for {changed} of {len(rows)} ({unsure} unsure)."
 
     def _write_results(self, path):
         with open(path, "w", newline="") as f:
@@ -215,7 +227,7 @@ class LabelReviewWidget(BaseWidget):
         current = "not decided yet" if decision is None else f"<b>{decision['final_label']}</b> ({decision['decision']})"
         self.info_label.setText(
             f"<b>Vesicle {pos + 1} / {n}</b> &nbsp; {item['tomogram']}, instance {item['instance_id']}<br>"
-            + ("<b>High priority</b>: all 6 models agree<br>" if _is_priority(item) else "")
+            + (f"<b>High priority</b>: {self._data.priority_note}<br>" if _is_priority(item) else "")
             + f"Ground-truth label: <b>{item['gt_label']}</b><br>"
             f"Models suggest: <b>{item['suggested_label']}</b> (p = {item['suggested_prob']:.2f})<br>"
             f"Your decision: {current}"
@@ -256,7 +268,8 @@ class LabelReviewWidget(BaseWidget):
             show_info(f"INFO: Could not save to {self._results_path} ({e}). Use 'Export Results' to save elsewhere.")
 
         if priority_left_before and not self._priority_left():
-            show_info("INFO: All high-priority vesicles (all 6 models agree) are done. The rest are optional.")
+            show_info(f"INFO: All high-priority vesicles ({self._data.priority_note}) are done. "
+                      f"{self._priority_summary()} The rest are optional.")
 
         if self._pos < len(self._order) - 1:
             self._go(self._pos + 1)
