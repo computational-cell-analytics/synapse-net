@@ -8,7 +8,8 @@ Mitochondria are scored by instance matching (F1, precision, recall) and the sym
 Cristae are scored voxel-wise in the mitochondria with cristae annotations (dice, precision, recall), and by the
 average precision and ROC-AUC of the foreground prediction there, also in bands at the membrane and in the rest.
 
-The segmentation changes with the tiling, whose default depends on the GPU memory. The published evaluations
+The segmentation changes with the tiling, whose default depends on the model's training patch shape and on the
+hardware (GPU memory, or a smaller halo on the CPU). The published evaluations
 used '--tile 32 256 256 --halo 4 32 32' for mitochondria2 and '--tile 32 256 256 --halo 8 64 64' for cristae5.
 """
 

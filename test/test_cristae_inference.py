@@ -14,8 +14,7 @@ class TestCristaeInference(unittest.TestCase):
         # Predict cristae everywhere, so that the segmentation is the mitochondria mask.
         predictions = np.stack([np.ones(state.shape, dtype="float32"), np.zeros(state.shape, dtype="float32")])
 
-        # The mitochondria are taken from the input, which has the dtype of the tomogram. A float input used to fail,
-        # because regionprops does not accept float labels.
+        # The mitochondria channel has the dtype of the tomogram; float used to fail in regionprops.
         patch = mock.patch.object(cristae_module, "get_prediction", return_value=predictions)
         for dtype in ("float32", "uint8"):
             with self.subTest(dtype=dtype), patch:

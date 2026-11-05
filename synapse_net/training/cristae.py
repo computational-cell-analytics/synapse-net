@@ -14,11 +14,10 @@ from .transform import AugmentedMitoStateMaskTransform, standardize_channel
 
 
 def _read_split(split_file, data_roots, key):
+    """Read the '<root name>/<relative path>' entries of `key`; `data_roots` override the stored roots."""
     with open(split_file) as f:
         split = json.load(f)
-    # The entries have the form '<root name>/<relative path>'. The roots stored in the split file can be
-    # overridden, so that the data can be moved.
-    roots = {**split.get("roots", {}), **(data_roots or {})}
+    roots ={**split.get("roots", {}), **(data_roots or {})}
     paths = []
     for entry in split.get(key, []):
         root, *parts = entry.split("/")

@@ -42,15 +42,18 @@ def standardize_channel(raw: np.ndarray, channel: int = 0) -> np.ndarray:
 
 
 def _membrane_weight(state, foreground, voxel_size, band_nm, offset_nm, w_pos, w_neg, exclude_state_value):
+    """Weight the loss in a band at the membrane of the annotated mitochondria.
+
+    The membrane is approximated by the surface of the annotated mitochondria. They are padded in 'edge' mode,
+    so that a mitochondrion cut by the patch border continues instead of getting a band through its lumen.
+    """
     # Zero in the mitochondria without cristae annotations, one everywhere else (including the background).
     weight = (np.abs(state - exclude_state_value) >= 0.5).astype(np.float32)
     mito = state == 1
     if (w_pos == 1.0 and w_neg == 1.0) or not mito.any():
         return weight
 
-    # The membrane is approximated by the surface of the annotated mitochondria. Padding in 'edge' mode lets a
-    # mitochondrion that is cut by the patch border continue, instead of creating a band through its lumen.
-    upper = offset_nm + band_nm
+    upper =offset_nm + band_nm
     pad = int(np.ceil(upper / min(voxel_size))) + 2
     distances = distance_transform(np.pad(mito, pad, mode="edge"), sampling=list(voxel_size), number_of_threads=1)
     distances = distances[tuple(slice(pad, -pad) for _ in range(mito.ndim))]
