@@ -1,4 +1,3 @@
-import copy
 import inspect
 import re
 from typing import Optional, Union
@@ -19,6 +18,7 @@ from ..inference.inference import (
     _segment_ribbon_AZ,
     compute_scale_from_voxel_size,
     get_model,
+    get_model_training_patch_shape,
     get_segmentation_function,
     run_segmentation,
 )
@@ -100,31 +100,13 @@ def _available_devices():
     return available_devices
 
 
-def _get_current_tiling(tiling: dict, default_tiling: dict, model_type: str):
-    # get tiling values from qt objects
-    for k, v in tiling.items():
-        for k2, v2 in v.items():
-            if isinstance(v2, int):
-                continue
-            elif hasattr(v2, "value"):  # If it's a QSpinBox, extract the value
-                tiling[k][k2] = v2.value()
-            else:
-                raise TypeError(f"Unexpected type for tiling value: {type(v2)} at {k}/{k2}")
-    # check if user inputs tiling/halo or not
-    if default_tiling == tiling:
-        if "2d" in model_type:
-            # if its a 2d model expand x,y and set z to 1
-            tiling = {
-                "tile": {"x": 512, "y": 512, "z": 1},
-                "halo": {"x": 64, "y": 64, "z": 1},
-            }
-    else:
-        show_info(f"Using custom tiling: {tiling}")
-    if "2d" in model_type:
-        # if its a 2d model set z to 1
+def _get_current_tiling(tiling_params: dict, model_type: str):
+    # Read the tiling values from the spin boxes.
+    tiling = {name: {axis: param.value() for axis, param in params.items()} for name, params in tiling_params.items()}
+    if "2d" in model_type:  # A 2d model predicts single slices.
         tiling["tile"]["z"] = 1
         tiling["halo"]["z"] = 0
-        show_info(f"Using tiling: {tiling}")
+    show_info(f"Using tiling: {tiling}")
     return tiling
 
 
@@ -157,7 +139,6 @@ class SegmentationWidget(BaseWidget):
 
         self.viewer = napari.current_viewer()
         layout = QVBoxLayout()
-        self.tiling = {}
 
         # Create the image selection dropdown.
         self.image_selector_name = "Image data"
@@ -188,6 +169,13 @@ class SegmentationWidget(BaseWidget):
             elif child_layout is not None:
                 SegmentationWidget._clear_layout(child_layout)
                 child_layout.deleteLater()
+
+    def _update_tiling(self, model_type):
+        patch_shape = None if model_type == "- choose -" else get_model_training_patch_shape(model_type)
+        tiling = get_default_tiling(patch_shape=patch_shape)
+        for name, values in tiling.items():
+            for axis, value in values.items():
+                self.tiling[name][axis].setValue(value)
 
     def _update_postprocessing_settings(self, model_type):
         self._clear_layout(self.postprocessing_settings_layout)
@@ -304,7 +292,7 @@ class SegmentationWidget(BaseWidget):
                 model = get_model(model_type, device)
 
             # Get the current tiling.
-            self.tiling = _get_current_tiling(self.tiling, self.default_tiling, model_type)
+            tiling = _get_current_tiling(self.tiling, model_type)
 
             # Get the voxel size.
             metadata = self._get_layer_selector_data(self.image_selector_name, return_metadata=True)
@@ -334,7 +322,7 @@ class SegmentationWidget(BaseWidget):
                 kwargs = {}
             kwargs.update(self._get_postprocessing_kwargs())
             segmentation = run_segmentation(
-                image, model=model, model_type=model_type, tiling=self.tiling, scale=scale, **kwargs
+                image, model=model, model_type=model_type, tiling=tiling, scale=scale, **kwargs
             )
 
             # Add the segmentation layer(s).
@@ -358,25 +346,22 @@ class SegmentationWidget(BaseWidget):
         self.device_dropdown, layout = self._add_choice_param("device", device, device_options)
         setting_values.layout().addLayout(layout)
 
-        # Create UI for the tile shape.
-        self.default_tiling = get_default_tiling()
-        self.tiling = copy.deepcopy(self.default_tiling)
+        # Create UI for the tile shape. The values are set to the default tiling of the selected model.
+        self.tiling = {"tile": {}, "halo": {}}
         self.tiling["tile"]["x"], self.tiling["tile"]["y"], self.tiling["tile"]["z"], layout = self._add_shape_param(
-            ("tile_x", "tile_y", "tile_z"),
-            (self.default_tiling["tile"]["x"], self.default_tiling["tile"]["y"], self.default_tiling["tile"]["z"]),
-            min_val=0, max_val=2048, step=16,
+            ("tile_x", "tile_y", "tile_z"), (0, 0, 0), min_val=0, max_val=2048, step=16,
             # tooltip=get_tooltip("embedding", "tiling")
         )
         setting_values.layout().addLayout(layout)
 
         # Create UI for the halo.
         self.tiling["halo"]["x"], self.tiling["halo"]["y"], self.tiling["halo"]["z"], layout = self._add_shape_param(
-            ("halo_x", "halo_y", "halo_z"),
-            (self.default_tiling["halo"]["x"], self.default_tiling["halo"]["y"], self.default_tiling["halo"]["z"]),
-            min_val=0, max_val=512,
+            ("halo_x", "halo_y", "halo_z"), (0, 0, 0), min_val=0, max_val=512,
             # tooltip=get_tooltip("embedding", "halo")
         )
         setting_values.layout().addLayout(layout)
+        self.model_selector.currentTextChanged.connect(self._update_tiling)
+        self._update_tiling(self.model_selector.currentText())
 
         # Read voxel size from layer metadata.
         self.voxel_size_param, layout = self._add_float_param(

@@ -23,7 +23,9 @@ from scipy.ndimage import binary_closing
 from skimage.measure import regionprops
 from skimage.morphology import remove_small_holes
 from skimage.transform import rescale, resize
-from torch_em.util.prediction import predict_with_halo
+from torch_em.model.unet import Decoder
+from torch_em.model.unetr import UNETRBase
+from torch_em.util.prediction import predict_with_halo_pipelined
 from tqdm import tqdm
 
 
@@ -100,6 +102,14 @@ class _Scaler:
         return output
 
 
+def _restore_legacy_attributes(model):
+    # Models pickled with torch_em < 0.10.7 lack the attributes that the newer decoder reads in its forward pass.
+    for module in model.modules():
+        if isinstance(module, Decoder) and not hasattr(module, "explicit_skip_channels"):
+            module.explicit_skip_channels = False
+    return model
+
+
 def _preprocess(input_volume, with_channels, channels_to_standardize):
     # We standardize the data for the whole volume beforehand.
     # If we have channels then the standardization is done independently per channel.
@@ -127,6 +137,8 @@ def get_prediction(
     prediction: Optional[ArrayLike] = None,
     devices: Optional[List[str]] = None,
     preprocess: Optional[callable] = None,
+    dtype: torch.dtype = torch.float32,
+    batch_size: int = 1,
 ) -> ArrayLike:
     """Run prediction on a given volume.
 
@@ -137,7 +149,8 @@ def get_prediction(
         input_volume: The input volume to predict on.
         model_path: The path to the model checkpoint if 'model' is not provided.
         model: Pre-loaded model. Either model_path or model is required.
-        tiling: The tiling configuration for the prediction.
+        tiling: The tiling configuration for the prediction. If not given, it is derived from the training
+            patch shape for a torch_em checkpoint and from the available VRAM otherwise.
         verbose: Whether to print timing information.
         with_channels: Whether to predict with channels.
         channels_to_standardize: List of channels to standardize. Defaults to None.
@@ -147,6 +160,13 @@ def get_prediction(
             If not given, the prediction will be computed in moemory.
         devices: The devices for running prediction. If not given will use the GPU
             if available, otherwise the CPU.
+        preprocess: The function used to normalize the input. It should match the `raw_transform`
+            used during training. Applied per block during prediction. If not given, torch_em
+            standardization is used.
+        dtype: The dtype for running the model. Pass `torch.bfloat16` to predict with bf16 autocast,
+            which is much faster on GPUs with bf16 support. By default, the model runs in float32.
+        batch_size: The number of blocks to stack into a single forward pass.
+            Larger values can increase GPU throughput at the cost of higher memory usage.
 
     Returns:
         The predicted volume.
@@ -160,8 +180,8 @@ def get_prediction(
     else:
         is_bioimageio = model_path.endswith(".zip")
 
-    if tiling is None:
-        tiling = get_default_tiling()
+    if tiling is not None:
+        print(f"Using tiling: {tiling}")
 
     # Normalize the whole input volume if it is a numpy array.
     # Otherwise we have a zarr array or similar as input, and can't normalize it en-block.
@@ -181,6 +201,13 @@ def get_prediction(
             # torch_em expects the root folder of a checkpoint path instead of the checkpoint itself.
             if model_path.endswith("best.pt"):
                 model_path = os.path.split(model_path)[0]
+        if tiling is None:
+            # Load a serialized model here already, to check whether it is a UNETR.
+            if model is None and not os.path.isdir(model_path):
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    model = torch.load(model_path, weights_only=False)
+            tiling = _get_default_tiling_for_model(model, model_path)
         # print(f"tiling {tiling}")
         # Create updated_tiling with the same structure
         updated_tiling = {
@@ -193,10 +220,35 @@ def get_prediction(
         # print(f"updated_tiling {updated_tiling}")
         prediction = get_prediction_torch_em(
             input_volume, updated_tiling, model_path, model, verbose, with_channels,
-            mask=mask, prediction=prediction, devices=devices, preprocess=preprocess,
+            mask=mask, prediction=prediction, devices=devices, preprocess=preprocess, dtype=dtype,
+            batch_size=batch_size,
         )
 
     return prediction
+
+
+def _get_default_tiling_for_model(model, model_path):
+    # A torch_em checkpoint stores the training dataset, so we can derive the tiling from the training patch shape.
+    if model is None:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            init = torch.load(os.path.join(model_path, "best.pt"), map_location="cpu", weights_only=False)["init"]
+        dataset = init["train_dataset"]
+        while hasattr(dataset, "datasets"):  # Unwrap concatenated datasets.
+            dataset = dataset.datasets[0]
+        patch_shape = dict(zip("zyx"[-len(dataset.patch_shape):], dataset.patch_shape))
+        # A UNETR resizes each tile to the input size of its encoder.
+        # The tile must thus match the training patch shape, otherwise the input is scaled differently than in training.
+        max_growth = 1.0 if "UNETR" in init["model_class"] else 1.2
+        return get_default_tiling(patch_shape=patch_shape, max_growth=max_growth)
+
+    if isinstance(model, UNETRBase):
+        raise ValueError(
+            "The tiling for a UNETR must match the patch shape that was used for training it. "
+            "Pass it via 'tiling', e.g. 'tiling=get_default_tiling(patch_shape=patch_shape, max_growth=1.0)', "
+            "or pass the path to the torch_em checkpoint, which stores the training patch shape."
+        )
+    return get_default_tiling()
 
 
 def get_prediction_torch_em(
@@ -210,6 +262,8 @@ def get_prediction_torch_em(
     prediction: Optional[ArrayLike] = None,
     devices: Optional[List[str]] = None,
     preprocess: Optional[callable] = None,
+    dtype: torch.dtype = torch.float32,
+    batch_size: int = 1,
 ) -> np.ndarray:
     """Run prediction using torch-em on a given volume.
 
@@ -226,13 +280,20 @@ def get_prediction_torch_em(
             If not given, the prediction will be computed in moemory.
         devices: The devices for running prediction. If not given will use the GPU
             if available, otherwise the CPU.
+        preprocess: The function used to normalize the input. It should match the `raw_transform`
+            used during training. By default, torch_em standardization is used.
+            Applied to the whole volume if the input is np.ndarray, otherwise applied per block.
+        dtype: The dtype for running the model. Pass `torch.bfloat16` to predict with bf16 autocast,
+            which is much faster on GPUs with bf16 support. By default, the model runs in float32.
+        batch_size: The number of blocks to stack into a single forward pass.
+            Larger values can increase GPU throughput at the cost of higher memory usage.
 
     Returns:
         The predicted volume.
     """
     # get block_shape and halo
-    block_shape = [tiling["tile"]["z"], tiling["tile"]["x"], tiling["tile"]["y"]]
-    halo = [tiling["halo"]["z"], tiling["halo"]["x"], tiling["halo"]["y"]]
+    block_shape = [tiling["tile"]["z"], tiling["tile"]["y"], tiling["tile"]["x"]]
+    halo = [tiling["halo"]["z"], tiling["halo"]["y"], tiling["halo"]["x"]]
 
     t0 = time.time()
     if devices is None:
@@ -246,6 +307,7 @@ def get_prediction_torch_em(
                 model = torch_em.util.load_model(checkpoint=model_path, device=devices[0])
             else:  # Load the model directly from a serialized pytorch model.
                 model = torch.load(model_path, weights_only=False)
+    model = _restore_legacy_attributes(model)
 
     # Run prediction with the model.
     with torch.no_grad():
@@ -264,11 +326,19 @@ def get_prediction_torch_em(
             preprocess = None if isinstance(input_volume, np.ndarray) else torch_em.transform.raw.standardize
         else:
             preprocess = preprocess
-        prediction = predict_with_halo(
+
+        def predict_with_autocast(net, inp):
+            with torch.autocast(device_type=torch.device(devices[0]).type, dtype=dtype):
+                return net(inp).float()
+
+        prediction_function = None if dtype == torch.float32 else predict_with_autocast
+
+        prediction = predict_with_halo_pipelined(
             input_volume, model, gpu_ids=devices,
             block_shape=block_shape, halo=halo,
             preprocess=preprocess, with_channels=with_channels, mask=mask,
-            output=prediction,
+            output=prediction, prediction_function=prediction_function,
+            batch_size=batch_size,
         )
     if verbose:
         print("Prediction time in", time.time() - t0, "s")
@@ -367,7 +437,7 @@ def inference_helper(
         output_root: The path to the output directory where the segmentation results will be saved.
         segmentation_function: The function performing the segmentation.
             This function must take the input_volume as the only argument and must return only the segmentation.
-            If you want to pass additional arguments to this function the use 'funtools.partial'
+            If you want to pass additional arguments to this function, use 'funtools.partial'
         data_ext: File extension for the image data. By default '.mrc' is used.
         extra_input_path: Filepath to extra inputs that need to be concatenated to the raw data loaded from mrc.
             This enables cristae segmentation with an extra mito channel.
@@ -463,15 +533,53 @@ def inference_helper(
         print(f"Saved segmentation to {output_path}.")
 
 
-def get_default_tiling(is_2d: bool = False) -> Dict[str, Dict[str, int]]:
+def get_default_tiling(
+    is_2d: bool = False,
+    patch_shape: Optional[Dict[str, int]] = None,
+    max_growth: float = 1.2,
+) -> Dict[str, Dict[str, int]]:
     """Determine the tile shape and halo depending on the available VRAM.
+
+    If the patch shape that was used for training the model is given, then the tiling is derived from it:
+    the tile shape is at least the training patch shape and grows by at most `max_growth` if the VRAM allows it.
+    The halo is derived from the patch shape, on the CPU it is at most 4 in z and 16 in y and x.
 
     Args:
         is_2d: Whether to return tiling settings for 2d inference.
+            Only used if `patch_shape` is not given, otherwise it is derived from the patch shape.
+        patch_shape: The patch shape used for training the model, as a mapping of axis (z, y, x) to size.
+            Only y and x for 2d models.
+        max_growth: The maximal factor by which the tile shape may exceed the training patch shape.
 
     Returns:
         The default tiling settings for the available computational resources.
     """
+    if patch_shape is not None:
+        # A missing or singleton z axis means a 2d model, which predicts single slices.
+        patch_shape = {"z": 1, **patch_shape}
+        is_2d = patch_shape["z"] == 1
+    tiling = _get_vram_tiling(is_2d)
+    if patch_shape is None:
+        return tiling
+
+    # The tile shape must stay divisible by the pooling factors of the U-Net: 8 in z and 16 in y and x.
+    # ponytail: fixed factors that fit all depth-4 U-Nets in the model registry, derive them from the model if needed.
+    tile = {}
+    for axis, size in patch_shape.items():
+        factor = 8 if axis == "z" else 16
+        max_size = max(size, int(size * max_growth) // factor * factor)
+        tile[axis] = min(max(tiling["tile"][axis], size), max_size)
+    halo = {axis: min(size // 4, 64) for axis, size in patch_shape.items()}
+    # A large halo makes CPU inference slow, because the halo is predicted and then discarded.
+    if get_device() == "cpu":
+        halo = {axis: min(size, 4 if axis == "z" else 16) for axis, size in halo.items()}
+
+    tiling = {"tile": tile, "halo": halo}
+    print(f"Determined tile size for training patch shape {patch_shape}: {tiling}")
+    return tiling
+
+
+def _get_vram_tiling(is_2d):
     if is_2d:
         tile = {"x": 768, "y": 768, "z": 1}
         halo = {"x": 128, "y": 128, "z": 0}
@@ -521,6 +629,7 @@ def parse_tiling(
     tile_shape: Tuple[int, int, int],
     halo: Tuple[int, int, int],
     is_2d: bool = False,
+    default_tiling: Optional[Dict[str, Dict[str, int]]] = None,
 ) -> Dict[str, Dict[str, int]]:
     """Helper function to parse tiling parameter input from the command line.
 
@@ -528,12 +637,14 @@ def parse_tiling(
         tile_shape: The tile shape. If None the default tile shape is used.
         halo: The halo. If None the default halo is used.
         is_2d: Whether to return tiling for a 2d model.
+        default_tiling: The default tiling. If None it is determined from the available VRAM.
 
     Returns:
         The tiling specification.
     """
 
-    default_tiling = get_default_tiling(is_2d=is_2d)
+    if default_tiling is None:
+        default_tiling = get_default_tiling(is_2d=is_2d)
 
     if tile_shape is None:
         tile_shape = default_tiling["tile"]

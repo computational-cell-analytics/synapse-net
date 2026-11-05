@@ -173,6 +173,22 @@ class TestSegmentationWidget(unittest.TestCase):
         self.assertEqual(self.widget.postprocessing_parameter_widgets, {})
         self.assertEqual(self.widget.postprocessing_settings_layout.count(), 0)
 
+    def test_tiling_follows_selected_model(self):
+        from synapse_net.inference.inference import get_model_training_patch_shape
+        from synapse_net.inference.util import get_default_tiling
+
+        with mock.patch.object(segmentation_widget, "show_info"):
+            for model_type in ("ribbon", "vesicles_2d"):
+                self._select_model(model_type)
+                expected = get_default_tiling(patch_shape=get_model_training_patch_shape(model_type))
+                self.assertEqual(segmentation_widget._get_current_tiling(self.widget.tiling, model_type), expected)
+
+            # Changes by the user are used for every run.
+            for tile_x in (128, 160):
+                self.widget.tiling["tile"]["x"].setValue(tile_x)
+                tiling = segmentation_widget._get_current_tiling(self.widget.tiling, "vesicles_2d")
+                self.assertEqual(tiling["tile"]["x"], tile_x)
+
     def test_choice_postprocessing_parameter_is_collected(self):
         self._select_model("vesicles_2d")
         self.widget.postprocessing_parameter_widgets["mode"].setCurrentText("label")

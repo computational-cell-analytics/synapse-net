@@ -12,9 +12,11 @@ from ..imod.to_imod import (
     _get_file_paths, _load_segmentation, export_helper,
     write_segmentation_to_imod_as_points, write_segmentation_to_imod,
 )
-from ..inference.inference import _get_model_registry, get_model, get_model_training_resolution, run_segmentation
+from ..inference.inference import (
+    _get_model_registry, get_model, get_model_training_patch_shape, get_model_training_resolution, run_segmentation
+)
 from ..inference.scalable_segmentation import scalable_segmentation
-from ..inference.util import inference_helper, parse_tiling
+from ..inference.util import _get_default_tiling_for_model, get_default_tiling, inference_helper, parse_tiling
 
 
 def imod_point_cli():
@@ -171,6 +173,11 @@ def segmentation_cli():
         help="The halo for prediction, in ZYX order. Increase the halo to minimize boundary artifacts."
     )
     parser.add_argument(
+        "--batch_size", type=int, default=1,
+        help="The number of blocks to stack into a single forward pass during prediction. "
+        "Larger values can increase GPU throughput at the cost of higher memory usage."
+    )
+    parser.add_argument(
         "--data_ext", default=".mrc", help="The extension of the tomogram data. By default .mrc."
     )
     parser.add_argument(
@@ -216,7 +223,13 @@ def segmentation_cli():
         assert model is not None, f"The model from {args.checkpoint} could not be loaded."
 
     is_2d = "2d" in args.model
-    tiling = parse_tiling(args.tile_shape, args.halo, is_2d=is_2d)
+    # The default tiling is derived from the training patch shape. A torch_em checkpoint stores it,
+    # otherwise we assume that the custom model was trained with the same patch shape as the selected model.
+    if args.checkpoint is not None and os.path.isdir(checkpoint_path):
+        default_tiling = _get_default_tiling_for_model(None, checkpoint_path)
+    else:
+        default_tiling = get_default_tiling(patch_shape=get_model_training_patch_shape(args.model))
+    tiling = parse_tiling(args.tile_shape, args.halo, is_2d=is_2d, default_tiling=default_tiling)
 
     # If the scale argument is not passed, then we get the average training resolution for the model.
     # The inputs will then be scaled to match this resolution based on the voxel size from the mrc files.
@@ -236,13 +249,14 @@ def segmentation_cli():
                 f"vesicles, mitochondria, or active zones, not for {args.model}."
             )
         segmentation_function = partial(
-            scalable_segmentation, model=model, tiling=tiling, verbose=args.verbose
+            scalable_segmentation, model=model, tiling=tiling, verbose=args.verbose, batch_size=args.batch_size
         )
         allocate_output = True
 
     else:
         segmentation_function = partial(
             run_segmentation, model=model, model_type=args.model, verbose=args.verbose, tiling=tiling,
+            batch_size=args.batch_size,
         )
         allocate_output = False
 
