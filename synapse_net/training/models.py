@@ -1,6 +1,6 @@
 """Model factories and pretrained backbone utilities for training."""
 import warnings
-from typing import Tuple
+from typing import Optional, Tuple
 import numpy as np
 
 import torch
@@ -34,6 +34,7 @@ def get_3d_model(
     scale_factors: Tuple[Tuple[int, int, int]] = [[1, 2, 2], [2, 2, 2], [2, 2, 2], [2, 2, 2]],
     initial_features: int = 32,
     final_activation: str = "Sigmoid",
+    norm: Optional[str] = "InstanceNorm",
 ) -> torch.nn.Module:
     """Get the U-Net model for 3D segmentation tasks.
 
@@ -43,6 +44,8 @@ def get_3d_model(
         initial_features: The number of features in the first level of the U-Net.
             The number of features increases by a factor of two in each level.
         final_activation: The activation applied to the last output layer.
+        norm: The normalization layer used in the convolutional blocks.
+            Pass None to build the network without normalization layers.
 
     Returns:
         The U-Net.
@@ -54,6 +57,7 @@ def get_3d_model(
         initial_features=initial_features,
         gain=2,
         final_activation=final_activation,
+        norm=norm,
     )
     return model
 
@@ -106,6 +110,7 @@ def _check_backbone(backbone, model_type, patch_shape):
 def _get_model(
     patch_shape, out_channels, in_channels=1, backbone=None, model_type=None,
     encoder_checkpoint=None, final_activation="Sigmoid",
+    initial_features=32, scale_factors=None, norm="InstanceNorm",
 ):
     is_2d, ndim = _determine_ndim(patch_shape)
 
@@ -124,9 +129,16 @@ def _get_model(
         )
 
     if is_2d:
-        return get_2d_model(out_channels=out_channels, in_channels=in_channels, final_activation=final_activation)
+        return get_2d_model(
+            out_channels=out_channels, in_channels=in_channels, initial_features=initial_features,
+            final_activation=final_activation,
+        )
 
-    return get_3d_model(out_channels=out_channels, in_channels=in_channels, final_activation=final_activation)
+    scale_factor_kwargs = {} if scale_factors is None else {"scale_factors": scale_factors}
+    return get_3d_model(
+        out_channels=out_channels, in_channels=in_channels, initial_features=initial_features,
+        final_activation=final_activation, norm=norm, **scale_factor_kwargs,
+    )
 
 
 def normalize_percentile_to_0_1_inverted(raw):

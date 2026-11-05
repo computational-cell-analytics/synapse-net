@@ -1,0 +1,41 @@
+# micro-sam voxel-size sweep on the validation blocks of the pinned split, see segment_microsam.py.
+# The same grid as the MitoNet sweep (mitonet_sweep_val.yaml), on the raw contrast only, since the
+# inverted contrast scored F1 ~0 at every voxel size for MitoNet:
+#   B  isotropic 30 25 20 15 12.5 10 nm
+#   A  z at the native 25 nm, xy 30 20 15 12.5 10 8 7.5 5 3.75 nm; xy 25 is B's iso25. 3.75 extends
+#      the grid by a step, because the first run selected its edge, 5 nm
+#   C  30 nm in z and 8 nm in xy
+# micro-sam has only the xy mode (2D slices merged in z). B runs first, so A at xy 25 finds B's
+# segmentation and skips it; settings that already exist are skipped, so a grid extension only
+# computes the new ones. Score with microsam_sweep_score.yaml.
+#
+# Every image or tile reaches the SAM encoder at exactly 1024 px, so the tiled settings (xy 7.5, 5
+# and 3.75) segment a padded canvas of 16, 25 and 25 tiles per slice; a full A100 keeps that affordable.
+# vit_b_em_organelles is read from ~/.cache/micro_sam/models, so the job needs no internet access.
+#
+# Submit with the runner of the synapse repo:
+#   python /mnt/vast-nhr/home/freckmann15/u15205/synapse/sbatch_runner.py \
+#       scripts/volume_em/evaluation/microsam_sweep_val.yaml [--dry-run]
+
+slurm_profile: grete_shared
+
+slurm:
+  job_name: "volem-microsam-sweep-val"
+  time: "12:00:00"
+
+env:
+  type: micromamba
+  path: /mnt/lustre-grete/usr/u15205/envs/micro-sam
+
+commands:
+  - "export CUDA_VISIBLE_DEVICES=0
+     SEG=/mnt/vast-nhr/home/freckmann15/u15205/synapse-net/scripts/volume_em/evaluation/segment_microsam.py
+     SPLIT=/mnt/vast-nhr/home/freckmann15/u15205/synapse-net/scripts/volume_em/training/split-mito_vol_em_aniso2lvl_final.json
+     ROOT=/mnt/lustre-grete/usr/u15205/volume-em/microsam-sweep/val"
+  - "for v in 30 25 20 15 12.5 10; do
+       python $SEG --voxel_size $v $v $v --split_file $SPLIT --split_key val --segmentation_root $ROOT;
+     done"
+  - "for xy in 30 25 20 15 12.5 10 8 7.5 5 3.75; do
+       python $SEG --voxel_size 25 $xy $xy --split_file $SPLIT --split_key val --segmentation_root $ROOT;
+     done"
+  - "python $SEG --voxel_size 30 8 8 --split_file $SPLIT --split_key val --segmentation_root $ROOT"

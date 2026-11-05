@@ -1,0 +1,23 @@
+# Scores the MitoNet voxel-size sweep of mitonet_sweep_val.yaml on the validation blocks and selects
+# the best setting per approach, see score_voxel_size_sweep.py. Writes the report into the repo and the
+# selection to best.json in the sweep root. Scoring is at the native resolution, ~6-8 GB per worker,
+# so 8 workers fit the 128 GB of the profile.
+#
+# Submit after the sweep, with the runner of the synapse repo:
+#   python /mnt/vast-nhr/home/freckmann15/u15205/synapse/sbatch_runner.py \
+#       scripts/volume_em/evaluation/mitonet_sweep_score.yaml --dependency afterok:<sweep job id>
+
+slurm_profile: grete_std_cpu
+
+slurm:
+  job_name: "volem-mitonet-sweep-score"
+
+env:
+  type: micromamba
+  path: /mnt/vast-nhr/home/freckmann15/u15205/micromamba/envs/synapse
+
+commands:
+  - "python /mnt/vast-nhr/home/freckmann15/u15205/synapse-net/scripts/volume_em/evaluation/score_voxel_size_sweep.py
+     --sweep_root /mnt/lustre-grete/usr/u15205/volume-em/mitonet-sweep/val
+     --workers 8
+     -o /mnt/vast-nhr/home/freckmann15/u15205/synapse-net/scripts/volume_em/RESULTS_mitonet_sweep_val.md"
