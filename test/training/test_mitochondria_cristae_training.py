@@ -14,7 +14,7 @@ def _identity(raw, labels):
     return raw, labels
 
 
-class TestTraining(unittest.TestCase):
+class TestMitochondriaCristaeTraining(unittest.TestCase):
     """The data, loss and transform of the mitochondria and cristae training, and a short cristae training."""
 
     @classmethod
@@ -71,8 +71,7 @@ class TestTraining(unittest.TestCase):
         self.assertEqual(train_paths, [self._path("ds0", 0), self._path("ds1", 1)])
         self.assertEqual(val_paths, [self._path("ds0", 2)])
 
-        # The test data is left out of a random split by passing it as exclude. This needs the same paths as the
-        # ones found by glob, also on Windows, where the '/' of the entries is not the path separator.
+        # Excluding the test data needs the same paths as glob, also with the Windows path separator.
         test_paths = get_cristae_test_paths(split_file)
         self.assertEqual(test_paths, [self._path("ds1", 3)])
         self.assertIn(test_paths[0], sum(get_cristae_paths(self.roots), []))
@@ -167,7 +166,9 @@ class TestTraining(unittest.TestCase):
                       patch_shape=(16, 32, 32), batch_size=1, num_workers=0)
         latest = os.path.join(self.tmp_folder, "checkpoints", "cristae", "latest.pt")
         cristae_training(n_iterations=2, **kwargs)
-        self.assertEqual(torch.load(latest, weights_only=False)["iteration"], 2)
+        checkpoint = torch.load(latest, weights_only=False)
+        self.assertEqual(checkpoint["iteration"], 2)
+        self.assertIsNone(checkpoint["init"]["model_kwargs"]["norm"])
         # Resuming continues the run, and `n_iterations` includes the iterations it already did.
         cristae_training(n_iterations=3, resume=True, **kwargs)
         self.assertEqual(torch.load(latest, weights_only=False)["iteration"], 3)
