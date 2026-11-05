@@ -32,8 +32,10 @@ def _run_segmentation(
         print("Compute connected components in", time.time() - t0, "s")
 
     t0 = time.time()
-    hmap = (dist.max() - dist) / dist.max()
-    hmap[np.logical_and(boundaries > boundary_threshold, foreground < boundary_threshold)] = (hmap + boundaries).max()
+    # Add the boundaries so that the boundary band is graded rather than a plateau of equal height:
+    # within a plateau the flooding order is unspecified, and one mitochondrion can flood along the membrane of another.
+    hmap = (dist.max() - dist) / dist.max() + boundaries
+    hmap[np.logical_and(boundaries > boundary_threshold, foreground < boundary_threshold)] = hmap.max()
     mask = (foreground + boundaries) > 0.5
 
     seg = np.zeros_like(seeds)
@@ -45,7 +47,12 @@ def _run_segmentation(
         print("Compute watershed in", time.time() - t0, "s")
 
     seg = apply_size_filter(seg, min_size, verbose=verbose, block_shape=block_shape)
-    seg = _postprocess_seg_3d(seg, area_threshold=area_threshold)
+    t0 = time.time()
+    seg = _postprocess_seg_3d(
+        seg, area_threshold=area_threshold, iterations=2, iterations_3d=3, fill_holes=True, remove_tunnels=True
+    )
+    if verbose:
+        print("Post-process segmentation in", time.time() - t0, "s")
     return seg
 
 
@@ -66,6 +73,7 @@ def segment_mitochondria(
     boundary_threshold: float = 0.25,
     area_threshold: int = 5000,
     preprocess: Callable = None,
+    batch_size: int = 1,
 ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
     """Segment mitochondria in an input volume.
 
@@ -86,6 +94,8 @@ def segment_mitochondria(
         boundary_threshold: The boundary threshold distance calculation.
         area_threshold: The maximum area (in pixels) of holes to be removed or filled in the segmentation.
             This parameter is passed to `skimage.morphology.remove_small_holes`.
+        batch_size: The number of blocks to stack into a single forward pass during prediction.
+            Larger values can increase GPU throughput at the cost of higher memory usage.
 
     Returns:
         The segmentation mask as a numpy array, or a tuple containing the segmentation mask
@@ -102,7 +112,7 @@ def segment_mitochondria(
         mask = scaler.scale_input(mask, is_segmentation=True)
     pred = get_prediction(
         input_volume, model_path=model_path, model=model, tiling=tiling, mask=mask, verbose=verbose,
-        preprocess=preprocess
+        preprocess=preprocess, batch_size=batch_size,
     )
 
     # Run segmentation and rescale the result if necessary.

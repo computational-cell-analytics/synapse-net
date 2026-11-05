@@ -108,6 +108,7 @@ def segment_cristae(
     mask: Optional[np.ndarray] = None,
     foreground_threshold: float = 0.5,
     erosion_distance_nm: float = 0.0,
+    batch_size: int = 1,
     **kwargs
 ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
     """Segment cristae in an input volume.
@@ -128,6 +129,8 @@ def segment_cristae(
         erosion_distance_nm: The distance in nanometers used to erode mitochondria instances before
             restricting the cristae prediction. Set to 0 to disable erosion and rely on the
             min_size filter to remove small cristae detached on the mitochondria membranes.
+        batch_size: The number of blocks to stack into a single forward pass during prediction.
+            Larger values can increase GPU throughput at the cost of higher memory usage.
 
     Returns:
         The segmentation mask as a numpy array, or a tuple containing the segmentation mask
@@ -155,7 +158,7 @@ def segment_cristae(
     erode_voxels = max(0, round(erosion_distance_nm / voxel_size))
 
     # Use the mitochondria segmentation as the prediction mask so that
-    # predict_with_halo skips tiles with no mito voxels entirely.
+    # predict_with_halo_pipelined skips tiles with no mito voxels entirely.
     # Replace with the optional external mask if one is provided.
     if mask is None:
         mask = mito_seg > 0
@@ -166,7 +169,8 @@ def segment_cristae(
     # Run prediction and segmentation.
     pred = get_prediction(
         input_volume, model_path=model_path, model=model, mask=mask,
-        tiling=tiling, with_channels=with_channels, channels_to_standardize=channels_to_standardize, verbose=verbose
+        tiling=tiling, with_channels=with_channels, channels_to_standardize=channels_to_standardize, verbose=verbose,
+        batch_size=batch_size,
     )
     foreground, boundaries = pred[:2]
     seg = _run_segmentation(

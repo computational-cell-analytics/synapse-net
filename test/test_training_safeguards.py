@@ -118,7 +118,8 @@ class TestSeeding(unittest.TestCase):
     """'--seed' has to cover the training itself, not just the train / val split."""
 
     def test_set_seed_makes_weight_init_reproducible(self):
-        from synapse_net.training.supervised_training import _set_seed, get_3d_model
+        from synapse_net.training.models import get_3d_model
+        from synapse_net.training.supervised_training import _set_seed
 
         _set_seed(42)
         first = [p.detach().clone() for p in get_3d_model(out_channels=2, initial_features=4).parameters()]
@@ -217,9 +218,10 @@ class TestScaleFactorsReachTheModel(unittest.TestCase):
         # 'synapse_net.training' re-exports the function 'supervised_training' under the name of its
         # own module, which shadows it, so the module has to be looked up explicitly.
         st = importlib.import_module("synapse_net.training.supervised_training")
+        models = importlib.import_module("synapse_net.training.models")
 
         with mock.patch.object(st, "get_supervised_loader"), \
-             mock.patch.object(st, "get_3d_model") as get_model, \
+             mock.patch.object(models, "get_3d_model") as get_model, \
              mock.patch.object(st.torch_em, "default_segmentation_trainer"):
             st.supervised_training(
                 name="m", train_paths=("a.h5",), val_paths=("b.h5",), label_key="labels",
@@ -238,7 +240,7 @@ class TestScaleFactorsReachTheModel(unittest.TestCase):
         self.assertNotIn("scale_factors", self._build_model())
 
     def test_two_anisotropic_levels_build_a_usable_model(self):
-        from synapse_net.training.supervised_training import get_3d_model
+        from synapse_net.training.models import get_3d_model
 
         model = get_3d_model(out_channels=2, initial_features=4, norm=None,
                              scale_factors=[[1, 2, 2], [1, 2, 2], [2, 2, 2], [2, 2, 2]])

@@ -1,4 +1,4 @@
-from typing import Optional, Dict, List, Union, Tuple
+from typing import Callable, Optional, Dict, List, Union, Tuple
 
 import numpy as np
 import torch
@@ -23,6 +23,9 @@ def segment_actin(
     return_predictions: bool = False,
     scale: Optional[List[float]] = None,
     mask: Optional[np.ndarray] = None,
+    preprocess: Optional[Callable] = None,
+    dtype: torch.dtype = torch.float32,
+    batch_size: int = 1,
 ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
     """Segment actin in an input volume.
 
@@ -37,6 +40,12 @@ def segment_actin(
         return_predictions: Whether to return the predictions (foreground, boundaries) alongside the segmentation.
         scale: The scale factor to use for rescaling the input volume before prediction.
         mask: An optional mask that is used to restrict the segmentation.
+        preprocess: The function used to normalize the input. It should match the `raw_transform`
+            used during training. By default, torch_em standardization is used.
+        dtype: The dtype for running the model. Pass `torch.bfloat16` to predict with bf16 autocast,
+            which is much faster on GPUs with bf16 support. By default, the model runs in float32.
+        batch_size: The number of blocks to stack into a single forward pass during prediction.
+            Larger values can increase GPU throughput at the cost of higher memory usage.
 
     Returns:
         The segmentation mask as a numpy array, or a tuple containing the segmentation mask
@@ -51,7 +60,11 @@ def segment_actin(
     # Run the prediction.
     if mask is not None:
         mask = scaler.scale_input(mask, is_segmentation=True)
-    pred = get_prediction(input_volume, model=model, model_path=model_path, tiling=tiling, verbose=verbose)
+
+    pred = get_prediction(
+        input_volume, model=model, model_path=model_path,
+        tiling=tiling, verbose=verbose, preprocess=preprocess, dtype=dtype, batch_size=batch_size,
+    )
     foreground, boundaries = pred[:2]
 
     # TODO proper segmentation procedure
