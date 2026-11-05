@@ -47,7 +47,12 @@ def _run_segmentation(
         print("Compute watershed in", time.time() - t0, "s")
 
     seg = apply_size_filter(seg, min_size, verbose=verbose, block_shape=block_shape)
-    seg = _postprocess_seg_3d(seg, area_threshold=area_threshold)
+    t0 = time.time()
+    seg = _postprocess_seg_3d(
+        seg, area_threshold=area_threshold, iterations=2, iterations_3d=3, fill_holes=True, remove_tunnels=True
+    )
+    if verbose:
+        print("Post-process segmentation in", time.time() - t0, "s")
     return seg
 
 
