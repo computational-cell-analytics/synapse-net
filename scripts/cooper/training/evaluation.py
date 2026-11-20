@@ -39,7 +39,7 @@ def evaluate_file(labels_path, vesicles_path, model_name, segment_key, anno_key,
         
     with h5py.File(vesicles_path) as seg_file:
         segmentation = seg_file["vesicles"]
-        vesicles = segmentation[segment_key][:] 
+        vesicles = segmentation[segment_key][:]
     
     if mask_key is not None:
         gt[mask == 0] = 0
