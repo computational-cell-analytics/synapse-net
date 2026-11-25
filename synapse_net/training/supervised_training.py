@@ -1,4 +1,5 @@
 import os
+import random
 from glob import glob
 from typing import Optional, Tuple, Union
 
@@ -10,6 +11,17 @@ from synapse_net.inference.inference import get_model_path, get_available_models
 from synapse_net.inference.util import _restore_legacy_attributes
 from synapse_net.training.models import get_raw_transform, _check_backbone, _get_model
 from synapse_net.training.dataloaders import get_supervised_loader
+
+
+def _random_split(paths, val_fraction, seed):
+    if len(paths) == 0:
+        raise ValueError("Did not find any training data.")
+    # Shuffle with a separate random state, so that the split is deterministic for a given set of files.
+    paths = sorted(paths)
+    random.Random(seed).shuffle(paths)
+    # Validate on at least one file if there is more than one.
+    n_val = max(int(len(paths) * val_fraction), int(len(paths) > 1))
+    return paths[:len(paths) - n_val], paths[len(paths) - n_val:]
 
 
 def supervised_training(
@@ -37,12 +49,18 @@ def supervised_training(
     loss_fn: Optional[torch.nn.Module] = None,
     in_channels: int = 1,
     out_channels: int = 2,
+    norm: Optional[str] = "InstanceNorm",
+    transform: Optional[callable] = None,
     mask_channel: bool = False,
     backbone: Optional[str] = None,
     model_type: Optional[str] = None,
     encoder_checkpoint: Optional[str] = None,
     checkpoint_path: Optional[str] = None,
+    resume: bool = False,
     save_every_kth_epoch: Optional[int] = None,
+    mixed_precision: bool = True,
+    early_stopping: Optional[int] = None,
+    log_image_interval: int = 100,
     **loader_kwargs,
 ):
     """Run supervised segmentation training.
@@ -86,6 +104,10 @@ def supervised_training(
             If no label transform is passed (the default) a boundary transform is used.
         loss_fn: Custom loss function. If None, will default to `torch_em.loss.DiceLoss`.
         out_channels: The number of output channels of the UNet.
+        norm: The normalization layer of the 3D UNet, or None for no normalization.
+            This has no effect if a `backbone` is used.
+        transform: Joint transformation applied to the raw data and the labels.
+            By default padding and the standard augmentations are applied.
         mask_channel: Whether the last channels in the labels should be used for masking the loss.
             This can be used to implement more complex masking operations and is not compatible with `ignore_label`.
         backbone: The pretrained encoder. Options: "sam", "sam2", "dinov2", "dinov3" (ViT encoders of a UNETR),
@@ -95,9 +117,14 @@ def supervised_training(
             "vit_b_em_organelles" for "sam".
         encoder_checkpoint: Path to the pretrained encoder weights for `backbone`.
             By default they are fetched for `backbone` and `model_type`.
-        checkpoint_path: Path to the directory with 'best.pt'; continue training this model.
+        checkpoint_path: Path to the directory with 'best.pt', to initialize the model from it.
+        resume: Whether to continue the previous run with this name in `save_root`, with its optimizer
+            and iteration count. `n_iterations` then includes the iterations of the previous run.
         save_every_kth_epoch: Save checkpoints after every kth epoch in a separate file.
             The corresponding checkpoints will be saved with the naming scheme 'epoch-{epoch}.pt'.
+        mixed_precision: Whether to train with mixed precision.
+        early_stopping: The number of epochs without improvement after which training is stopped.
+        log_image_interval: The interval (in iterations) at which images are written to the log.
         loader_kwargs: Additional keyword arguments for the dataloader.
     """
     _check_backbone(backbone, model_type, patch_shape)
@@ -109,13 +136,13 @@ def supervised_training(
         train_paths, raw_key, label_key, patch_shape, batch_size,
         n_samples=n_samples_train, rois=train_rois, sampler=sampler, ignore_label=ignore_label,
         label_transform=label_transform, label_paths=train_label_paths, raw_transform=raw_transform,
-        **loader_kwargs,
+        transform=transform, **loader_kwargs,
     )
     val_loader = get_supervised_loader(
         val_paths, raw_key, label_key, patch_shape, batch_size,
         n_samples=n_samples_val, rois=val_rois, sampler=sampler, ignore_label=ignore_label,
         label_transform=label_transform, label_paths=val_label_paths, raw_transform=raw_transform,
-        **loader_kwargs,
+        transform=transform, **loader_kwargs,
     )
 
     if check:
@@ -129,7 +156,7 @@ def supervised_training(
     else:
         model = _get_model(
             patch_shape, out_channels, in_channels=in_channels, backbone=backbone,
-            model_type=model_type, encoder_checkpoint=encoder_checkpoint,
+            model_type=model_type, encoder_checkpoint=encoder_checkpoint, norm=norm,
         )
 
     base_loss = loss_fn if loss_fn is not None else torch_em.loss.DiceLoss()
@@ -166,14 +193,19 @@ def supervised_training(
         train_loader=train_loader,
         val_loader=val_loader,
         learning_rate=lr,
-        mixed_precision=True,
-        log_image_interval=100,
+        mixed_precision=mixed_precision,
+        log_image_interval=log_image_interval,
+        early_stopping=early_stopping,
         compile_model=False,
         save_root=save_root,
         loss=loss,
         metric=metric,
     )
-    trainer.fit(n_iterations, save_every_kth_epoch=save_every_kth_epoch)
+    if resume:  # Train only the remaining iterations; this fails if there is no previous run.
+        latest = os.path.join(trainer.checkpoint_folder, "latest.pt")
+        n_iterations -= torch.load(latest, map_location="cpu", weights_only=False)["iteration"]
+    trainer.fit(n_iterations, load_from_checkpoint="latest" if resume else None,
+                save_every_kth_epoch=save_every_kth_epoch)
 
 
 def _derive_key_from_files(files, key):
