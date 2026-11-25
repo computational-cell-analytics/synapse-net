@@ -73,11 +73,13 @@ class TestVolEmMitochondria(unittest.TestCase):
         self.assertEqual((kwargs["patch_shape"], kwargs["batch_size"]), ((32, 512, 512), 4))
 
     def test_model_architecture(self):
+        from torch_em.util import get_constructor_arguments
         from synapse_net.training.models import _get_model
         from synapse_net.training.mitochondria_vol_em import VOL_EM_SCALE_FACTORS
 
         model = _get_model((32, 512, 512), 2, norm=None, scale_factors=VOL_EM_SCALE_FACTORS)
-        self.assertEqual(model.scale_factors, VOL_EM_SCALE_FACTORS)
+        kwargs = get_constructor_arguments(model)
+        self.assertEqual((kwargs["scale_factors"], kwargs["norm"]), (VOL_EM_SCALE_FACTORS, None))
 
     def test_inference_preprocessing(self):
         from torch_em.transform.raw import normalize_percentile
