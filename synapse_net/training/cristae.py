@@ -1,6 +1,5 @@
 """Training of the cristae model for electron tomography (`cristae5`)."""
 
-import json
 import os
 from glob import glob
 from typing import List, Mapping, Optional, Sequence, Tuple
@@ -9,22 +8,9 @@ import torch_em
 from torch_em.data import MinInstanceSampler
 
 from .loss import MaskedDiceLossPerSample
-from .supervised_training import _random_split, supervised_training
+from .supervised_training import _random_split, _read_split, supervised_training
 from .transform import AugmentedMitoStateMaskTransform, standardize_channel
 
-
-def _read_split(split_file, data_roots, key):
-    """Read the '<root name>/<relative path>' entries of `key`; `data_roots` override the stored roots."""
-    with open(split_file) as f:
-        split = json.load(f)
-    roots ={**split.get("roots", {}), **(data_roots or {})}
-    paths = []
-    for entry in split.get(key, []):
-        root, *parts = entry.split("/")
-        if root not in roots:
-            raise ValueError(f"{split_file} refers to the unknown data root '{root}'.")
-        paths.append(os.path.join(roots[root], *parts))
-    return paths
 
 
 def get_cristae_test_paths(split_file: str, data_roots: Optional[Mapping[str, str]] = None) -> List[str]:

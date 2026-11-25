@@ -5,6 +5,8 @@ from bioimage_cpp.distance import distance_transform
 from torch_em.transform.label import labels_to_binary
 from scipy.ndimage import distance_transform_edt
 
+from synapse_net.inference.mitochondria import remove_white_patches
+
 # The voxel size of the cristae training data, in nanometer.
 CRISTAE_VOXEL_SIZE = (1.74, 1.74, 1.74)
 
@@ -129,3 +131,24 @@ class AugmentedMitoStateMaskTransform:
         mask = torch.as_tensor(mask).to(labels.dtype)
         masks = mask.unsqueeze(1).repeat(1, labels.shape[1], *([1] * (labels.dim() - 2)))
         return raw, torch.cat([labels, masks], dim=1)
+
+
+class RemoveWhitePatchesAndNormalize:
+    """Raw transform of the volume EM mitochondria model: `remove_white_patches`, then percentile normalization.
+
+    This is a class so that dataloader workers and checkpoints can pickle it.
+
+    Args:
+        min_size: The minimal size (in voxels) of a filler component that is removed.
+        lower: The lower percentile for the normalization.
+        upper: The upper percentile for the normalization.
+    """
+
+    def __init__(self, min_size: int = 20, lower: float = 1.0, upper: float = 99.0):
+        self.min_size = min_size
+        self.lower = lower
+        self.upper = upper
+
+    def __call__(self, raw: np.ndarray) -> np.ndarray:
+        raw = remove_white_patches(raw, min_size=self.min_size)
+        return torch_em.transform.raw.normalize_percentile(raw, lower=self.lower, upper=self.upper)

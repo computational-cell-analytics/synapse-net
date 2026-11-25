@@ -1,7 +1,8 @@
+import json
 import os
 import random
 from glob import glob
-from typing import Optional, Tuple, Union
+from typing import List, Mapping, Optional, Tuple, Union
 
 import torch
 import torch_em
@@ -22,6 +23,20 @@ def _random_split(paths, val_fraction, seed):
     # Validate on at least one file if there is more than one.
     n_val = max(int(len(paths) * val_fraction), int(len(paths) > 1))
     return paths[:len(paths) - n_val], paths[len(paths) - n_val:]
+
+
+def _read_split(split_file: str, data_roots: Optional[Mapping[str, str]], key: str) -> List[str]:
+    """Read the '<root name>/<relative path>' entries of `key`; `data_roots` override the stored roots."""
+    with open(split_file) as f:
+        split = json.load(f)
+    roots = {**split.get("roots", {}), **(data_roots or {})}
+    paths = []
+    for entry in split.get(key, []):
+        root, *parts = entry.split("/")
+        if root not in roots:
+            raise ValueError(f"{split_file} refers to the unknown data root '{root}'.")
+        paths.append(os.path.join(roots[root], *parts))
+    return paths
 
 
 def supervised_training(
@@ -50,6 +65,7 @@ def supervised_training(
     in_channels: int = 1,
     out_channels: int = 2,
     norm: Optional[str] = "InstanceNorm",
+    scale_factors: Optional[Tuple[Tuple[int, int, int]]] = None,
     transform: Optional[callable] = None,
     mask_channel: bool = False,
     backbone: Optional[str] = None,
@@ -106,6 +122,8 @@ def supervised_training(
         out_channels: The number of output channels of the UNet.
         norm: The normalization layer of the 3D UNet, or None for no normalization.
             This has no effect if a `backbone` is used.
+        scale_factors: The downscaling factors of the 3D UNet encoder, in ZYX. By default one anisotropic
+            level is used, pass more for data with a stronger anisotropy. Has no effect for 2D or a `backbone`.
         transform: Joint transformation applied to the raw data and the labels.
             By default padding and the standard augmentations are applied.
         mask_channel: Whether the last channels in the labels should be used for masking the loss.
@@ -157,6 +175,7 @@ def supervised_training(
         model = _get_model(
             patch_shape, out_channels, in_channels=in_channels, backbone=backbone,
             model_type=model_type, encoder_checkpoint=encoder_checkpoint, norm=norm,
+            scale_factors=scale_factors,
         )
 
     base_loss = loss_fn if loss_fn is not None else torch_em.loss.DiceLoss()

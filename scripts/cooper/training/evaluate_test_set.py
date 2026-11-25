@@ -1,9 +1,12 @@
-"""Evaluate the mitochondria or cristae model for electron tomography on its held-out test set.
+"""Evaluate the mitochondria or cristae model for electron tomography, or the FIB-SEM mitochondria model,
+on its held-out test set.
 
     python evaluate_test_set.py -t mito -m mitochondria2 -o mito.csv
     python evaluate_test_set.py -t cristae -m cristae5 -o cristae.csv
+    python evaluate_test_set.py -t fibsem -m mitochondria_fibsem -o fibsem.csv
 
 The model is the name of a pretrained model, a checkpoint folder or a serialized model.
+For 'fibsem' the model must be a checkpoint until 'mitochondria_fibsem' is in the model registry.
 Mitochondria are scored by instance matching (F1, precision, recall) and the symmetric best dice.
 Cristae are scored voxel-wise in the mitochondria with cristae annotations (dice, precision, recall), and by the
 average precision and ROC-AUC of the foreground prediction there, also in bands at the membrane and in the rest.
@@ -28,11 +31,12 @@ from sklearn.metrics import average_precision_score, roc_auc_score
 
 from synapse_net.inference.cristae import segment_cristae
 from synapse_net.inference.inference import get_model
-from synapse_net.inference.mitochondria import segment_mitochondria
+from synapse_net.inference.mitochondria import segment_mitochondria, segment_mitochondria_fibsem
 from synapse_net.training.cristae import get_cristae_test_paths
 from synapse_net.training.transform import CRISTAE_VOXEL_SIZE
 
 MITO_TEST_ROOT = "/mnt/lustre-grete/usr/u12103/mitochondria/synapse-net-eval-data/eval_data_h5_s4"
+FIBSEM_TEST_ROOT = "/mnt/lustre-grete/projects/nim00020/data/volume-em/moebius/test_split"
 CRISTAE_SPLIT_FILE = os.path.join(os.path.dirname(__file__), "split-cristae_membw_pos3neg2_2026-07-31.json")
 BAND_NM = (8.0, 12.0)  # The thicknesses of the membrane bands for the average precision.
 MAX_POINTS_AP = 3_000_000  # The average precision is computed on a random subset of at most this many voxels.
@@ -84,6 +88,8 @@ def evaluate(task, path, model, tiling):
             seg = segment_mitochondria(f["raw"][:], model=model, tiling=tiling, verbose=False,
                                        preprocess=torch_em.transform.raw.normalize_percentile)
             return score_mito(path, seg)
+        if task == "fibsem":
+            return score_mito(path, segment_mitochondria_fibsem(f["raw"][:], model=model, tiling=tiling, verbose=False))
         # The tomogram and the mitochondria state, which segment_cristae turns into the mitochondria mask.
         seg, pred = segment_cristae(f["raw_mitos_combined"][:], voxel_size=np.mean(CRISTAE_VOXEL_SIZE), model=model,
                                     tiling=tiling, verbose=False, return_predictions=True)
@@ -92,7 +98,7 @@ def evaluate(task, path, model, tiling):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("-t", "--task", choices=["mito", "cristae"], required=True)
+    parser.add_argument("-t", "--task", choices=["mito", "cristae", "fibsem"], required=True)
     parser.add_argument("-m", "--model", required=True, help="A pretrained model, a checkpoint folder or a .pt file.")
     parser.add_argument("-o", "--output_path", required=True, help="The csv file for the scores.")
     parser.add_argument("--tile", type=int, nargs=3, help="The tile shape (z, y, x), including the halo.")
@@ -110,8 +116,12 @@ def main():
         model = get_model(args.model)
     model.eval()
 
-    paths = sorted(glob(os.path.join(MITO_TEST_ROOT, "*.h5"))) if args.task == "mito" else \
-        get_cristae_test_paths(CRISTAE_SPLIT_FILE)
+    if args.task == "mito":
+        paths = sorted(glob(os.path.join(MITO_TEST_ROOT, "*.h5")))
+    elif args.task == "fibsem":
+        paths = sorted(glob(os.path.join(FIBSEM_TEST_ROOT, "*", "*.h5")))
+    else:
+        paths = get_cristae_test_paths(CRISTAE_SPLIT_FILE)
     results = []
     for path in paths:
         results.append({"tomogram": os.path.basename(path), **evaluate(args.task, path, model, tiling)})

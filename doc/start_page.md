@@ -214,7 +214,8 @@ for more information and instructions on how to use the command.
 ### Mitochondria and Cristae Training
 
 SynapseNet provides dedicated functions for training the mitochondria and cristae models for electron tomography,
-which reproduce the recipes of our `mitochondria2` and `cristae5` models:
+and the mitochondria model for FIB-SEM, which reproduce the recipes of our `mitochondria2`, `cristae5` and
+`mitochondria_fibsem` models:
 ```python
 from synapse_net.training import cristae_training, mitochondria_training
 from synapse_net.training.cristae import get_cristae_paths
@@ -225,12 +226,22 @@ mitochondria_training("my-mito-model", train_paths, val_paths, save_root="/path/
 
 train_paths, val_paths = get_cristae_paths({"cristae": "/path/to/cristae-tomograms"})
 cristae_training("my-cristae-model", train_paths, val_paths, save_root="/path/to/models")
+
+from synapse_net.training import vol_em_mitochondria_training
+from synapse_net.training.mitochondria_vol_em import get_vol_em_mitochondria_paths
+
+train_paths, val_paths = get_vol_em_mitochondria_paths({"fibsem": "/path/to/blocks"})
+vol_em_mitochondria_training("my-fibsem-mito-model", train_paths, val_paths, save_root="/path/to/models")
 ```
 The mitochondria model is trained on percentile-normalized tomograms, so segment with it by passing
 `preprocess=torch_em.transform.raw.normalize_percentile` to `synapse_net.inference.mitochondria.segment_mitochondria`.
 The cristae model gets the tomogram and a mitochondria state as input, where 0 is background, 1 is a mitochondrion with
-cristae annotations and 2 is one without, which is excluded from the loss. Both recipes need an 80 GB GPU.
-The scripts in `scripts/cooper/training` train and evaluate the published models.
+cristae annotations and 2 is one without, which is excluded from the loss.
+The FIB-SEM model (25 nm in z, 5 nm in xy) uses two anisotropic U-Net levels and no normalization layers. The white
+filler borders of the training blocks are removed before percentile normalization;
+`synapse_net.inference.mitochondria.segment_mitochondria_fibsem` does the same at inference.
+All recipes need an 80 GB GPU. The scripts in `scripts/cooper/training` and `scripts/volume_em/training` train the
+published models, `scripts/cooper/training/evaluate_test_set.py` evaluates them.
 
 
 ### Domain Adaptation

@@ -108,7 +108,7 @@ def _check_backbone(backbone, model_type, patch_shape):
 
 def _get_model(
     patch_shape, out_channels, in_channels=1, backbone=None, model_type=None,
-    encoder_checkpoint=None, final_activation="Sigmoid", norm="InstanceNorm",
+    encoder_checkpoint=None, final_activation="Sigmoid", norm="InstanceNorm", scale_factors=None,
 ):
     is_2d, ndim = _determine_ndim(patch_shape)
 
@@ -129,8 +129,10 @@ def _get_model(
     if is_2d:
         return get_2d_model(out_channels=out_channels, in_channels=in_channels, final_activation=final_activation)
 
+    scale_kwargs = {} if scale_factors is None else {"scale_factors": scale_factors}
     return get_3d_model(
         out_channels=out_channels, in_channels=in_channels, final_activation=final_activation, norm=norm,
+        **scale_kwargs,
     )
 
 

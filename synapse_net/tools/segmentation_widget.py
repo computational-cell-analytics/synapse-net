@@ -22,7 +22,7 @@ from ..inference.inference import (
     get_segmentation_function,
     run_segmentation,
 )
-from ..inference.mitochondria import segment_mitochondria
+from ..inference.mitochondria import segment_mitochondria, segment_mitochondria_fibsem
 from ..inference.util import get_default_tiling, get_device
 from ..inference.vesicles import VESICLE_SEGMENTATION_MODES, segment_vesicles
 
@@ -35,6 +35,10 @@ _POSTPROCESSING_PARAMETER_SPECS = {
         "threshold": {"type": "float", "min": 0.0, "max": 1.0, "step": 0.01, "decimals": 2},
     },
     segment_mitochondria: {
+        "min_size": {"type": "int", "min": 0, "max": _MAX_MIN_SIZE, "step": 1},
+        "seed_distance": {"type": "int", "min": 0, "max": 10_000, "step": 1},
+    },
+    segment_mitochondria_fibsem: {
         "min_size": {"type": "int", "min": 0, "max": _MAX_MIN_SIZE, "step": 1},
         "seed_distance": {"type": "int", "min": 0, "max": 10_000, "step": 1},
     },

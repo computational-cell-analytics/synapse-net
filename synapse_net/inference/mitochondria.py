@@ -4,6 +4,8 @@ from typing import Callable, Dict, List, Optional, Tuple, Union
 import elf.parallel as parallel
 import numpy as np
 import torch
+from skimage.measure import label as connected_components
+from torch_em.transform.raw import normalize_percentile
 
 from synapse_net.inference.util import apply_size_filter, get_prediction, _Scaler, _postprocess_seg_3d
 
@@ -126,3 +128,72 @@ def segment_mitochondria(
         pred = scaler.rescale_output(pred, is_segmentation=False)
         return seg, pred
     return seg
+
+
+def remove_white_patches(raw: np.ndarray, min_size: int = 20, value: int = 255) -> np.ndarray:
+    """Set the white filler borders of a volume EM block to zero.
+
+    Volume EM blocks cut out of a larger FIB-SEM volume carry saturated filler where the cutout extends
+    past the imaged region, which skews the percentile normalization. Saturated components smaller than
+    `min_size` are kept, because they are sample structure. Has to run on the unnormalized data.
+
+    Args:
+        raw: The 2d or 3d volume, with an integer dtype.
+        min_size: The minimal size (in voxels) of a filler component that is removed.
+        value: The value that marks the filler.
+
+    Returns:
+        The volume with the filler set to zero.
+    """
+    if raw.ndim not in (2, 3):
+        raise ValueError(f"Expect 2d or 3d input data, got {raw.ndim} dimensions.")
+    if not np.issubdtype(raw.dtype, np.integer):
+        raise ValueError(f"Expect the unnormalized data with an integer dtype, got {raw.dtype}.")
+    mask = raw == value
+    if not mask.any():
+        return raw
+    components = connected_components(mask)
+    filler_ids = np.where(np.bincount(components.ravel()) >= min_size)[0]
+    filler_ids = filler_ids[filler_ids != 0]
+    if filler_ids.size == 0:
+        return raw
+    raw = raw.copy()
+    raw[np.isin(components, filler_ids)] = 0
+    return raw
+
+
+
+def segment_mitochondria_fibsem(
+    input_volume: np.ndarray,
+    min_size: int = 1000,
+    seed_distance: int = 1,
+    boundary_threshold: float = 0.12,
+    area_threshold: int = 200,
+    white_patch_min_size: Optional[int] = 20,
+    **kwargs,
+) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
+    """Segment mitochondria in FIB-SEM volume EM with the `mitochondria_fibsem` model.
+
+    Removes the white filler borders with `remove_white_patches` and normalizes with the 1st and 99th percentile,
+    matching the training of the model, then calls `segment_mitochondria`.
+
+    Args:
+        input_volume: The unnormalized input volume.
+        min_size: The minimum size of a mitochondrion, in voxels.
+        seed_distance: The distance threshold for the seeded watershed.
+        boundary_threshold: The boundary threshold for the distance calculation.
+        area_threshold: The maximum area (in pixels) of holes that are filled in the segmentation.
+        white_patch_min_size: The minimal size (in voxels) of a filler component that is removed.
+            Pass None for data that was not cut out of a larger volume, or that is not stored as integers.
+        kwargs: Additional keyword arguments for `segment_mitochondria`.
+
+    Returns:
+        The segmentation, and the predictions if `return_predictions` is passed.
+    """
+    if white_patch_min_size is not None:
+        input_volume = remove_white_patches(input_volume, min_size=white_patch_min_size)
+    kwargs.setdefault("preprocess", normalize_percentile)
+    return segment_mitochondria(
+        input_volume, min_size=min_size, seed_distance=seed_distance, boundary_threshold=boundary_threshold,
+        area_threshold=area_threshold, **kwargs,
+    )

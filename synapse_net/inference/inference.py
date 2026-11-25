@@ -7,7 +7,7 @@ import pooch
 
 from .active_zone import segment_active_zone
 from .compartments import segment_compartments
-from .mitochondria import segment_mitochondria
+from .mitochondria import segment_mitochondria, segment_mitochondria_fibsem
 from .ribbon_synapse import segment_ribbon_synapse_structures
 from .vesicles import segment_vesicles
 from .cristae import segment_cristae
@@ -131,6 +131,7 @@ def get_model_training_resolution(model_type: str) -> Dict[str, float]:
         "compartments": {"x": 3.47, "y": 3.47, "z": 3.47},
         "mitochondria": {"x": 2.07, "y": 2.07, "z": 2.07},
         "mitochondria2": {"x": 2.87, "y": 2.87, "z": 2.87},
+        "mitochondria_fibsem": {"x": 5.0, "y": 5.0, "z": 25.0},
         "cristae": {"x": 1.44, "y": 1.44, "z": 1.44},
         "cristae2": {"x": 1.44, "y": 1.44, "z": 1.44},
         "cristae3": {"x": 1.44, "y": 1.44, "z": 1.44},
@@ -164,6 +165,7 @@ def get_model_training_patch_shape(model_type: str) -> Dict[str, int]:
         "compartments": {"z": 64, "y": 384, "x": 384},  # cooper/training/train_compartments.py
         "mitochondria": {"z": 32, "y": 256, "x": 256},  # cooper/training/train_mitochondria.py
         "mitochondria2": {"z": 32, "y": 256, "x": 256},  # cooper/training/train_mitochondria.py
+        "mitochondria_fibsem": {"z": 32, "y": 512, "x": 512},  # volume_em/training/train_mitochondria_vol_em.py
         "cristae": {"z": 32, "y": 256, "x": 256},  # Confirmed by the model's trainer.
         "cristae2": {"z": 32, "y": 256, "x": 256},  # Confirmed by the model's trainer.
         "cristae3": {"z": 32, "y": 256, "x": 256},  # Confirmed by the model's trainer.
@@ -288,6 +290,8 @@ def get_segmentation_function(model_type: str) -> Callable:
         return segment_vesicles
     if model_type in ("mitochondria", "mitochondria2"):
         return segment_mitochondria
+    if model_type == "mitochondria_fibsem":
+        return segment_mitochondria_fibsem
     if model_type == "active_zone":
         return segment_active_zone
     if model_type == "compartments":
