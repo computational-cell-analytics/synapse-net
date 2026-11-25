@@ -84,13 +84,15 @@ After this SynapseNet will be up-to-date and you can use the latest features!
 
 ## Segmentation Models
 
-We currently offer seven different models for segmenting synaptic structures:
+We currently offer the following models for segmenting synaptic structures:
 - `vesicles_3d` to segment vesicles in (room-temperature) electron tomograms.
 - `vesicles_2d` to segment vesicles in two-dimensional electron micrographs.
 - `vesicles_cryo` to segment vesicles in cryogenic electron tomograms.
 - `active_zone` to segment active zones in electron tomograms.
 - `compartments` to segment synaptic compartments in electron tomograms.
-- `mitochondria` to segment mitochondria in electron tomograms.
+- `mitochondria2` to segment mitochondria in electron tomograms.
+- `cristae5` to segment cristae in electron tomograms. It needs a mitochondria segmentation as a second input.
+- `mitochondria_fibsem` to segment mitochondria in FIB-SEM volume EM (trained at 25 nm in z and 5 nm in xy).
 - `ribbon` to segment structures of the active zones in ribbon synapses (ribbon, presynaptic density and active zone membrane) in electron tomograms.
 
 
@@ -145,7 +147,7 @@ SynapseNet provides a command line interface to segment synaptic structures in m
 synapse_net.run_segmentation -i /path/to/folder-with-mrc -o /path/to/save-segmentation -m vesicles_3d
 ```
 to segment the synaptic vesicles in all tomograms that are stored as mrc files in the folder `/path/to/folder-with-mrc`. The segmentations will be stored as tif files in the (new) folder `/path/to/save-segmentation`.
-You can select a different segmentation model by changing the name after `-m`. For example use `-m mitochondria` to segment mitochondria or `-m vesicles_2d` to segment vesicles in 2D images.
+You can select a different segmentation model by changing the name after `-m`. For example use `-m mitochondria2` to segment mitochondria or `-m vesicles_2d` to segment vesicles in 2D images.
 The command offers several other arguments to change the segmentation logic; you can run `synapse_net.run_segmentation -h` for an explanation of these arguments.
 
 **IMOD Export:** We offer two commands to export segmentation results to mod files that can be opened with [3dmod](https://bio3d.colorado.edu/imod/doc/3dmodguide.html), which is part of the [IMOD](https://bio3d.colorado.edu/imod/) software suite:
