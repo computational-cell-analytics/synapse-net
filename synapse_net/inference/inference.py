@@ -4,6 +4,7 @@ from typing import Callable, Dict, List, Optional, Union
 import torch
 import numpy as np
 import pooch
+from torch_em.model.unet import AnisotropicUNet
 
 from .active_zone import segment_active_zone
 from .compartments import segment_compartments
@@ -25,7 +26,7 @@ def _get_model_registry():
         "active_zone": "c23652a8fe06daa113546af6d3200c4c1dcc79917056c6ed7357b8c93548372a",
         "compartments": "527983720f9eb215c45c4f4493851fd6551810361eda7b79f185a0d304274ee1",
         "mitochondria": "24625018a5968b36f39fa9d73b121a32e8f66d0f2c0540d3df2e1e39b3d58186",
-        "mitochondria2": "0ec4c48fb67ebcdf1c2a86710e1d5e40519758b867e49a6999d155e8eb15d459",
+        "mitochondria2": "45b3e890d928bd9145ecf3b8676f4e1ed5f9938cad1ab51343b9ed07f2d1de24",
         "cristae": "f96c90484f4ea92ac0515a06e389cc117580f02c2aacdc44b5828820cf38c3c3",
         "cristae2": "0864945698862df043adc51c0034289a579b0622a61164e5ebd00a24ee25d075",
         "cristae3": "5cb8699487bd21204071cbfb784a7f5c2bb6ab5f347a9d02a913aa27ae70eca4",
@@ -44,7 +45,7 @@ def _get_model_registry():
         "active_zone": "https://owncloud.gwdg.de/index.php/s/wpea9FH9waG4zJd/download",
         "compartments": "https://owncloud.gwdg.de/index.php/s/DnFDeTmDDmZrDDX/download",
         "mitochondria": "https://owncloud.gwdg.de/index.php/s/1T542uvzfuruahD/download",
-        "mitochondria2": "https://owncloud.gwdg.de/index.php/s/jivHzhpsqXN3PoH/download",
+        "mitochondria2": "https://hypha.aicell.io/bioimage-io/artifacts/brave-hedgehog/files/weights.pt?version=v0",
         "cristae": "https://owncloud.gwdg.de/index.php/s/Df7OUOyQ1Kc2eEO/download",
         "cristae2": "https://owncloud.gwdg.de/index.php/s/qe0R5pRgH2m0pQ5/download",
         "cristae3": "https://owncloud.gwdg.de/index.php/s/51X1et8d7pOfdhU/download",
@@ -69,6 +70,20 @@ def _get_model_registry():
     return models
 
 
+def _state_dict_to_model(fname, action, pup):
+    # bioimage.io models ship a state dict; convert it once into a pickled model like the other registry entries.
+    out = fname + ".pt"
+    if action == "fetch" and os.path.exists(out):
+        return out
+    model = AnisotropicUNet(
+        in_channels=1, out_channels=2, scale_factors=[[1, 2, 2], [2, 2, 2], [2, 2, 2], [2, 2, 2]],
+        initial_features=32, gain=2, final_activation="Sigmoid", norm="InstanceNorm",
+    )
+    model.load_state_dict(torch.load(fname, map_location="cpu", weights_only=True))
+    torch.save(model, out)
+    return out
+
+
 def get_available_models() -> List[str]:
     """Get the names of all available pretrained models.
 
@@ -89,7 +104,8 @@ def get_model_path(model_type: str) -> str:
         The local path to the model.
     """
     model_registry = _get_model_registry()
-    model_path = model_registry.fetch(model_type)
+    processor = _state_dict_to_model if model_type == "mitochondria2" else None
+    model_path = model_registry.fetch(model_type, processor=processor)
     return model_path
 
 

@@ -36,8 +36,9 @@ class TestInference(unittest.TestCase):
 
         def check_url(url):
             try:
-                # Make a HEAD request to the URL, which fetches HTTP headers but no content.
-                response = requests.head(url, allow_redirects=True)
+                # Stream a GET request so that only the headers are fetched (some hosts reject HEAD requests).
+                with requests.get(url, allow_redirects=True, stream=True) as response:
+                    pass
                 # Check if the HTTP status code is one that indicates availability (200 <= code < 400).
                 return response.status_code < 400
             except requests.RequestException:
@@ -50,6 +51,25 @@ class TestInference(unittest.TestCase):
             self.assertTrue(url_exists)
             get_model_training_resolution(name)
             get_model_training_patch_shape(name)
+
+    # Test that the bioimage.io model is converted correctly, by checking it against the model's test tensors.
+    def test_mitochondria2_bioimageio(self):
+        import numpy as np
+        import pooch
+        from synapse_net.inference import get_model
+
+        url = "https://hypha.aicell.io/bioimage-io/artifacts/brave-hedgehog/files/{}?version=v0"
+        test_input = np.load(pooch.retrieve(
+            url.format("test_input.npy"), "a3de25e32a357b819469addc6ec514f1ecd485d6b6cd4edee5b38241a879ef1b"
+        ))
+        test_output = np.load(pooch.retrieve(
+            url.format("test_output.npy"), "8a925fc9b88f1061f1cbfd32510125e06067ab8069696757a5dfd93a6d823695"
+        ))
+        test_input = (test_input - test_input.mean()) / (test_input.std() + 1e-7)
+        model = get_model("mitochondria2", device="cpu")
+        with torch.no_grad():
+            pred = model(torch.from_numpy(test_input.astype("float32"))).numpy()
+        self.assertTrue(np.allclose(pred, test_output, atol=1e-4))
 
     def test_run_segmentation(self):
         from synapse_net.inference import run_segmentation, get_model
