@@ -52,24 +52,35 @@ class TestInference(unittest.TestCase):
             get_model_training_resolution(name)
             get_model_training_patch_shape(name)
 
-    # Test that the bioimage.io model is converted correctly, by checking it against the model's test tensors.
-    def test_mitochondria2_bioimageio(self):
+    # Test that bioimage.io models are converted correctly, by checking them against the models' test tensors.
+    # Only one 2D and one 3D model are checked, to limit the download size.
+    def test_bioimageio_models(self):
         import numpy as np
         import pooch
         from synapse_net.inference import get_model
 
-        url = "https://hypha.aicell.io/bioimage-io/artifacts/brave-hedgehog/files/{}?version=v0"
-        test_input = np.load(pooch.retrieve(
-            url.format("test_input.npy"), "a3de25e32a357b819469addc6ec514f1ecd485d6b6cd4edee5b38241a879ef1b"
-        ))
-        test_output = np.load(pooch.retrieve(
-            url.format("test_output.npy"), "8a925fc9b88f1061f1cbfd32510125e06067ab8069696757a5dfd93a6d823695"
-        ))
-        test_input = (test_input - test_input.mean()) / (test_input.std() + 1e-7)
-        model = get_model("mitochondria2", device="cpu")
-        with torch.no_grad():
-            pred = model(torch.from_numpy(test_input.astype("float32"))).numpy()
-        self.assertTrue(np.allclose(pred, test_output, atol=1e-4))
+        test_tensors = {
+            "vesicles_2d": ("adaptable-microbe", {
+                "test_input.npy": "0cd6f464ec8eaa2928b100e456bc0a53949f926e00a4c9e428c0a3db014a2d36",
+                "test_output.npy": "7ba544cfa1ac3ea75dd0c546c485baa94de2e4f576449841678f651d99fe0653",
+            }),
+            "cristae5": ("gorgeous-eagle", {
+                "test_raw.npy": "49bd5b93747875ae069bc13a5aa8e971f099a0180f06aa678890209feaf008fe",
+                "test_mito_mask.npy": "391ebfa87a95f74d99a671701134c4fb437a879581dcf21743bd690f165b201d",
+                "test_output.npy": "0e734e083895f7ee5abced5d20285a05e677be2405a8b1dfd9f7d89611f03042",
+            }),
+        }
+        url = "https://hypha.aicell.io/bioimage-io/artifacts/{}/files/{}?version=v0"
+        for model_type, (artifact, files) in test_tensors.items():
+            with self.subTest(model_type=model_type):
+                *inputs, expected = [np.load(pooch.retrieve(url.format(artifact, f), sha)) for f, sha in files.items()]
+                # Only the raw data is standardized, the mitochondria mask of the cristae model is passed as is.
+                raw = inputs[0]
+                inputs[0] = (raw - raw.mean()) / (raw.std() + 1e-7)
+                model = get_model(model_type, device="cpu")
+                with torch.no_grad():
+                    pred = model(torch.from_numpy(np.concatenate(inputs, axis=1).astype("float32"))).numpy()
+                self.assertTrue(np.allclose(pred, expected, atol=1e-4))
 
     def test_run_segmentation(self):
         from synapse_net.inference import run_segmentation, get_model
