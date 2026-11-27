@@ -109,7 +109,7 @@ We currently provide five different plugins, which are explained in the followin
 <img src="https://raw.githubusercontent.com/computational-cell-analytics/synapse-net/refs/heads/main/doc/images/napari/napari1-plugin-menu.jpg" alt="The napari plugin widget with selection of the SynapseNet plugins." width="768">
 
 The `Segmentation` widget enables segmenting synaptic structures with the SynapseNet [models](#segmentation-models).
-You can select the image layer for which to run segmentation from the `Image data` dropdown and the model to use from the `Select Model` dropdown.
+You can select the image layer for which to run segmentation from the `Image data` dropdown the structure to segment from the `Target Structure` dropdown and the model for your data from the `Model` dropdown, which only lists the models for the chosen structure.
 Then press `Run Segmentation`. To display a progress bar click on `activity` in the lower right.
 The screenshot below shows the Segmentation UI and a segmentation result for 2D vesicle segmentation.
 

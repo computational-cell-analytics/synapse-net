@@ -1,3 +1,4 @@
+import inspect
 import os
 import time
 import warnings
@@ -91,6 +92,13 @@ class _Scaler:
             print("Resized prediction back to original shape", output.shape, "in", time.time() - t0, "s")
 
         return output
+
+
+# ponytail: drop the area_threshold branch once scikit-image>=0.26 is required.
+def _remove_small_holes(mask, max_size):
+    if "max_size" in inspect.signature(remove_small_holes).parameters:
+        return remove_small_holes(mask, max_size=max_size)
+    return remove_small_holes(mask, area_threshold=max_size)
 
 
 def _restore_legacy_attributes(model):
@@ -758,7 +766,7 @@ def _postprocess_seg_3d(
         mask = seg[bb] == prop.label
 
         # Fill small holes and apply closing.
-        mask = remove_small_holes(mask, area_threshold=area_threshold)
+        mask = _remove_small_holes(mask, area_threshold)
         closed = np.logical_or(binary_closing(mask, iterations=iterations), mask)
         closed = np.logical_or(binary_closing(closed, iterations=iterations_3d, structure=structure_3d), closed)
 

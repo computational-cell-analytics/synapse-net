@@ -14,7 +14,6 @@ from ..inference.active_zone import segment_active_zone
 from ..inference.compartments import segment_compartments
 from ..inference.cristae import segment_cristae
 from ..inference.inference import (
-    _get_model_registry,
     _segment_ribbon_AZ,
     compute_scale_from_voxel_size,
     get_model,
@@ -26,6 +25,22 @@ from ..inference.mitochondria import segment_mitochondria, segment_mitochondria_
 from ..inference.util import get_default_tiling, get_device
 from ..inference.vesicles import VESICLE_SEGMENTATION_MODES, segment_vesicles
 
+
+# Models offered in the plugin per target structure; the first one is the default.
+_STRUCTURE_MODELS = {
+    "Vesicles": {
+        "Tomography 3D": "vesicles_3d",
+        "Tomography 2D": "vesicles_2d",
+        "Cryo-ET": "vesicles_cryo",
+        "Endbulb of Held": "vesicles_3d_endbulb",
+        "Inner ear": "vesicles_3d_innerear",
+    },
+    "Mitochondria": {"Tomography": "mitochondria2", "FIB-SEM": "mitochondria_fibsem"},
+    "Cristae": {"Tomography": "cristae5"},
+    "Active zone": {"Tomography": "active_zone"},
+    "Compartments": {"Tomography": "compartments"},
+    "Ribbon synapse": {"Tomography": "ribbon"},
+}
 
 _MAX_MIN_SIZE = 100_000_000
 _POSTPROCESSING_PARAMETER_SPECS = {
@@ -175,7 +190,7 @@ class SegmentationWidget(BaseWidget):
                 child_layout.deleteLater()
 
     def _update_tiling(self, model_type):
-        patch_shape = None if model_type == "- choose -" else get_model_training_patch_shape(model_type)
+        patch_shape = None if model_type is None else get_model_training_patch_shape(model_type)
         tiling = get_default_tiling(patch_shape=patch_shape)
         for name, values in tiling.items():
             for axis, value in values.items():
@@ -184,7 +199,7 @@ class SegmentationWidget(BaseWidget):
     def _update_postprocessing_settings(self, model_type):
         self._clear_layout(self.postprocessing_settings_layout)
         self.postprocessing_parameter_widgets = {}
-        if model_type == "- choose -":
+        if model_type is None:
             return
 
         segmentation_function = get_segmentation_function(model_type)
@@ -241,34 +256,36 @@ class SegmentationWidget(BaseWidget):
 
     def load_model_widget(self):
         model_widget = QWidget()
-        title_label = QLabel("Select Model:")
-
-        # Exclude the models that are only offered through the CLI and not in the plugin.
-        model_list = set(_get_model_registry().urls.keys())
-        # These are the models exlcuded due to their specificity and to keep the menu simple.
-        # TODO: we should at some point update the logic here, to make it easier to support further models
-        # without cluttering the UI.
-        excluded_models = ["vesicles_2d_maus"]
-        model_list = [name for name in model_list if name not in excluded_models]
-
-        models = ["- choose -"] + model_list
-        self.model_selector = QComboBox()
-        self.model_selector.addItems(models)
-        # Create a layout and add the title label and combo box
         layout = QVBoxLayout()
-        layout.addWidget(title_label)
-        layout.addWidget(self.model_selector)
 
-        # Set layout on the model widget
+        self.structure_selector = QComboBox()
+        self.structure_selector.addItems(["- choose -"] + list(_STRUCTURE_MODELS))
+        self.model_selector = QComboBox()
+        self.structure_selector.currentTextChanged.connect(self._update_model_selector)
+
+        layout.addWidget(QLabel("Target Structure:"))
+        layout.addWidget(self.structure_selector)
+        layout.addWidget(QLabel("Model:"))
+        layout.addWidget(self.model_selector)
         model_widget.setLayout(layout)
         return model_widget
 
+    def _update_model_selector(self, structure):
+        self.model_selector.clear()
+        for label, model_type in _STRUCTURE_MODELS.get(structure, {}).items():
+            self.model_selector.addItem(label, model_type)
+
+    def _on_model_changed(self, _index):
+        model_type = self.model_selector.currentData()
+        self._update_tiling(model_type)
+        self._update_postprocessing_settings(model_type)
+
     def on_predict(self):
         # Get the model and postprocessing settings.
-        model_type = self.model_selector.currentText()
+        model_type = self.model_selector.currentData()
         custom_model_path = self.checkpoint_param.text()
-        if model_type == "- choose -":
-            show_info("INFO: Please choose a model.")
+        if model_type is None:
+            show_info("INFO: Please choose a target structure.")
             return
 
         device = get_device(self.device_dropdown.currentText())
@@ -364,8 +381,6 @@ class SegmentationWidget(BaseWidget):
             # tooltip=get_tooltip("embedding", "halo")
         )
         setting_values.layout().addLayout(layout)
-        self.model_selector.currentTextChanged.connect(self._update_tiling)
-        self._update_tiling(self.model_selector.currentText())
 
         # Read voxel size from layer metadata.
         self.voxel_size_param, layout = self._add_float_param(
@@ -392,8 +407,8 @@ class SegmentationWidget(BaseWidget):
         self.postprocessing_settings_widget.setLayout(self.postprocessing_settings_layout)
         setting_values.layout().addWidget(self.postprocessing_settings_widget)
         self.postprocessing_parameter_widgets = {}
-        self.model_selector.currentTextChanged.connect(self._update_postprocessing_settings)
-        self._update_postprocessing_settings(self.model_selector.currentText())
+        self.model_selector.currentIndexChanged.connect(self._on_model_changed)
+        self._on_model_changed(self.model_selector.currentIndex())
 
         settings = self._make_collapsible(widget=setting_values, title="Advanced Settings")
         return settings

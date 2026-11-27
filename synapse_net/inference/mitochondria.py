@@ -160,7 +160,6 @@ def remove_white_patches(raw: np.ndarray, min_size: int = 20, value: int = 255) 
     return raw
 
 
-
 def segment_mitochondria_fibsem(
     input_volume: np.ndarray,
     min_size: int = 1000,
@@ -182,14 +181,17 @@ def segment_mitochondria_fibsem(
         boundary_threshold: The boundary threshold for the distance calculation.
         area_threshold: The maximum area (in pixels) of holes that are filled in the segmentation.
         white_patch_min_size: The minimal size (in voxels) of a filler component that is removed.
-            Pass None for data that was not cut out of a larger volume, or that is not stored as integers.
+            Pass None for data that was not cut out of a larger volume. Skipped for non-integer data.
         kwargs: Additional keyword arguments for `segment_mitochondria`.
 
     Returns:
         The segmentation, and the predictions if `return_predictions` is passed.
     """
     if white_patch_min_size is not None:
-        input_volume = remove_white_patches(input_volume, min_size=white_patch_min_size)
+        if np.issubdtype(input_volume.dtype, np.integer):
+            input_volume = remove_white_patches(input_volume, min_size=white_patch_min_size)
+        else:
+            print(f"INFO: Skipping the white filler removal, which needs integer data, for {input_volume.dtype} data.")
     kwargs.setdefault("preprocess", normalize_percentile)
     return segment_mitochondria(
         input_volume, min_size=min_size, seed_distance=seed_distance, boundary_threshold=boundary_threshold,
