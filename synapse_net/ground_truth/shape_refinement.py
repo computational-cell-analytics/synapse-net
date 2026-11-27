@@ -147,5 +147,3 @@ def refine_vesicle_shapes(
     if return_seeds:
         return refined_vesicles, seeds
     return refined_vesicles
-
-

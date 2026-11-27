@@ -265,6 +265,8 @@ class TestSegmentationWidget(unittest.TestCase):
         self.assertEqual(run.call_args.kwargs["foreground_threshold"], 0.75)
         self.assertEqual(run.call_args.kwargs["model_type"], "active_zone")
         self.assertIs(run.call_args.kwargs["model"], model)
+        # The layer is named after the structure, not after the model.
+        self.assertEqual(self.viewer.added_labels[-1][1]["name"], "active zone")
 
     def test_run_segmentation_shows_busy_state(self):
         self._select_model("active_zone")

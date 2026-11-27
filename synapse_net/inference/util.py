@@ -94,11 +94,12 @@ class _Scaler:
         return output
 
 
-# ponytail: drop the area_threshold branch once scikit-image>=0.26 is required.
+# TODO: use max_size directly once scikit-image>=0.26 is required.
+_HOLE_SIZE_ARGUMENT = "max_size" if "max_size" in inspect.signature(remove_small_holes).parameters else "area_threshold"
+
+
 def _remove_small_holes(mask, max_size):
-    if "max_size" in inspect.signature(remove_small_holes).parameters:
-        return remove_small_holes(mask, max_size=max_size)
-    return remove_small_holes(mask, area_threshold=max_size)
+    return remove_small_holes(mask, **{_HOLE_SIZE_ARGUMENT: max_size})
 
 
 def _restore_legacy_attributes(model):
@@ -545,7 +546,7 @@ def get_default_tiling(
         return tiling
 
     # The tile shape must stay divisible by the pooling factors of the U-Net: 8 in z and 16 in y and x.
-    # ponytail: fixed factors that fit all depth-4 U-Nets in the model registry, derive them from the model if needed.
+    # NOTE: fixed factors that fit all depth-4 U-Nets in the model registry, derive them from the model if needed.
     tile = {}
     for axis, size in patch_shape.items():
         factor = 8 if axis == "z" else 16

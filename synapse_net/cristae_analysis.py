@@ -771,8 +771,9 @@ def compute_crista_skeleton(
     if graph.number_of_nodes() == 0:
         return (*empty, np.zeros((0, 2), dtype=int)) if return_edges else empty
 
-    termini = set(_merge_termini(graph, vertices, [n for n in graph.nodes if graph.degree(n) == 1],
-                                terminus_merge_nm))
+    termini = set(_merge_termini(
+        graph, vertices, [n for n in graph.nodes if graph.degree(n) == 1], terminus_merge_nm
+    ))
 
     kept = sorted(graph.nodes)
     remap = {node: index for index, node in enumerate(kept)}
@@ -1129,7 +1130,6 @@ def detect_junctions(
             max_extension_nm=max_extension_nm, n_jobs=n_jobs, **_given(**kwargs),
         )
     raise ValueError(f"junction_mode must be 'overlap' or 'skeleton', got {junction_mode!r}")
-
 
 
 def detect_junctions_per_mito(
@@ -1521,7 +1521,7 @@ def _single_mito_row(
         lumen_local = mito_local & ~membrane_local
     else:
         lumen_local = None  # the fallback would be mito_local itself, i.e. the OUTER surface.
-    # ponytail: the lumen spans flat across each crista junction mouth (cristae are never subtracted
+    # NOTE: the lumen spans flat across each crista junction mouth (cristae are never subtracted
     # from it), so the inner boundary membrane area is over-counted by ~one small disk per junction.
     lumen_mesh = (
         _open_trimmed_mesh(lumen_local, sampling, border_radius, boundary)
@@ -1592,8 +1592,8 @@ def _single_mito_row(
 
     # Inner mitochondrial membrane = inner boundary membrane + crista membrane. A crista mask is a
     # slab, so its closed mesh already wraps both leaflets — that is the crista membrane area.
-    # ponytail: cristae contribute 0.0 when absent, not NaN — a crista-less mito still has an IBM.
-    # ponytail: crista area is meshed fully closed while the lumen is border-trimmed and left open;
+    # NOTE: cristae contribute 0.0 when absent, not NaN — a crista-less mito still has an IBM.
+    # NOTE: crista area is meshed fully closed while the lumen is border-trimmed and left open;
     # they only disagree when the mito is clipped AND cristae reach the clipped face.
     imm_surface = ibm_surface + (crista_surface if np.isfinite(crista_surface) else 0.0)
 

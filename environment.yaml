@@ -4,6 +4,7 @@ name:
     synapse-net
 dependencies:
     - bioimage-cpp
+    - bioimage-py
     - kornia
     - napari >=0.7.0
     - pip

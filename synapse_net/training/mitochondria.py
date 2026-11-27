@@ -1,14 +1,11 @@
 """Training of the mitochondria model for electron tomography (`mitochondria2`)."""
 
-import json
-import os
-from glob import glob
 from typing import List, Optional, Sequence, Tuple
 
 import torch_em
 from torch_em.data import MinInstanceSampler
 
-from .supervised_training import _random_split, supervised_training
+from .supervised_training import _get_split_paths, supervised_training
 
 
 def get_mitochondria_paths(
@@ -27,19 +24,7 @@ def get_mitochondria_paths(
         The filepaths for training.
         The filepaths for validation.
     """
-    if split_file is None:
-        return _random_split(glob(os.path.join(data_root, "**", "*.h5"), recursive=True), val_fraction, seed)
-
-    with open(split_file) as f:
-        split = json.load(f)
-    # The entries use '/', join their parts so that the paths match the ones found by glob on Windows.
-    train_paths, val_paths = (
-        [os.path.join(data_root, *entry.split("/")) for entry in split[key]] for key in ("train", "val")
-    )
-    missing = [path for path in train_paths + val_paths if not os.path.exists(path)]
-    if missing:
-        raise ValueError(f"{len(missing)} files from {split_file} do not exist, e.g. {missing[0]}.")
-    return train_paths, val_paths
+    return _get_split_paths(data_root, split_file, "*.h5", val_fraction, seed)
 
 
 def mitochondria_training(
@@ -61,8 +46,8 @@ def mitochondria_training(
     """Train the mitochondria model for electron tomography, with the recipe of `mitochondria2`.
 
     The model predicts foreground and boundaries from tomograms that are normalized with the 1st and 99th
-    percentile. This normalization has to be applied at inference too, by passing
-    `preprocess=torch_em.transform.raw.normalize_percentile` to `segment_mitochondria`.
+    percentile. Inference does not need this normalization: the instance normalization of the model makes
+    its output independent of it, so the default standardization of `segment_mitochondria` gives the same result.
     The default batch size and patch shape need an 80 GB GPU; `mixed_precision` reduces the memory.
 
     Args:

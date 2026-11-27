@@ -97,7 +97,8 @@ class CristaeAnalysisWidget(BaseWidget):
         self.voxel_size_param, layout = self._add_float_param(
             "voxel_size", 0.0, min_val=0.0, max_val=100.0,
             title="Voxel Size (nm, 0 = auto)", step=0.1,
-            tooltip="Voxel size of the input volume in nanometers. Set to 0 (default) to auto-detect from layer metadata.",
+            tooltip="Voxel size of the input volume in nanometers. "
+                    "Set to 0 (default) to auto-detect from layer metadata.",
         )
         setting_values.layout().addLayout(layout)
 

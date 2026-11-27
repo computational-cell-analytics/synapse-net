@@ -6,7 +6,6 @@ on its held-out test set.
     python evaluate_test_set.py -t fibsem -m mitochondria_fibsem -o fibsem.csv
 
 The model is the name of a pretrained model, a checkpoint folder or a serialized model.
-For 'fibsem' the model must be a checkpoint until 'mitochondria_fibsem' is in the model registry.
 Mitochondria are scored by instance matching (F1, precision, recall) and the symmetric best dice.
 Cristae are scored voxel-wise in the mitochondria with cristae annotations (dice, precision, recall), and by the
 average precision and ROC-AUC of the foreground prediction there, also in bands at the membrane and in the rest.
@@ -84,7 +83,7 @@ def score_cristae(path, seg, pred):
 def evaluate(task, path, model, tiling):
     with open_file(path, "r") as f:
         if task == "mito":
-            # The percentile normalization of the training recipe is part of the model.
+            # Use the normalization of the training recipe. The default standardization gives the same result.
             seg = segment_mitochondria(f["raw"][:], model=model, tiling=tiling, verbose=False,
                                        preprocess=torch_em.transform.raw.normalize_percentile)
             return score_mito(path, seg)
