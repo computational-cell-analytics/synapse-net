@@ -15,9 +15,9 @@ from qtpy.QtWidgets import (
 from superqt import QCollapsible
 
 try:
-    from napari_skimage_regionprops import add_table, get_table
+    from napari_skimage_regionprops import add_table
 except ImportError:
-    add_table, get_table = None, None
+    add_table = None
 
 
 class _SilencePrint:
@@ -375,7 +375,7 @@ class BaseWidget(QWidget):
             file_path = save_path
             data.to_excel(file_path, index=False)
         else:
-            raise ValueError("Invalid extension for table: {ext}. We support .csv or .xlsx.")
+            raise ValueError(f"Invalid extension for table: {ext}. We support .csv or .xlsx.")
         return file_path
 
     def _add_properties_and_table(self, layer, table_data, save_path=""):
@@ -387,7 +387,7 @@ class BaseWidget(QWidget):
 
         # Save table to file if save path is provided.
         if save_path != "":
-            file_path = self._save_table(self.save_path.text(), table_data)
+            file_path = self._save_table(save_path, table_data)
             show_info(f"INFO: Added table and saved file to {file_path}.")
 
     def _add_or_update_layer(self, add_fn, name, data, scale, translate, layer_kwargs):

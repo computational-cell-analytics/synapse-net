@@ -1,6 +1,4 @@
 import napari
-import napari.layers
-import napari.viewer
 
 import numpy as np
 from bioimage_cpp.utils import take_dict
@@ -68,7 +66,7 @@ class SizeFilterWidget(BaseWidget):
         filter_ids = [prop.label for prop in props if prop.area < size_threshold]
         segmentation[np.isin(segmentation, filter_ids)] = 0
         if apply_label:
-            mapping = {prop.label: int(prop.max_intensity) for prop in props if prop.label not in filter_ids}
+            mapping = {prop.label: int(prop.intensity_max) for prop in props if prop.label not in filter_ids}
             mapping[0] = 0
             segmentation = take_dict(mapping, segmentation)
         return segmentation.astype(dtype)

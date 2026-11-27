@@ -1,18 +1,16 @@
 import multiprocessing as mp
 from concurrent import futures
 from functools import partial
-from typing import List, Dict, Optional
+from typing import Optional
 
 import numpy as np
 
 import bioimage_cpp as bic
-from scipy.ndimage import binary_erosion, binary_dilation
+from scipy.ndimage import binary_erosion
 from skimage import img_as_ubyte
 from skimage.filters import gaussian, rank, sato, sobel
-from skimage.measure import regionprops
 from skimage.morphology import disk
 from skimage.segmentation import watershed
-from tqdm import tqdm
 
 FILTERS = ("sobel", "laplace", "ggm", "structure-tensor", "sato")
 
@@ -79,47 +77,6 @@ def edge_filter(
         edge_map = _sato_filter(data, sigma)
 
     return edge_map
-
-
-def check_filters(
-    data: np.ndarray,
-    filters: List[str] = FILTERS,
-    sigmas: List[float] = [2.0, 4.0],
-    show: bool = True,
-) -> Dict[str, np.ndarray]:
-    """Apply different edge filters to the input data.
-
-    Args:
-        data: The input data volume.
-        filters: The names of edge filters to apply.
-            The filter names must match `method` in `edge_filter`.
-        sigmas: The sigma values to use for the filters.
-        show: Whether to show the filter responses in napari.
-
-    Returns:
-        Dictionary with the filter responses.
-    """
-
-    n_filters = len(filters) * len(sigmas)
-    pbar = tqdm(total=n_filters, desc="Compute filters")
-
-    responses = {}
-    for filter_ in filters:
-        for sigma in sigmas:
-            name = f"{filter_}_{sigma}"
-            responses[name] = edge_filter(data, sigma, method=filter_)
-            pbar.update(1)
-
-    if show:
-        import napari
-
-        v = napari.Viewer()
-        v.add_image(data)
-        for name, response in responses.items():
-            v.add_image(response, name=name)
-        napari.run()
-
-    return responses
 
 
 def refine_vesicle_shapes(
@@ -192,74 +149,3 @@ def refine_vesicle_shapes(
     return refined_vesicles
 
 
-def refine_individual_vesicle_shapes(
-    vesicles: np.ndarray,
-    edge_map: np.ndarray,
-    foreground_erosion: int = 4,
-    background_erosion: int = 8,
-) -> np.ndarray:
-    """Refine vesicle shapes by fitting vesicles to a boundary map.
-
-    This function erodes the segmented vesicles, and then fits them
-    to a bonudary using a seeded watershed. This is done individually for each vesicle.
-
-    Args:
-        vesicles: The vesicle segmentation.
-        edge_map: Volume with high intensities for vesicle membrane.
-            You can use `edge_filter` to compute this based on the tomogram.
-        foreground_erosion: By how many pixels the foreground should be eroded in the seeds.
-        background_erosion: By how many pixels the background should be eroded in the seeds.
-    Returns:
-        The refined vesicles.
-    """
-
-    refined_vesicles = np.zeros_like(vesicles)
-    halo = [0, 12, 12]
-
-    def fit_vesicle(prop):
-        label_id = prop.label
-
-        bb = prop.bbox
-        bb = tuple(
-            slice(max(start - ha, 0), min(stop + ha, sh)) for start, stop, ha, sh in
-            zip(bb[:3], bb[3:], halo, vesicles.shape)
-        )
-        vesicle_sub = vesicles[bb]
-
-        vesicle_mask = vesicle_sub == label_id
-        hmap = edge_map[bb]
-
-        # Do refinement in 2d to avoid effects caused by anisotropy.
-        seg = np.zeros_like(vesicle_mask)
-        for z in range(seg.shape[0]):
-            m = vesicle_mask[z]
-            fg_seed = binary_erosion(m, iterations=foreground_erosion).astype("uint8")
-            if fg_seed.sum() == 0:
-                seg[z][m] = 1
-                continue
-            bg_seed = (~binary_dilation(m, iterations=background_erosion)).astype("uint8")
-            # Make sure all other vesicles in the local bbox are part of the bg seed,
-            # to avoid leaking into other vesicles.
-            bg_seed[(vesicle_sub[z] != 0) & (vesicle_sub[z] != label_id)] = 1
-
-            # Run seeded watershed to fit the shapes.
-            seeds = fg_seed + 2 * bg_seed
-            seg[z] = watershed(hmap[z], seeds) == 1
-
-        # import napari
-        # v = napari.Viewer()
-        # v.add_image(hmap)
-        # # v.add_labels(seeds)
-        # v.add_labels(seg)
-        # v.title = label_id
-        # napari.run()
-
-        refined_vesicles[bb][seg] = label_id
-
-    props = regionprops(vesicles)
-    # fit_vesicle(props[1])
-    n_threads = 8
-    with futures.ThreadPoolExecutor(n_threads) as tp:
-        list(tqdm(tp.map(fit_vesicle, props), total=len(props), disable=False, desc="refine vesicles"))
-
-    return refined_vesicles

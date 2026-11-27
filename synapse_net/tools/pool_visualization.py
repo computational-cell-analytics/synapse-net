@@ -63,7 +63,7 @@ def _visualize_vesicle_pools(input_path, vesicle_paths, table_paths, segmentatio
 
     # Load the vesicle layer, either from a single file with
     if len(vesicle_paths) == 1:
-        vesicles = imageio.imread(vesicle_paths)
+        vesicles = imageio.imread(vesicle_paths[0])
     else:
         vesicles = None
         for path in vesicle_paths:

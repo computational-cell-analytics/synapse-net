@@ -35,6 +35,37 @@ class TestDistanceMeasurement(unittest.TestCase):
 
             self.assertTrue(np.isclose(distances[3, 4], factor * 15))  # distance between object 3 and 5
 
+    def test_keep_direct_distances(self):
+        from synapse_net.distance_measurements import measure_pairwise_object_distances, keep_direct_distances
+
+        seg = np.zeros((4, 64, 64), dtype="uint32")
+        seg[1, 16, 0] = 1
+        seg[1, 16, 16:20] = 2  # Object 2 sits between object 1 and 3 and blocks their distance line.
+        seg[1, 16, 32] = 3
+
+        distances, endpoints1, endpoints2, seg_ids = measure_pairwise_object_distances(seg, n_threads=1)
+        pairs = keep_direct_distances(seg, distances, endpoints1, endpoints2, seg_ids)
+        self.assertEqual(sorted(map(tuple, pairs)), [(1, 2), (2, 3)])
+
+    def test_filter_blocked_segmentation_to_object_distances(self):
+        from synapse_net.distance_measurements import (
+            measure_segmentation_to_object_distances, filter_blocked_segmentation_to_object_distances
+        )
+
+        seg = np.zeros((4, 64, 64), dtype="uint32")
+        seg[1, 16, 8] = 1
+        seg[1, 16, 24] = 2
+        obj = np.zeros_like(seg)
+        obj[1, 16, 40:48] = 1
+
+        distances, endpoints1, endpoints2, seg_ids = measure_segmentation_to_object_distances(seg, obj)
+        kept = filter_blocked_segmentation_to_object_distances(seg, distances, endpoints1, endpoints2, seg_ids)
+        self.assertEqual(sorted(kept), [2])  # The distance line of object 1 is blocked by object 2.
+        kept = filter_blocked_segmentation_to_object_distances(
+            seg, distances, endpoints1, endpoints2, seg_ids, filter_seg_ids=[1]
+        )
+        self.assertEqual(kept, [])
+
 
 if __name__ == "__main__":
     unittest.main()

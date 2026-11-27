@@ -36,8 +36,9 @@ class TestInference(unittest.TestCase):
 
         def check_url(url):
             try:
-                # Make a HEAD request to the URL, which fetches HTTP headers but no content.
-                response = requests.head(url, allow_redirects=True)
+                # Stream a GET request so that only the headers are fetched (some hosts reject HEAD requests).
+                with requests.get(url, allow_redirects=True, stream=True) as response:
+                    pass
                 # Check if the HTTP status code is one that indicates availability (200 <= code < 400).
                 return response.status_code < 400
             except requests.RequestException:
@@ -50,6 +51,36 @@ class TestInference(unittest.TestCase):
             self.assertTrue(url_exists)
             get_model_training_resolution(name)
             get_model_training_patch_shape(name)
+
+    # Test that bioimage.io models are converted correctly, by checking them against the models' test tensors.
+    # Only one 2D and one 3D model are checked, to limit the download size.
+    def test_bioimageio_models(self):
+        import numpy as np
+        import pooch
+        from synapse_net.inference import get_model
+
+        test_tensors = {
+            "vesicles_2d": ("adaptable-microbe", {
+                "test_input.npy": "0cd6f464ec8eaa2928b100e456bc0a53949f926e00a4c9e428c0a3db014a2d36",
+                "test_output.npy": "7ba544cfa1ac3ea75dd0c546c485baa94de2e4f576449841678f651d99fe0653",
+            }),
+            "cristae5": ("gorgeous-eagle", {
+                "test_raw.npy": "49bd5b93747875ae069bc13a5aa8e971f099a0180f06aa678890209feaf008fe",
+                "test_mito_mask.npy": "391ebfa87a95f74d99a671701134c4fb437a879581dcf21743bd690f165b201d",
+                "test_output.npy": "0e734e083895f7ee5abced5d20285a05e677be2405a8b1dfd9f7d89611f03042",
+            }),
+        }
+        url = "https://hypha.aicell.io/bioimage-io/artifacts/{}/files/{}?version=v0"
+        for model_type, (artifact, files) in test_tensors.items():
+            with self.subTest(model_type=model_type):
+                *inputs, expected = [np.load(pooch.retrieve(url.format(artifact, f), sha)) for f, sha in files.items()]
+                # Only the raw data is standardized, the mitochondria mask of the cristae model is passed as is.
+                raw = inputs[0]
+                inputs[0] = (raw - raw.mean()) / (raw.std() + 1e-7)
+                model = get_model(model_type, device="cpu")
+                with torch.no_grad():
+                    pred = model(torch.from_numpy(np.concatenate(inputs, axis=1).astype("float32"))).numpy()
+                self.assertTrue(np.allclose(pred, expected, atol=1e-4))
 
     def test_run_segmentation(self):
         from synapse_net.inference import run_segmentation, get_model

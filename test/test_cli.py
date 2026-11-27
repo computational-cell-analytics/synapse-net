@@ -8,7 +8,6 @@ from shutil import rmtree
 
 import imageio.v3 as imageio
 import mrcfile
-import pooch
 from synapse_net.sample_data import get_sample_data
 
 
@@ -71,8 +70,9 @@ class TestCLI(unittest.TestCase):
         self.check_segmentation_result()
 
     def test_segmentation_cli_with_checkpoint(self):
-        cache_dir = os.path.expanduser(pooch.os_cache("synapse-net"))
-        model_path = os.path.join(cache_dir, "models", "vesicles_2d")
+        from synapse_net.inference.inference import get_model_path
+
+        model_path = get_model_path("vesicles_2d")
         cmd = [
             "synapse_net.run_segmentation", "-i", self.data_path, "-o", self.tmp_dir, "-m", "vesicles_2d",
             "-c", model_path,

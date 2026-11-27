@@ -129,7 +129,6 @@ def segment_active_zone(
 
     if compartment is not None:
         assert not return_predictions
-        compartment = scaler.scale_input(input_volume, is_segmentation=True)
         intersection = find_intersection_boundary(segmentation, compartment)
         return segmentation, intersection
 

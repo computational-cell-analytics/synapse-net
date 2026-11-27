@@ -1,13 +1,9 @@
+import inspect
 import os
 import time
 import warnings
 from glob import glob
 from typing import Dict, List, Optional, Tuple, Union
-
-# # Suppress annoying import warnings.
-# with warnings.catch_warnings():
-#     warnings.simplefilter("ignore")
-#     import bioimageio.core
 
 import imageio.v3 as imageio
 import elf.parallel as parallel
@@ -15,7 +11,6 @@ import mrcfile
 import numpy as np
 import torch
 import torch_em
-# import xarray
 
 from elf.io import open_file
 from numpy.typing import ArrayLike
@@ -46,10 +41,6 @@ class _Scaler:
 
         # Convert scale to a NumPy array (ensures consistency)
         scale = np.atleast_1d(scale).astype(np.float64)
-
-        # Validate scale values
-        if not np.issubdtype(scale.dtype, np.number):
-            raise TypeError(f"Scale contains non-numeric values: {scale}")
 
         # Check if scaling is effectively identity (1.0 in all dimensions)
         if np.allclose(scale, 1.0, atol=1e-3):
@@ -101,6 +92,13 @@ class _Scaler:
             print("Resized prediction back to original shape", output.shape, "in", time.time() - t0, "s")
 
         return output
+
+
+# ponytail: drop the area_threshold branch once scikit-image>=0.26 is required.
+def _remove_small_holes(mask, max_size):
+    if "max_size" in inspect.signature(remove_small_holes).parameters:
+        return remove_small_holes(mask, max_size=max_size)
+    return remove_small_holes(mask, area_threshold=max_size)
 
 
 def _restore_legacy_attributes(model):
@@ -176,11 +174,6 @@ def get_prediction(
     if model is None and model_path is None:
         raise ValueError("Either 'model_path' or 'model' must be provided.")
 
-    if model is not None:
-        is_bioimageio = None
-    else:
-        is_bioimageio = model_path.endswith(".zip")
-
     if tiling is not None:
         print(f"Using tiling: {tiling}")
 
@@ -190,40 +183,30 @@ def get_prediction(
     if isinstance(input_volume, np.ndarray):
         input_volume = _preprocess(input_volume, with_channels, channels_to_standardize)
 
-    # Run prediction with the bioimage.io library.
-    if is_bioimageio:
-        if mask is not None:
-            raise NotImplementedError
-        raise NotImplementedError
-
-    # Run prediction with the torch-em library.
-    else:
-        if model is None:
-            # torch_em expects the root folder of a checkpoint path instead of the checkpoint itself.
-            if model_path.endswith("best.pt"):
-                model_path = os.path.split(model_path)[0]
-        if tiling is None:
-            # Load a serialized model here already, to check whether it is a UNETR.
-            if model is None and not os.path.isdir(model_path):
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore")
-                    model = torch.load(model_path, weights_only=False)
-            tiling = _get_default_tiling_for_model(model, model_path)
-        # print(f"tiling {tiling}")
-        # Create updated_tiling with the same structure
-        updated_tiling = {
-            "tile": {},
-            "halo": tiling["halo"]  # Keep the halo part unchanged
-        }
-        # Update tile dimensions
-        for dim in tiling["tile"]:
-            updated_tiling["tile"][dim] = tiling["tile"][dim] - 2 * tiling["halo"][dim]
-        # print(f"updated_tiling {updated_tiling}")
-        prediction = get_prediction_torch_em(
-            input_volume, updated_tiling, model_path, model, verbose, with_channels,
-            mask=mask, prediction=prediction, devices=devices, preprocess=preprocess, dtype=dtype,
-            batch_size=batch_size,
-        )
+    if model is None:
+        # torch_em expects the root folder of a checkpoint path instead of the checkpoint itself.
+        if model_path.endswith("best.pt"):
+            model_path = os.path.split(model_path)[0]
+    if tiling is None:
+        # Load a serialized model here already, to check whether it is a UNETR.
+        if model is None and not os.path.isdir(model_path):
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                model = torch.load(model_path, weights_only=False)
+        tiling = _get_default_tiling_for_model(model, model_path)
+    # Create updated_tiling with the same structure
+    updated_tiling = {
+        "tile": {},
+        "halo": tiling["halo"]  # Keep the halo part unchanged
+    }
+    # Update tile dimensions
+    for dim in tiling["tile"]:
+        updated_tiling["tile"][dim] = tiling["tile"][dim] - 2 * tiling["halo"][dim]
+    prediction = get_prediction_torch_em(
+        input_volume, updated_tiling, model_path, model, verbose, with_channels,
+        mask=mask, prediction=prediction, devices=devices, preprocess=preprocess, dtype=dtype,
+        batch_size=batch_size,
+    )
 
     return prediction
 
@@ -325,8 +308,6 @@ def get_prediction_torch_em(
 
         if preprocess is None:
             preprocess = None if isinstance(input_volume, np.ndarray) else torch_em.transform.raw.standardize
-        else:
-            preprocess = preprocess
 
         def predict_with_autocast(net, inp):
             with torch.autocast(device_type=torch.device(devices[0]).type, dtype=dtype):
@@ -785,7 +766,7 @@ def _postprocess_seg_3d(
         mask = seg[bb] == prop.label
 
         # Fill small holes and apply closing.
-        mask = remove_small_holes(mask, area_threshold=area_threshold)
+        mask = _remove_small_holes(mask, area_threshold)
         closed = np.logical_or(binary_closing(mask, iterations=iterations), mask)
         closed = np.logical_or(binary_closing(closed, iterations=iterations_3d, structure=structure_3d), closed)
 

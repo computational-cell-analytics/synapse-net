@@ -6,7 +6,6 @@ import numpy as np
 
 from concurrent import futures
 from scipy.ndimage import distance_transform_edt, binary_dilation
-from sklearn.metrics import pairwise_distances
 
 from skimage.measure import regionprops
 from skimage.draw import line_nd
@@ -59,16 +58,6 @@ def compute_geodesic_distances(
         distances = np.abs(distances)
 
     return distances
-
-
-def _compute_centroid_distances(segmentation, resolution, n_neighbors):
-    props = regionprops(segmentation)
-    centroids = np.array([prop.centroid for prop in props])
-    if resolution is not None:
-        scale_factor = np.array(resolution)[:, None]
-        centroids *= scale_factor
-    pair_distances = pairwise_distances(centroids)
-    return pair_distances
 
 
 def _compute_boundary_distances(segmentation, resolution, n_threads):
@@ -137,9 +126,8 @@ def measure_pairwise_object_distances(
 
     Args:
         segmentation: The input segmentation.
-        distance_type: The type of distance to compute, can either be 'boundary' to
-            compute the distance between the boundary / surface of the objects or 'centroid'
-            to compute the distance between centroids.
+        distance_type: The type of distance to compute. Only 'boundary', the distance between
+            the boundary / surface of the objects, is supported.
         resolution: The resolution / pixel size of the data.
         n_threads: The number of threads for parallelizing the distance computation.
         save_path: Path for saving the measurement results in numpy zipped format.
@@ -150,14 +138,9 @@ def measure_pairwise_object_distances(
         The 'right' endpoint coordinates of the distances.
         The segmentation id pairs of the distances.
     """
-    supported_distances = ("boundary", "centroid")
-    assert distance_type in supported_distances
-    if distance_type == "boundary":
-        distances, endpoints1, endpoints2, seg_ids = _compute_boundary_distances(segmentation, resolution, n_threads)
-    elif distance_type == "centroid":
-        raise NotImplementedError
-        # TODO has to be adapted
-        # distances, neighbors = _compute_centroid_distances(segmentation, resolution)
+    if distance_type != "boundary":
+        raise NotImplementedError(f"Distance type '{distance_type}' is not supported, only 'boundary'.")
+    distances, endpoints1, endpoints2, seg_ids = _compute_boundary_distances(segmentation, resolution, n_threads)
 
     if save_path is not None:
         np.savez(
@@ -232,9 +215,8 @@ def measure_segmentation_to_object_distances(
     Args:
         segmentation: The input segmentation.
         segmented_object: The segmented object.
-        distance_type: The type of distance to compute, can either be 'boundary' to
-            compute the distance between the boundary / surface of the objects or 'centroid'
-            to compute the distance between centroids.
+        distance_type: The type of distance to compute. Only 'boundary', the distance between
+            the boundary / surface of the objects, is supported.
         resolution: The resolution / pixel size of the data.
         save_path: Path for saving the measurement results in numpy zipped format.
         verbose: Whether to print the progress of the distance computation.
@@ -459,8 +441,8 @@ def keep_direct_distances(
     Returns:
         The list of id pairs that are kept.
     """
-    distance_lines, properties = create_object_distance_lines(
-        distances, endpoints1, endpoints2, seg_ids, scale=scale
+    distance_lines, properties = create_pairwise_distance_lines(
+        distances, endpoints1, endpoints2, list(seg_ids), scale=scale
     )
 
     ids_a, ids_b = properties["id_a"], properties["id_b"]
@@ -531,7 +513,7 @@ def filter_blocked_segmentation_to_object_distances(
 
     filtered_ids = []
     for seg_id, line in tqdm(zip(all_seg_ids, distance_lines), total=len(distance_lines), disable=not verbose):
-        if (seg_ids is not None) and (seg_id not in seg_ids):
+        if (filter_seg_ids is not None) and (seg_id not in filter_seg_ids):
             continue
 
         start, stop = line

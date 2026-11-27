@@ -5,10 +5,10 @@ from typing import Callable, Dict, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
-from scipy.ndimage import binary_dilation, binary_erosion, center_of_mass
+from scipy.ndimage import binary_erosion, center_of_mass
 from scipy.ndimage import label as ndimage_label
 from skimage.measure import mesh_surface_area, regionprops
-from skimage.morphology import ball, disk, local_maxima
+from skimage.morphology import disk, local_maxima
 from tqdm import tqdm
 
 from bioimage_cpp.distance import distance_transform, geodesic_distances_mesh

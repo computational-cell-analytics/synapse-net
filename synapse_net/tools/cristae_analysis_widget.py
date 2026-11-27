@@ -90,7 +90,7 @@ class CristaeAnalysisWidget(BaseWidget):
         self.save_path, layout = self._add_path_param(
             name="save_path", select_type="file", value="",
             tooltip="Path to save the analysis results CSV file. An empty path will skip saving. "
-                    "See docs/cristae_analysis.md for how each column is computed.",
+                    "See doc/cristae_analysis.md for how each column is computed.",
         )
         setting_values.layout().addLayout(layout)
 

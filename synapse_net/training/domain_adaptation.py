@@ -17,7 +17,9 @@ from torch_em.transform.invertible_augmentations import MeanTeacherAugmenters, D
 from .dataloaders import get_supervised_loader, get_unsupervised_loader, _determine_ndim
 from .models import get_raw_transform, _check_backbone, _get_model
 from .supervised_training import _derive_key_from_files
-from ..inference.inference import get_model_path, compute_scale_from_voxel_size, get_available_models
+from ..inference.inference import (
+    get_model_path, compute_scale_from_voxel_size, get_available_models, get_model_training_patch_shape
+)
 from ..inference.util import _restore_legacy_attributes, _Scaler
 
 
@@ -235,14 +237,6 @@ def mean_teacher_adaptation(
     trainer.fit(n_iterations)
 
 
-# TODO patch shapes for other models
-PATCH_SHAPES = {
-    "vesicles_3d": [48, 256, 256],
-}
-"""@private
-"""
-
-
 def _get_paths(input_folder, pattern, resize_training_data, model_name, tmp_dir, val_fraction):
     files = sorted(glob(os.path.join(input_folder, "**", pattern), recursive=True))
     if len(files) == 0:
@@ -300,7 +294,8 @@ def _get_paths(input_folder, pattern, resize_training_data, model_name, tmp_dir,
 
 def _parse_patch_shape(patch_shape, model_name):
     if patch_shape is None:
-        patch_shape = PATCH_SHAPES[model_name]
+        shape = get_model_training_patch_shape(model_name)
+        patch_shape = [shape.get("z", 1), shape["y"], shape["x"]]
     return patch_shape
 
 

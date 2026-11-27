@@ -39,6 +39,7 @@ def get_supervised_loader(
     label_transform: Optional[callable] = None,
     label_paths: Optional[Tuple[str]] = None,
     raw_transform: Optional[callable] = None,
+    transform: Optional[callable] = None,
     **loader_kwargs,
 ) -> torch.utils.data.DataLoader:
     """Get a dataloader for supervised segmentation training.
@@ -65,6 +66,8 @@ def get_supervised_loader(
         label_paths: Optional paths containing the labels / annotations for training.
             If not given, the labels are expected to be contained in the `data_paths`.
         raw_transform: Normalization applied to the raw data. By default the torch_em standardization is used.
+        transform: Joint transformation applied to the raw data and the labels, after the
+            `label_transform`. By default padding and the standard augmentations are applied.
         loader_kwargs: Additional keyword arguments for the dataloader.
 
     Returns:
@@ -86,7 +89,9 @@ def get_supervised_loader(
             raise NotImplementedError
         label_transform = torch_em.transform.label.connected_components
 
-    if ndim == 2:
+    if transform is not None:  # A specific joint transform was passed, do nothing.
+        pass
+    elif ndim == 2:
         adjusted_patch_shape = _adjust_patch_shape(ndim, patch_shape)
         transform = torch_em.transform.Compose(
             torch_em.transform.PadIfNecessary(adjusted_patch_shape), torch_em.transform.get_augmentations(2)

@@ -1,7 +1,4 @@
 import napari
-import napari.layers
-import napari.viewer
-import numpy as np
 import pandas as pd
 from skimage.measure import regionprops
 
@@ -44,65 +41,6 @@ class MorphologyWidget(BaseWidget):
         layout.addWidget(self.measure_button2)
 
         self.setLayout(layout)
-
-    def _create_shapes_layer(self, table_data, name="Shapes Layer"):
-        """
-        Create and add a Shapes layer to the Napari viewer using table data.
-
-        Args:
-            table_data (pd.DataFrame): The table data containing coordinates, radii, and properties.
-            name (str): Name of the layer.
-
-        Returns:
-            Shapes layer: The created Napari Shapes layer.
-        """
-        coords = (
-            table_data[['x', 'y']].to_numpy()
-            if 'z' not in table_data.columns
-            else table_data[['x', 'y', 'z']].to_numpy()
-        )
-        radii = table_data['radius'].to_numpy()
-
-        if coords.shape[1] == 2:
-            # For 2D data, create circular outlines using trigonometric functions
-            outlines = [
-                np.column_stack((
-                    coords[i, 0] + radii[i] * np.cos(np.linspace(0, 2 * np.pi, 100)),
-                    coords[i, 1] + radii[i] * np.sin(np.linspace(0, 2 * np.pi, 100))
-                )) for i in range(len(coords))
-            ]
-        elif coords.shape[1] == 3:
-            # For 3D data, create spherical outlines using latitude and longitude
-            theta = np.linspace(0, 2 * np.pi, 50)  # Longitude
-            phi = np.linspace(0, np.pi, 25)       # Latitude
-            sphere_points = np.array([
-                [
-                    coords[i, 0] + radii[i] * np.sin(p) * np.cos(t),
-                    coords[i, 1] + radii[i] * np.sin(p) * np.sin(t),
-                    coords[i, 2] + radii[i] * np.cos(p)
-                ]
-                for i in range(len(coords))
-                for t in theta for p in phi
-            ])
-            outlines = [
-                sphere_points[i * len(theta) * len(phi):(i + 1) * len(theta) * len(phi)]
-                for i in range(len(coords))
-            ]
-        else:
-            raise ValueError("Coordinate dimensionality must be 2 or 3.")
-
-        # Add the shapes layer with properties
-        layer = self.viewer.add_shapes(
-            outlines,
-            name=name,
-            shape_type="polygon",  # Use "polygon" for closed shapes like circles
-            edge_width=2,
-            edge_color="red",
-            face_color="transparent",
-            blending="additive",
-            properties=table_data.to_dict(orient='list'),  # Attach table data as properties
-        )
-        return layer
 
     def _to_table_data(self, coords, radii, props):
         """
@@ -168,17 +106,12 @@ class MorphologyWidget(BaseWidget):
         if segmentation is None:
             show_info("INFO: Please choose a segmentation.")
             return
-        # get metadata from layer if available
-        metadata = self._get_layer_selector_data(self.image_selector_name, return_metadata=True)
-        resolution = metadata.get("voxel_size", None)
-        if resolution is not None:
-            resolution = [v for v in resolution.values()]
-        morphology = compute_object_morphology(
-            object_=segmentation, structure_name=self.image_selector_name1, resolution=resolution
-        )
+        metadata = self._get_layer_selector_data(self.image_selector_name, return_metadata=True) or {}
+        resolution = self._handle_resolution(metadata, self.voxel_size_param, segmentation.ndim)
+        layer = self._get_layer_selector_layer(self.image_selector_name1)
+        morphology = compute_object_morphology(object_=segmentation, structure_name=layer.name, resolution=resolution)
 
         # Add the properties to the layer and add/save the table.
-        layer = self._get_layer_selector_layer(self.image_selector_name1)
         self._add_properties_and_table(layer, morphology, self.save_path.text())
 
     def _create_settings_widget(self):

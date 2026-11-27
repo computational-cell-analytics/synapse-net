@@ -1,6 +1,5 @@
 """Model factories and pretrained backbone utilities for training."""
-import warnings
-from typing import Tuple
+from typing import Optional, Tuple
 import numpy as np
 
 import torch
@@ -34,6 +33,7 @@ def get_3d_model(
     scale_factors: Tuple[Tuple[int, int, int]] = [[1, 2, 2], [2, 2, 2], [2, 2, 2], [2, 2, 2]],
     initial_features: int = 32,
     final_activation: str = "Sigmoid",
+    norm: Optional[str] = "InstanceNorm",
 ) -> torch.nn.Module:
     """Get the U-Net model for 3D segmentation tasks.
 
@@ -43,6 +43,7 @@ def get_3d_model(
         initial_features: The number of features in the first level of the U-Net.
             The number of features increases by a factor of two in each level.
         final_activation: The activation applied to the last output layer.
+        norm: The normalization layer used in the convolutional blocks, or None for no normalization.
 
     Returns:
         The U-Net.
@@ -54,6 +55,7 @@ def get_3d_model(
         initial_features=initial_features,
         gain=2,
         final_activation=final_activation,
+        norm=norm,
     )
     return model
 
@@ -105,7 +107,7 @@ def _check_backbone(backbone, model_type, patch_shape):
 
 def _get_model(
     patch_shape, out_channels, in_channels=1, backbone=None, model_type=None,
-    encoder_checkpoint=None, final_activation="Sigmoid",
+    encoder_checkpoint=None, final_activation="Sigmoid", norm="InstanceNorm", scale_factors=None,
 ):
     is_2d, ndim = _determine_ndim(patch_shape)
 
@@ -126,7 +128,11 @@ def _get_model(
     if is_2d:
         return get_2d_model(out_channels=out_channels, in_channels=in_channels, final_activation=final_activation)
 
-    return get_3d_model(out_channels=out_channels, in_channels=in_channels, final_activation=final_activation)
+    scale_kwargs = {} if scale_factors is None else {"scale_factors": scale_factors}
+    return get_3d_model(
+        out_channels=out_channels, in_channels=in_channels, final_activation=final_activation, norm=norm,
+        **scale_kwargs,
+    )
 
 
 def normalize_percentile_to_0_1_inverted(raw):
@@ -158,7 +164,7 @@ def get_raw_transform(backbone):
     return get_raw_transform_for_pretrained_vit(backbone)
 
 
-def _get_checkpoint(backbone, model_type, return_decoder_path=False):
+def _get_checkpoint(backbone, model_type):
 
     if backbone == "sam":
         if microsam_models is None:
@@ -168,12 +174,6 @@ def _get_checkpoint(backbone, model_type, return_decoder_path=False):
         model_registry = microsam_models()
         encoder_checkpoint = model_registry.fetch(model_type, progressbar=True)
 
-        if return_decoder_path:
-            decoder_name = f"{model_type}_decoder"
-            decoder_path = model_registry.fetch(
-                decoder_name, progressbar=True
-            ) if decoder_name in model_registry.registry else None
-
     elif backbone == "sam2":
         if microsam2_models is None:
             raise RuntimeError(
@@ -182,71 +182,18 @@ def _get_checkpoint(backbone, model_type, return_decoder_path=False):
         model_registry = microsam2_models()
         encoder_checkpoint = model_registry.fetch(model_type, progressbar=True)
 
-        if return_decoder_path:
-            decoder_name = f"{model_type}_decoder"
-            decoder_path = model_registry.fetch(
-                decoder_name, progressbar=True
-            ) if decoder_name in model_registry.registry else None
-
     elif backbone == "dinov2":
         if get_vfm_model is None:
             raise RuntimeError("The 'dinov2' backbone requires micro_sam with the 'micro_sam.models.vfm' module.")
         encoder_checkpoint = get_vfm_model(f"{model_type}_dinov2", device="cpu").model.state_dict()
-        decoder_path = None
 
     elif backbone == "dinov3":
         if get_vfm_model is None:
             raise RuntimeError("The 'dinov3' backbone requires micro_sam with the 'micro_sam.models.vfm' module.")
         encoder_checkpoint = get_vfm_model(f"{model_type}_dinov3", device="cpu").model.state_dict()
-        decoder_path = None
     else:
         raise ValueError(f"Unsupported backbone '{backbone}'.")
 
-    if return_decoder_path:
-        return encoder_checkpoint, decoder_path
-    else:
-        return encoder_checkpoint
+    return encoder_checkpoint
 
 
-def _init_microsam_decoder(model, backbone, model_type, out_channels):
-    # Get the micro-sam decoder path
-    _, decoder_path = _get_checkpoint(backbone=backbone, model_type=model_type, return_decoder_path=True)
-
-    if decoder_path is None:
-        warnings.warn("Oopsie daisy. You choose a `micro-sam` or model without pretrained decoder weights.")
-        return model
-
-    # Load the pretrained decoder weights.
-    decoder_state = torch.load(decoder_path, map_location="cpu", weights_only=True)
-
-    # Super hacky way of initializing decoder weights - please don't try this at home.
-    unetr_state_dict = model.state_dict()
-    for k, v in unetr_state_dict.items():
-        # If the key starts with encoder, we don't care about it.
-        if k.startswith("encoder"):
-            continue
-
-        # If the 'out_channels' are different than expected, i.e. 3, we say ciao ciao to it.
-        if out_channels != 3 and k.startswith("out_conv"):
-            warnings.warn(f"Seems like output channels are different than 'micro-sam'. Hence, we reinitialize '{k}'.")
-            unetr_state_dict[k] = v
-            continue
-
-        # If it's some weird parameters, we don't care about them too.
-        if k not in decoder_state:
-            warnings.warn(f"Could not find '{k}' in the pretrained decoder state dict. Hence, we reinitialize '{k}.")
-            unetr_state_dict[k] = v
-            continue
-
-        # If the parameter shapes mismatch, we don't care about them either.
-        if decoder_state[k].shape != v.shape:
-            warnings.warn(f"There's a shape mismatch for '{k}'. Hence, we reinitialize '{k}'.")
-            unetr_state_dict[k] = v
-            continue
-
-        # Keep the expected decoder weights.
-        unetr_state_dict[k] = decoder_state[k]
-
-    model.load_state_dict(unetr_state_dict)
-
-    return model

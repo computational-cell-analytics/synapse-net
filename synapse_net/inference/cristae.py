@@ -6,7 +6,8 @@ from elf.wrapper.base import (
     SimpleTransformationWrapper,
     MultiTransformationWrapper,
 )
-from skimage.morphology import binary_erosion, ball
+from scipy import ndimage
+from skimage.morphology import ball
 from skimage.measure import regionprops
 import numpy as np
 import torch
@@ -19,6 +20,9 @@ def _erode_instances(mito_data, erode_voxels, verbose):
     if verbose:
         t_erode = time.time()
         print(f"Eroding mitochondria instances globally by {erode_voxels} voxels ...")
+
+    if not np.issubdtype(mito_data.dtype, np.integer):
+        mito_data = np.rint(mito_data).astype("uint32")
 
     footprint = ball(erode_voxels)
     props = regionprops(mito_data)
@@ -33,7 +37,7 @@ def _erode_instances(mito_data, erode_voxels, verbose):
         instance_mask = (mito_data[sl] == prop.label)
 
         # Apply erosion
-        eroded_mask = binary_erosion(instance_mask, footprint=footprint)
+        eroded_mask = ndimage.binary_erosion(instance_mask, structure=footprint, border_value=1)
 
         # Write True to the newly eroded locations in our boolean array
         eroded_binary_mask[sl][eroded_mask] = True
@@ -102,7 +106,6 @@ def segment_cristae(
     tiling: Optional[Dict[str, Dict[str, int]]] = None,
     min_size: int = 2000,
     verbose: bool = True,
-    distance_based_segmentation: bool = False,
     return_predictions: bool = False,
     scale: Optional[List[float]] = None,
     mask: Optional[np.ndarray] = None,
@@ -121,7 +124,6 @@ def segment_cristae(
         tiling: The tiling configuration for the prediction.
         min_size: The minimum size of a cristae to be considered.
         verbose: Whether to print timing information.
-        distance_based_segmentation: Whether to use distance-based segmentation.
         return_predictions: Whether to return the predictions (foreground, boundaries) alongside the segmentation.
         scale: The scale factor to use for rescaling the input volume before prediction.
         mask: An optional mask that is used to restrict the segmentation.
@@ -172,7 +174,7 @@ def segment_cristae(
         tiling=tiling, with_channels=with_channels, channels_to_standardize=channels_to_standardize, verbose=verbose,
         batch_size=batch_size,
     )
-    foreground, boundaries = pred[:2]
+    foreground = pred[0]
     seg = _run_segmentation(
         foreground,
         verbose=verbose,

@@ -77,7 +77,7 @@ def download_data_from_zenodo(path: str, name: str):
     from torch_em.data.datasets.util import download_source, unzip
 
     urls = {
-        "2d_tem": "https://zenodo.org/records`/14236382/files/tem_2d.zip?download=1",
+        "2d_tem": "https://zenodo.org/records/14236382/files/tem_2d.zip?download=1",
         "inner_ear_ribbon_synapse": "https://zenodo.org/records/14232607/files/inner-ear-ribbon-synapse-tomgrams.zip?download=1",  # noqa
         "training_data": "https://zenodo.org/records/14330011/files/synapse-net.zip?download=1"
     }

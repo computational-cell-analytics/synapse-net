@@ -84,13 +84,15 @@ After this SynapseNet will be up-to-date and you can use the latest features!
 
 ## Segmentation Models
 
-We currently offer seven different models for segmenting synaptic structures:
+We currently offer the following models for segmenting synaptic structures:
 - `vesicles_3d` to segment vesicles in (room-temperature) electron tomograms.
 - `vesicles_2d` to segment vesicles in two-dimensional electron micrographs.
 - `vesicles_cryo` to segment vesicles in cryogenic electron tomograms.
 - `active_zone` to segment active zones in electron tomograms.
 - `compartments` to segment synaptic compartments in electron tomograms.
-- `mitochondria` to segment mitochondria in electron tomograms.
+- `mitochondria2` to segment mitochondria in electron tomograms.
+- `cristae5` to segment cristae in electron tomograms. It needs a mitochondria segmentation as a second input.
+- `mitochondria_fibsem` to segment mitochondria in FIB-SEM volume EM (trained at 25 nm in z and 5 nm in xy).
 - `ribbon` to segment structures of the active zones in ribbon synapses (ribbon, presynaptic density and active zone membrane) in electron tomograms.
 
 
@@ -107,7 +109,7 @@ We currently provide five different plugins, which are explained in the followin
 <img src="https://raw.githubusercontent.com/computational-cell-analytics/synapse-net/refs/heads/main/doc/images/napari/napari1-plugin-menu.jpg" alt="The napari plugin widget with selection of the SynapseNet plugins." width="768">
 
 The `Segmentation` widget enables segmenting synaptic structures with the SynapseNet [models](#segmentation-models).
-You can select the image layer for which to run segmentation from the `Image data` dropdown and the model to use from the `Select Model` dropdown.
+You can select the image layer for which to run segmentation from the `Image data` dropdown the structure to segment from the `Target Structure` dropdown and the model for your data from the `Model` dropdown, which only lists the models for the chosen structure.
 Then press `Run Segmentation`. To display a progress bar click on `activity` in the lower right.
 The screenshot below shows the Segmentation UI and a segmentation result for 2D vesicle segmentation.
 
@@ -145,7 +147,7 @@ SynapseNet provides a command line interface to segment synaptic structures in m
 synapse_net.run_segmentation -i /path/to/folder-with-mrc -o /path/to/save-segmentation -m vesicles_3d
 ```
 to segment the synaptic vesicles in all tomograms that are stored as mrc files in the folder `/path/to/folder-with-mrc`. The segmentations will be stored as tif files in the (new) folder `/path/to/save-segmentation`.
-You can select a different segmentation model by changing the name after `-m`. For example use `-m mitochondria` to segment mitochondria or `-m vesicles_2d` to segment vesicles in 2D images.
+You can select a different segmentation model by changing the name after `-m`. For example use `-m mitochondria2` to segment mitochondria or `-m vesicles_2d` to segment vesicles in 2D images.
 The command offers several other arguments to change the segmentation logic; you can run `synapse_net.run_segmentation -h` for an explanation of these arguments.
 
 **IMOD Export:** We offer two commands to export segmentation results to mod files that can be opened with [3dmod](https://bio3d.colorado.edu/imod/doc/3dmodguide.html), which is part of the [IMOD](https://bio3d.colorado.edu/imod/) software suite:
@@ -209,6 +211,39 @@ Run
 synapse_net.run_supervised_training -h
 ```
 for more information and instructions on how to use the command.
+
+
+### Mitochondria and Cristae Training
+
+SynapseNet provides dedicated functions for training the mitochondria and cristae models for electron tomography,
+and the mitochondria model for FIB-SEM, which reproduce the recipes of our `mitochondria2`, `cristae5` and
+`mitochondria_fibsem` models:
+```python
+from synapse_net.training import cristae_training, mitochondria_training
+from synapse_net.training.cristae import get_cristae_paths
+from synapse_net.training.mitochondria import get_mitochondria_paths
+
+train_paths, val_paths = get_mitochondria_paths("/path/to/tomograms")
+mitochondria_training("my-mito-model", train_paths, val_paths, save_root="/path/to/models")
+
+train_paths, val_paths = get_cristae_paths({"cristae": "/path/to/cristae-tomograms"})
+cristae_training("my-cristae-model", train_paths, val_paths, save_root="/path/to/models")
+
+from synapse_net.training import vol_em_mitochondria_training
+from synapse_net.training.mitochondria_vol_em import get_vol_em_mitochondria_paths
+
+train_paths, val_paths = get_vol_em_mitochondria_paths({"fibsem": "/path/to/blocks"})
+vol_em_mitochondria_training("my-fibsem-mito-model", train_paths, val_paths, save_root="/path/to/models")
+```
+The mitochondria model is trained on percentile-normalized tomograms, so segment with it by passing
+`preprocess=torch_em.transform.raw.normalize_percentile` to `synapse_net.inference.mitochondria.segment_mitochondria`.
+The cristae model gets the tomogram and a mitochondria state as input, where 0 is background, 1 is a mitochondrion with
+cristae annotations and 2 is one without, which is excluded from the loss.
+The FIB-SEM model (25 nm in z, 5 nm in xy) uses two anisotropic U-Net levels and no normalization layers. The white
+filler borders of the training blocks are removed before percentile normalization;
+`synapse_net.inference.mitochondria.segment_mitochondria_fibsem` does the same at inference.
+All recipes need an 80 GB GPU. The scripts in `scripts/cooper/training` and `scripts/volume_em/training` train the
+published models, `scripts/cooper/training/evaluate_test_set.py` evaluates them.
 
 
 ### Domain Adaptation

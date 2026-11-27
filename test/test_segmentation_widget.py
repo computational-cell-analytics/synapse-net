@@ -104,10 +104,27 @@ class TestSegmentationWidget(unittest.TestCase):
         self.current_viewer_patcher.stop()
 
     def _select_model(self, model_type):
-        index = self.widget.model_selector.findText(model_type)
+        structure = next(
+            name for name, models in segmentation_widget._STRUCTURE_MODELS.items() if model_type in models.values()
+        )
+        self.widget.structure_selector.setCurrentText(structure)
+        index = self.widget.model_selector.findData(model_type)
         self.assertNotEqual(index, -1)
         self.widget.model_selector.setCurrentIndex(index)
         self.app.processEvents()
+
+    def test_structure_limits_model_selection(self):
+        registry = set(inference_module._get_model_registry().urls)
+        for structure, models in segmentation_widget._STRUCTURE_MODELS.items():
+            with self.subTest(structure=structure):
+                self.assertTrue(set(models.values()) <= registry)
+                self.widget.structure_selector.setCurrentText(structure)
+                offered = [self.widget.model_selector.itemData(i) for i in range(self.widget.model_selector.count())]
+                self.assertEqual(offered, list(models.values()))
+                self.assertEqual(self.widget.model_selector.currentData(), offered[0])
+
+        self.widget.structure_selector.setCurrentText("- choose -")
+        self.assertEqual(self.widget.model_selector.count(), 0)
 
     def test_dynamic_postprocessing_parameters(self):
         test_cases = (
@@ -116,7 +133,7 @@ class TestSegmentationWidget(unittest.TestCase):
                 "mode": (QComboBox, "distance-watershed", None),
                 "threshold": (QDoubleSpinBox, 0.5, 0.01),
             }),
-            ("mitochondria", {
+            ("mitochondria2", {
                 "min_size": (QSpinBox, 50_000, 1),
                 "seed_distance": (QSpinBox, 6, 1),
             }),
@@ -135,7 +152,7 @@ class TestSegmentationWidget(unittest.TestCase):
                 "min_membrane_size": (QSpinBox, 50_000, 1),
                 "n_ribbons": (QSpinBox, 1, 1),
             }),
-            ("cristae", {
+            ("cristae5", {
                 "min_size": (QSpinBox, 2_000, 1),
                 "foreground_threshold": (QDoubleSpinBox, 0.5, 0.01),
                 "erosion_distance_nm": (QDoubleSpinBox, 0.0, 0.1),
@@ -169,7 +186,7 @@ class TestSegmentationWidget(unittest.TestCase):
         self._select_model("vesicles_2d")
         self.assertEqual(self.widget.postprocessing_parameter_widgets["min_size"].value(), 500)
 
-        self._select_model("- choose -")
+        self.widget.structure_selector.setCurrentText("- choose -")
         self.assertEqual(self.widget.postprocessing_parameter_widgets, {})
         self.assertEqual(self.widget.postprocessing_settings_layout.count(), 0)
 
@@ -282,7 +299,7 @@ class TestSegmentationWidget(unittest.TestCase):
         self.assertEqual(self.widget.predict_button.text(), "Run Segmentation")
 
     def test_cristae_parameters_have_tooltips(self):
-        self._select_model("cristae")
+        self._select_model("cristae5")
         spec = segmentation_widget._POSTPROCESSING_PARAMETER_SPECS[segmentation_widget.segment_cristae]
         for name in ("min_size", "foreground_threshold", "erosion_distance_nm"):
             with self.subTest(parameter=name):
