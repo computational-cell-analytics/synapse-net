@@ -1,9 +1,11 @@
+import multiprocessing as mp
 import time
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import elf.parallel as parallel
 import numpy as np
 import torch
+from bioimage_py.operations import isin
 from skimage.measure import label as connected_components
 from torch_em.transform.raw import normalize_percentile
 
@@ -128,7 +130,7 @@ def segment_mitochondria(
     return seg
 
 
-def remove_white_patches(raw: np.ndarray, min_size: int = 20, value: int = 255) -> np.ndarray:
+def remove_white_patches(raw: np.ndarray, min_size: int = 20, value: int = 255, num_workers: int = 1) -> np.ndarray:
     """Set the white filler borders of a volume EM block to zero.
 
     Volume EM blocks cut out of a larger FIB-SEM volume carry saturated filler where the cutout extends
@@ -139,6 +141,7 @@ def remove_white_patches(raw: np.ndarray, min_size: int = 20, value: int = 255) 
         raw: The 2d or 3d volume, with an integer dtype.
         min_size: The minimal size (in voxels) of a filler component that is removed.
         value: The value that marks the filler.
+        num_workers: The number of threads for finding the filler voxels.
 
     Returns:
         The volume with the filler set to zero.
@@ -155,8 +158,9 @@ def remove_white_patches(raw: np.ndarray, min_size: int = 20, value: int = 255) 
     filler_ids = filler_ids[filler_ids != 0]
     if filler_ids.size == 0:
         return raw
+    block_shape = None if num_workers == 1 else (64, 512, 512)[-raw.ndim:]
     raw = raw.copy()
-    raw[np.isin(components, filler_ids)] = 0
+    raw[isin(components, filler_ids, block_shape=block_shape, num_workers=num_workers)] = 0
     return raw
 
 
@@ -189,7 +193,9 @@ def segment_mitochondria_fibsem(
     """
     if white_patch_min_size is not None:
         if np.issubdtype(input_volume.dtype, np.integer):
-            input_volume = remove_white_patches(input_volume, min_size=white_patch_min_size)
+            input_volume = remove_white_patches(
+                input_volume, min_size=white_patch_min_size, num_workers=mp.cpu_count()
+            )
         else:
             print(f"INFO: Skipping the white filler removal, which needs integer data, for {input_volume.dtype} data.")
     kwargs.setdefault("preprocess", normalize_percentile)

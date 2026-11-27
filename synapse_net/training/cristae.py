@@ -1,16 +1,13 @@
 """Training of the cristae model for electron tomography (`cristae5`)."""
 
-import os
-from glob import glob
 from typing import List, Mapping, Optional, Sequence, Tuple
 
 import torch_em
 from torch_em.data import MinInstanceSampler
 
 from .loss import MaskedDiceLossPerSample
-from .supervised_training import _random_split, _read_split, supervised_training
+from .supervised_training import _get_split_paths, _read_split, supervised_training
 from .transform import AugmentedMitoStateMaskTransform, standardize_channel
-
 
 
 def get_cristae_test_paths(split_file: str, data_roots: Optional[Mapping[str, str]] = None) -> List[str]:
@@ -48,16 +45,7 @@ def get_cristae_paths(
         The filepaths for training.
         The filepaths for validation.
     """
-    if split_file is None:
-        paths = [path for root in (data_roots or {}).values()
-                 for path in glob(os.path.join(root, "**", "*_combined.h5"), recursive=True)]
-        return _random_split([path for path in paths if not any(ex in path for ex in exclude)], val_fraction, seed)
-
-    train_paths, val_paths = (_read_split(split_file, data_roots, key) for key in ("train", "val"))
-    missing = [path for path in train_paths + val_paths if not os.path.exists(path)]
-    if missing:
-        raise ValueError(f"{len(missing)} files from {split_file} do not exist, e.g. {missing[0]}.")
-    return train_paths, val_paths
+    return _get_split_paths(data_roots, split_file, "*_combined.h5", val_fraction, seed, exclude=exclude)
 
 
 def cristae_training(

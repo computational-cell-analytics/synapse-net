@@ -30,7 +30,7 @@ from ..inference.vesicles import VESICLE_SEGMENTATION_MODES, segment_vesicles
 _STRUCTURE_MODELS = {
     "Vesicles": {
         "Tomography 3D": "vesicles_3d",
-        "Tomography 2D": "vesicles_2d",
+        "2D Micrographs": "vesicles_2d",
         "Cryo-ET": "vesicles_cryo",
         "Endbulb of Held": "vesicles_3d_endbulb",
         "Inner ear": "vesicles_3d_innerear",
@@ -43,20 +43,18 @@ _STRUCTURE_MODELS = {
 }
 
 _MAX_MIN_SIZE = 100_000_000
+_MITOCHONDRIA_PARAMETER_SPECS = {
+    "min_size": {"type": "int", "min": 0, "max": _MAX_MIN_SIZE, "step": 1},
+    "seed_distance": {"type": "int", "min": 0, "max": 10_000, "step": 1},
+}
 _POSTPROCESSING_PARAMETER_SPECS = {
     segment_vesicles: {
         "min_size": {"type": "int", "min": 0, "max": _MAX_MIN_SIZE, "step": 1},
         "mode": {"type": "choice", "options": list(VESICLE_SEGMENTATION_MODES)},
         "threshold": {"type": "float", "min": 0.0, "max": 1.0, "step": 0.01, "decimals": 2},
     },
-    segment_mitochondria: {
-        "min_size": {"type": "int", "min": 0, "max": _MAX_MIN_SIZE, "step": 1},
-        "seed_distance": {"type": "int", "min": 0, "max": 10_000, "step": 1},
-    },
-    segment_mitochondria_fibsem: {
-        "min_size": {"type": "int", "min": 0, "max": _MAX_MIN_SIZE, "step": 1},
-        "seed_distance": {"type": "int", "min": 0, "max": 10_000, "step": 1},
-    },
+    segment_mitochondria: _MITOCHONDRIA_PARAMETER_SPECS,
+    segment_mitochondria_fibsem: _MITOCHONDRIA_PARAMETER_SPECS,
     segment_active_zone: {
         "min_size": {"type": "int", "min": 0, "max": _MAX_MIN_SIZE, "step": 1},
         "foreground_threshold": {"type": "float", "min": 0.0, "max": 1.0, "step": 0.01, "decimals": 2},
@@ -283,6 +281,7 @@ class SegmentationWidget(BaseWidget):
     def on_predict(self):
         # Get the model and postprocessing settings.
         model_type = self.model_selector.currentData()
+        structure = self.structure_selector.currentText().lower()
         custom_model_path = self.checkpoint_param.text()
         if model_type is None:
             show_info("INFO: Please choose a target structure.")
@@ -351,9 +350,9 @@ class SegmentationWidget(BaseWidget):
                 for name, seg in segmentation.items():
                     self.viewer.add_labels(seg, name=name, metadata=metadata)
             else:
-                self.viewer.add_labels(segmentation, name=f"{model_type}", metadata=metadata)
+                self.viewer.add_labels(segmentation, name=structure, metadata=metadata)
 
-        show_info(f"INFO: Segmentation of {model_type} added to layers.")
+        show_info(f"INFO: Segmentation of {structure} added to layers.")
 
     def _create_settings_widget(self):
         setting_values = QWidget()

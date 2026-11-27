@@ -32,7 +32,8 @@ class TestVolEmMitochondria(unittest.TestCase):
         train_paths, val_paths = get_vol_em_mitochondria_paths(split_file=split_file)
         self.assertEqual(train_paths, [os.path.join(root, "sub", "a.h5")])
         self.assertEqual(val_paths, [os.path.join(root, "sub", "b.h5")])
-        self.assertEqual(sum(get_vol_em_mitochondria_paths({"4007": root}), []).__len__(), 2)
+        train_paths, val_paths = get_vol_em_mitochondria_paths({"4007": root})
+        self.assertEqual(len(train_paths + val_paths), 2)
         with self.assertRaisesRegex(ValueError, "do not exist"):
             get_vol_em_mitochondria_paths({"4007": "elsewhere"}, split_file=split_file)
 
@@ -46,21 +47,12 @@ class TestVolEmMitochondria(unittest.TestCase):
         self.assertTrue((fixed[:, :, :4] == 0).all())
         self.assertEqual(fixed[0, 8, 8], 255)
         self.assertEqual(raw[0, 0, 0], 255)  # the input is not modified
+        np.testing.assert_array_equal(remove_white_patches(raw, num_workers=2), fixed)
+        np.testing.assert_array_equal(remove_white_patches(raw[0], num_workers=2), fixed[0])
         no_filler = np.full((4, 16, 16), 100, dtype="uint8")
         self.assertIs(remove_white_patches(no_filler), no_filler)
         with self.assertRaisesRegex(ValueError, "integer dtype"):
             remove_white_patches(raw.astype("float32"))
-
-    def test_fibsem_segmentation_skips_filler_removal_for_floats(self):
-        from synapse_net.inference import mitochondria
-
-        raw = np.full((4, 16, 16), 100, dtype="uint8")
-        raw[:, :, :4] = 255
-        with mock.patch.object(mitochondria, "segment_mitochondria") as segment, mock.patch("builtins.print"):
-            mitochondria.segment_mitochondria_fibsem(raw.astype("float32"))
-            self.assertTrue((segment.call_args.args[0][:, :, :4] == 255).all())
-            mitochondria.segment_mitochondria_fibsem(raw)
-            self.assertTrue((segment.call_args.args[0][:, :, :4] == 0).all())
 
     def test_raw_transform_is_picklable(self):
         from synapse_net.training.transform import RemoveWhitePatchesAndNormalize
@@ -107,6 +99,11 @@ class TestVolEmMitochondria(unittest.TestCase):
         self.assertIs(kwargs["preprocess"], normalize_percentile)
         self.assertEqual((kwargs["min_size"], kwargs["seed_distance"]), (1000, 1))
         self.assertEqual((kwargs["boundary_threshold"], kwargs["area_threshold"]), (0.12, 200))
+
+        # The filler removal needs integer data and is skipped for float data.
+        with mock.patch.object(mitochondria, "segment_mitochondria") as segment, mock.patch("builtins.print"):
+            mitochondria.segment_mitochondria_fibsem(raw.astype("float32"))
+        self.assertTrue((segment.call_args.args[0][:, :, :4] == 255).all())
 
 
 if __name__ == "__main__":

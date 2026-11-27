@@ -4,6 +4,7 @@ name:
     synapse-net
 dependencies:
     - bioimage-cpp
+    - bioimage-py
     - kornia
     - napari >=0.7.0
     - pip
@@ -14,6 +15,6 @@ dependencies:
     - torch_em >=0.10.9
     - torchvision
     - trimesh
-    - zarr <3
+    - zarr
     - pip:
         - napari-skimage-regionprops

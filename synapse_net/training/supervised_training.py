@@ -25,10 +25,17 @@ def _random_split(paths, val_fraction, seed):
     return paths[:len(paths) - n_val], paths[len(paths) - n_val:]
 
 
-def _read_split(split_file: str, data_roots: Optional[Mapping[str, str]], key: str) -> List[str]:
-    """Read the '<root name>/<relative path>' entries of `key`; `data_roots` override the stored roots."""
+def _read_split(split_file: str, data_roots: Union[Mapping[str, str], str, None], key: str) -> List[str]:
+    """Read the entries of `key` from a split file.
+
+    The entries have the form '<root name>/<relative path>', and `data_roots` override the roots stored in the file.
+    If `data_roots` is a single folder, then the entries are paths relative to it.
+    """
     with open(split_file) as f:
         split = json.load(f)
+    # The entries use '/', join their parts so that the paths match the ones found by glob on Windows.
+    if isinstance(data_roots, str):
+        return [os.path.join(data_roots, *entry.split("/")) for entry in split.get(key, [])]
     roots = {**split.get("roots", {}), **(data_roots or {})}
     paths = []
     for entry in split.get(key, []):
@@ -37,6 +44,20 @@ def _read_split(split_file: str, data_roots: Optional[Mapping[str, str]], key: s
             raise ValueError(f"{split_file} refers to the unknown data root '{root}'.")
         paths.append(os.path.join(roots[root], *parts))
     return paths
+
+
+def _get_split_paths(data_roots, split_file, pattern, val_fraction, seed, exclude=()):
+    """Get the training and validation paths from a split file, or from a random split of the files in the roots."""
+    if split_file is None:
+        roots = [data_roots] if isinstance(data_roots, str) else (data_roots or {}).values()
+        paths = [path for root in roots for path in glob(os.path.join(root, "**", pattern), recursive=True)]
+        return _random_split([path for path in paths if not any(ex in path for ex in exclude)], val_fraction, seed)
+
+    train_paths, val_paths = (_read_split(split_file, data_roots, key) for key in ("train", "val"))
+    missing = [path for path in train_paths + val_paths if not os.path.exists(path)]
+    if missing:
+        raise ValueError(f"{len(missing)} files from {split_file} do not exist, e.g. {missing[0]}.")
+    return train_paths, val_paths
 
 
 def supervised_training(

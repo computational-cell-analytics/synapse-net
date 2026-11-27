@@ -1,15 +1,14 @@
 """Training of the mitochondria model for FIB-SEM volume EM (`mitochondria_fibsem`)."""
 
-import os
-from glob import glob
 from typing import List, Mapping, Optional, Sequence, Tuple
 
 from torch_em.data import MinInstanceSampler
 
-from .supervised_training import _random_split, _read_split, supervised_training
+from .supervised_training import _get_split_paths, supervised_training
 from .transform import RemoveWhitePatchesAndNormalize
+from ..inference.inference import _MODELS
 
-VOL_EM_SCALE_FACTORS = [[1, 2, 2], [1, 2, 2], [2, 2, 2], [2, 2, 2]]
+VOL_EM_SCALE_FACTORS = _MODELS["mitochondria_fibsem"].unet["scale_factors"]
 """The U-Net downscaling factors: two anisotropic levels for the 5:1 anisotropy of the data."""
 
 
@@ -33,16 +32,7 @@ def get_vol_em_mitochondria_paths(
         The filepaths for training.
         The filepaths for validation.
     """
-    if split_file is None:
-        paths = [path for root in (data_roots or {}).values()
-                 for path in glob(os.path.join(root, "**", "*.h5"), recursive=True)]
-        return _random_split(paths, val_fraction, seed)
-
-    train_paths, val_paths = (_read_split(split_file, data_roots, key) for key in ("train", "val"))
-    missing = [path for path in train_paths + val_paths if not os.path.exists(path)]
-    if missing:
-        raise ValueError(f"{len(missing)} files from {split_file} do not exist, e.g. {missing[0]}.")
-    return train_paths, val_paths
+    return _get_split_paths(data_roots, split_file, "*.h5", val_fraction, seed)
 
 
 def vol_em_mitochondria_training(

@@ -104,12 +104,13 @@ After installing SynapseNet you can start napari by activating the `synapse-net`
 Once napari is opened, you can load a tomogram (or other image data), by drag'n'dropping the corresponding mrc file onto the napari window.
 
 You can find the SynapseNet widgets in the menu `Plugin->SynapseNet`, see also the screenshot below.
-We currently provide five different plugins, which are explained in the following paragraphs.
+We currently provide seven different widgets, which are explained in the following paragraphs.
 
 <img src="https://raw.githubusercontent.com/computational-cell-analytics/synapse-net/refs/heads/main/doc/images/napari/napari1-plugin-menu.jpg" alt="The napari plugin widget with selection of the SynapseNet plugins." width="768">
 
 The `Segmentation` widget enables segmenting synaptic structures with the SynapseNet [models](#segmentation-models).
-You can select the image layer for which to run segmentation from the `Image data` dropdown the structure to segment from the `Target Structure` dropdown and the model for your data from the `Model` dropdown, which only lists the models for the chosen structure.
+Select the image layer to segment from the `Image data` dropdown and the structure to segment from the `Target Structure` dropdown.
+Then select the model for your data from the `Model` dropdown, which only lists the models for the chosen structure.
 Then press `Run Segmentation`. To display a progress bar click on `activity` in the lower right.
 The screenshot below shows the Segmentation UI and a segmentation result for 2D vesicle segmentation.
 
@@ -136,6 +137,12 @@ The screenshot below shows a grouping of vesicles into 'close' (red) and 'far' (
 <img src="https://raw.githubusercontent.com/computational-cell-analytics/synapse-net/refs/heads/main/doc/images/napari/napari5-pool-widget.jpg" alt="The napari plugin widget with selection of the SynapseNet plugins." width="768">
 
 In addition, the `Segmentation Postprocessing` widget can be used to filter out objects that do not overlap with a mask, e.g. a synaptic compartment, or to intersect a segmentation with the boundaries of a mask.
+The `Size Filter` widget removes the objects of a segmentation that are smaller than a size threshold.
+
+The `Cristae Analysis` widget measures the morphology of cristae for each mitochondrion.
+Select the crista segmentation from the `Crista Mask` dropdown and the mitochondria segmentation from the `Mito Segmentation` dropdown.
+The widget computes a table with one row per mitochondrion, for example with the crista volume and surface area and the number of crista junctions, and adds a layer with the junctions.
+See the [cristae analysis documentation](https://github.com/computational-cell-analytics/synapse-net/blob/main/doc/cristae_analysis.md) for the settings and the definition of each measurement.
 
 
 ## Command Line Interface
@@ -235,8 +242,9 @@ from synapse_net.training.mitochondria_vol_em import get_vol_em_mitochondria_pat
 train_paths, val_paths = get_vol_em_mitochondria_paths({"fibsem": "/path/to/blocks"})
 vol_em_mitochondria_training("my-fibsem-mito-model", train_paths, val_paths, save_root="/path/to/models")
 ```
-The mitochondria model is trained on percentile-normalized tomograms, so segment with it by passing
-`preprocess=torch_em.transform.raw.normalize_percentile` to `synapse_net.inference.mitochondria.segment_mitochondria`.
+The mitochondria model is trained on percentile-normalized tomograms. You do not need this normalization for inference:
+the default standardization of `synapse_net.inference.mitochondria.segment_mitochondria` gives the same result,
+because the model uses instance normalization.
 The cristae model gets the tomogram and a mitochondria state as input, where 0 is background, 1 is a mitochondrion with
 cristae annotations and 2 is one without, which is excluded from the loss.
 The FIB-SEM model (25 nm in z, 5 nm in xy) uses two anisotropic U-Net levels and no normalization layers. The white

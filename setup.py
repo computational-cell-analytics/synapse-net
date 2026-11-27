@@ -13,6 +13,7 @@ setup(
     license="MIT",
     install_requires=[
         "bioimage-cpp",
+        "bioimage-py",
         "python-elf>=0.9.0",
         "torch_em>=0.10.9",
         "networkx",

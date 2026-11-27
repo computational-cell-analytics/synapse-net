@@ -195,5 +195,3 @@ def _get_checkpoint(backbone, model_type):
         raise ValueError(f"Unsupported backbone '{backbone}'.")
 
     return encoder_checkpoint
-
-

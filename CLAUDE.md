@@ -29,7 +29,7 @@ python -m unittest test.test_inference.TestInference         # one test class
 python -m unittest test.test_inference.TestInference.test_run_segmentation  # one test
 ```
 
-Tests are **network-dependent**: they download pretrained models (via `pooch` from GWDG ownCloud) and sample data the first time they run, into the OS cache dir (`pooch.os_cache("synapse-net")`). A first run is slow and requires internet; offline runs will fail on model/sample download, not on a code bug.
+Tests are **network-dependent**: they download pretrained models (via `pooch` from bioimage.io and GWDG ownCloud) and sample data the first time they run, into the OS cache dir (`pooch.os_cache("synapse-net")`). A first run is slow and requires internet; offline runs will fail on model/sample download, not on a code bug.
 
 ## Common commands
 
@@ -51,7 +51,7 @@ synapse_net.visualize_vesicle_pools -h
 The package is organized by capability. The big picture spans several modules:
 
 ### Models & the model registry (`synapse_net/inference/inference.py`)
-Models are identified by a **`model_type` string** (`vesicles_3d`, `vesicles_2d`, `vesicles_cryo`, `active_zone`, `compartments`, `mitochondria`/`mitochondria2`, `cristae`/`cristae2`/`cristae3`/`cristae4`/`cristae5`, `ribbon`, plus CLI-only `vesicles_*` variants). `_get_model_registry()` maps each name to a sha256 + GWDG ownCloud download URL and fetches via `pooch`. `get_model(model_type)` downloads (if needed) and `torch.load`s the checkpoint.
+Models are identified by a **`model_type` string** (`vesicles_3d`, `vesicles_2d`, `vesicles_cryo`, `active_zone`, `compartments`, `mitochondria`/`mitochondria2`/`mitochondria_fibsem`, `cristae`/`cristae2`/`cristae3`/`cristae4`/`cristae5`, `ribbon`, plus CLI-only `vesicles_*` variants). The `_MODELS` table holds one `_ModelSpec` per model: sha256, download URL, training resolution, training patch shape, segmentation function, and the U-Net arguments. **Add or change a model there only.** `_get_model_registry()` builds the `pooch` registry from the table. Most models are downloaded from bioimage.io as a state dict, which is converted once to a pickled model and then removed; the older ones are pickled models on GWDG ownCloud. `get_model(model_type)` downloads (if needed) and `torch.load`s the pickled model.
 
 **Voxel-size scaling is central.** Each model was trained at a specific resolution (`get_model_training_resolution`, in nm/axis). `compute_scale_from_voxel_size(voxel_size, model_type)` produces a zyx scale factor so input data is resized to match training resolution before inference and resized back after. Always pair a model with the right `scale` rather than feeding raw-resolution data.
 
@@ -78,7 +78,7 @@ Per-structure recipes sit on top of `supervised_training.py`, each fixing the hy
 
 ### Tools (`synapse_net/tools/`)
 - `cli.py` — argparse wrappers behind the console scripts.
-- Napari widgets (`segmentation_widget.py`, `distance_measure_widget.py`, `morphology_widget.py`, `vesicle_pool_widget.py`, `postprocessing_widget.py`, `size_filter_widget.py`), all subclassing `base_widget.py` and registered in `synapse_net/napari.yaml`. **When adding/renaming a widget, command, reader, or sample, update `napari.yaml` and the `setup.py` entry points to match.**
+- Napari widgets (`segmentation_widget.py`, `distance_measure_widget.py`, `morphology_widget.py`, `vesicle_pool_widget.py`, `postprocessing_widget.py`, `size_filter_widget.py`, `cristae_analysis_widget.py`), all subclassing `base_widget.py` and registered in `synapse_net/napari.yaml`. **When adding/renaming a widget, command, reader, or sample, update `napari.yaml` and the `setup.py` entry points to match.**
 - `volume_reader.py` — napari reader for `.mrc`/`.rec`/`.h5`.
 
 ### Analysis & I/O

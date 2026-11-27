@@ -52,12 +52,22 @@ class TestInference(unittest.TestCase):
             get_model_training_resolution(name)
             get_model_training_patch_shape(name)
 
+    def test_compute_scale_from_voxel_size(self):
+        from synapse_net.inference import compute_scale_from_voxel_size
+
+        # The scale is in zyx order, which matters for a model with an anisotropic training resolution.
+        scale = compute_scale_from_voxel_size({"x": 5.0, "y": 10.0, "z": 5.0}, "mitochondria_fibsem")
+        self.assertEqual(scale, [0.2, 2.0, 1.0])
+        scale = compute_scale_from_voxel_size({"x": 2.7, "y": 1.35}, "vesicles_2d")
+        self.assertEqual(scale, [1.0, 2.0])
+
     # Test that bioimage.io models are converted correctly, by checking them against the models' test tensors.
     # Only one 2D and one 3D model are checked, to limit the download size.
     def test_bioimageio_models(self):
         import numpy as np
         import pooch
         from synapse_net.inference import get_model
+        from synapse_net.inference.inference import get_model_path
 
         test_tensors = {
             "vesicles_2d": ("adaptable-microbe", {
@@ -81,6 +91,10 @@ class TestInference(unittest.TestCase):
                 with torch.no_grad():
                     pred = model(torch.from_numpy(np.concatenate(inputs, axis=1).astype("float32"))).numpy()
                 self.assertTrue(np.allclose(pred, expected, atol=1e-4))
+                # Only the converted model stays in the cache, the downloaded state dict is removed.
+                model_path = get_model_path(model_type)
+                self.assertTrue(os.path.exists(model_path))
+                self.assertFalse(os.path.exists(os.path.join(os.path.dirname(model_path), model_type)))
 
     def test_run_segmentation(self):
         from synapse_net.inference import run_segmentation, get_model

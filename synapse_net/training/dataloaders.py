@@ -57,7 +57,7 @@ def get_supervised_loader(
         add_boundary_transform: Whether to add a boundary channel to the training data.
         label_dtype: The datatype of the labels returned by the dataloader.
         rois: Optional region of interests for training.
-        sampler: Optional sampler to accept or reject patches for training. 
+        sampler: Optional sampler to accept or reject patches for training.
             By default a minimum instance sampler will be used, pass `False` to disable.
         ignore_label: Ignore label in the ground-truth. The areas marked by this label will be
             ignored in the loss computation. By default this option is not used.
@@ -154,7 +154,7 @@ def get_unsupervised_loader(
         sample_mask_key: The key to the sample mask dataset inside each file.
         bg_mask_paths: The filepaths to the background masks for each tomogram.
         bg_mask_key: The key to the background mask dataset inside each file.
-        sampler: Optional sampler to accept or reject patches for training. 
+        sampler: Optional sampler to accept or reject patches for training.
         exclude_top_and_bottom: Whether to exclude the five top and bottom slices to
             avoid artifacts at the border of tomograms.
         raw_transform: Normalization applied to the raw data. By default the torch_em standardization is used.
@@ -168,8 +168,10 @@ def get_unsupervised_loader(
         roi = None
 
     if sample_mask_paths is not None:
-        assert len(data_paths) == len(sample_mask_paths), \
-            f"Expected equal number of data_paths and sample_mask_paths, got {len(data_paths)} and {len(sample_mask_paths)}."
+        assert len(data_paths) == len(sample_mask_paths), (
+            "Expected equal number of data_paths and sample_mask_paths, "
+            f"got {len(data_paths)} and {len(sample_mask_paths)}."
+        )
     if bg_mask_paths is not None:
         assert len(data_paths) == len(bg_mask_paths), \
             f"Expected equal number of data_paths and bg_mask_paths, got {len(data_paths)} and {len(bg_mask_paths)}."
@@ -209,5 +211,3 @@ def get_unsupervised_loader(
     loader = torch_em.segmentation.get_data_loader(ds, batch_size=batch_size,
                                                    num_workers=num_workers, shuffle=True)
     return loader
-
-
