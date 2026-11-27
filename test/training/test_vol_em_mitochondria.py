@@ -51,6 +51,17 @@ class TestVolEmMitochondria(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "integer dtype"):
             remove_white_patches(raw.astype("float32"))
 
+    def test_fibsem_segmentation_skips_filler_removal_for_floats(self):
+        from synapse_net.inference import mitochondria
+
+        raw = np.full((4, 16, 16), 100, dtype="uint8")
+        raw[:, :, :4] = 255
+        with mock.patch.object(mitochondria, "segment_mitochondria") as segment, mock.patch("builtins.print"):
+            mitochondria.segment_mitochondria_fibsem(raw.astype("float32"))
+            self.assertTrue((segment.call_args.args[0][:, :, :4] == 255).all())
+            mitochondria.segment_mitochondria_fibsem(raw)
+            self.assertTrue((segment.call_args.args[0][:, :, :4] == 0).all())
+
     def test_raw_transform_is_picklable(self):
         from synapse_net.training.transform import RemoveWhitePatchesAndNormalize
 
