@@ -1,9 +1,11 @@
 import os
+from functools import partial
 from typing import Callable, Dict, List, Optional, Union
 
 import torch
 import numpy as np
 import pooch
+from torch_em.model import AnisotropicUNet, UNet2d
 
 from .active_zone import segment_active_zone
 from .compartments import segment_compartments
@@ -20,44 +22,49 @@ from ..file_utils import get_cache_dir
 #
 
 
+_BIOIMAGEIO_URL = "https://hypha.aicell.io/bioimage-io/artifacts/{}/files/weights.pt?version=v0"
+
+
 def _get_model_registry():
     registry = {
-        "active_zone": "c23652a8fe06daa113546af6d3200c4c1dcc79917056c6ed7357b8c93548372a",
-        "compartments": "527983720f9eb215c45c4f4493851fd6551810361eda7b79f185a0d304274ee1",
+        "active_zone": "e953ba83cae6edb24fd74cd6c8ec05ac4f2c406f286b946ea69352d9cbc040b3",
+        "compartments": "c4cba43527930e162ce600f71b37ae78d1e76a127de240413086f008bd00cc24",
         "mitochondria": "24625018a5968b36f39fa9d73b121a32e8f66d0f2c0540d3df2e1e39b3d58186",
-        "mitochondria2": "0ec4c48fb67ebcdf1c2a86710e1d5e40519758b867e49a6999d155e8eb15d459",
+        "mitochondria_fibsem": "092d94e11753473f4590c4b0aa9a6406b60b81639bdf6a37a1edcffb7476dbca",
+        "mitochondria2": "45b3e890d928bd9145ecf3b8676f4e1ed5f9938cad1ab51343b9ed07f2d1de24",
         "cristae": "f96c90484f4ea92ac0515a06e389cc117580f02c2aacdc44b5828820cf38c3c3",
         "cristae2": "0864945698862df043adc51c0034289a579b0622a61164e5ebd00a24ee25d075",
         "cristae3": "5cb8699487bd21204071cbfb784a7f5c2bb6ab5f347a9d02a913aa27ae70eca4",
         "cristae4": "214bf0848c2c3c7459a576c5d46416750e1b9947002674545904f069ddc75066",
-        "cristae5": "fcef96640a8223a11cec72fa129566d9c31deee71c99929d1f246d46f567d0b7",
-        "ribbon": "7c947f0ddfabe51a41d9d05c0a6ca7d6b238f43df2af8fffed5552d09bb075a9",
-        "vesicles_2d": "eb0b74f7000a0e6a25b626078e76a9452019f2d1ea6cf2033073656f4f055df1",
-        "vesicles_3d": "b329ec1f57f305099c984fbb3d7f6ae4b0ff51ec2fa0fa586df52dad6b84cf29",
-        "vesicles_cryo": "782f5a21c3cda82c4e4eaeccc754774d5aaed5929f8496eb018aad7daf91661b",
+        "cristae5": "70c13da6687dd994c8a01c30fc5e19613fb55761778db2ae98529cf3a4a55b51",
+        "ribbon": "22b89cf25bdca3477612c403f1c8402b61e8e17f93fa3b6ba988201a0ca076e0",
+        "vesicles_2d": "0ddfbcd4cf2ba45f11f854d3bd60726dc1248af186e75fd95934e19a7fdc21a3",
+        "vesicles_3d": "c831e0370607a8010ae33e6b63db291b437ba6cca3ef759e31f49a9e5b871fff",
+        "vesicles_cryo": "8b5a4678da3984346e595f3245b45ac63e1d6dd7722b4cd041dd2b145d5ea548",
         # Additional models that are only available in the CLI, not in the plugin model selection.
-        "vesicles_2d_maus": "01506895df6343fc33ffc9c9eb3f975bf42eb4eaaaf4848bac83b57f1b46e460",
-        "vesicles_3d_endbulb": "8582c7e3e5f16ef2bf34d6f9e34644862ca3c76835c9e7d44475c9dd7891d228",
-        "vesicles_3d_innerear": "924f0f7cfb648a3a6931c1d48d8b1fdc6c0c0d2cb3330fe2cae49d13e7c3b69d",
+        "vesicles_2d_maus": "99f70f1ba300f7d0b6468f07457dfcae0250917775d01f1b09b317b6c2e55c96",
+        "vesicles_3d_endbulb": "6ab8a086099b4b16f497a2e20728700c3f9d2437780e38df38edf9aac23b938d",
+        "vesicles_3d_innerear": "679615657484c1c93c1e241cd328943fead2a907e17259853ed5fe8166110696",
     }
     urls = {
-        "active_zone": "https://owncloud.gwdg.de/index.php/s/wpea9FH9waG4zJd/download",
-        "compartments": "https://owncloud.gwdg.de/index.php/s/DnFDeTmDDmZrDDX/download",
+        "active_zone": _BIOIMAGEIO_URL.format("loyal-butterfly"),
+        "compartments": _BIOIMAGEIO_URL.format("quiet-lobster"),
         "mitochondria": "https://owncloud.gwdg.de/index.php/s/1T542uvzfuruahD/download",
-        "mitochondria2": "https://owncloud.gwdg.de/index.php/s/jivHzhpsqXN3PoH/download",
+        "mitochondria2": _BIOIMAGEIO_URL.format("brave-hedgehog"),
+        "mitochondria_fibsem": _BIOIMAGEIO_URL.format("affable-zebra"),
         "cristae": "https://owncloud.gwdg.de/index.php/s/Df7OUOyQ1Kc2eEO/download",
         "cristae2": "https://owncloud.gwdg.de/index.php/s/qe0R5pRgH2m0pQ5/download",
         "cristae3": "https://owncloud.gwdg.de/index.php/s/51X1et8d7pOfdhU/download",
         "cristae4": "https://owncloud.gwdg.de/index.php/s/XoepbLjeT4csq1t/download",
-        "cristae5": "https://owncloud.gwdg.de/index.php/s/XD0ns5wrBrBdLub/download",
-        "ribbon": "https://owncloud.gwdg.de/index.php/s/S3b5l0liPP1XPYA/download",
-        "vesicles_2d": "https://owncloud.gwdg.de/index.php/s/d72QIvdX6LsgXip/download",
-        "vesicles_3d": "https://owncloud.gwdg.de/index.php/s/A425mkAOSqePDhx/download",
-        "vesicles_cryo": "https://owncloud.gwdg.de/index.php/s/e2lVdxjCJuZkLJm/download",
+        "cristae5": _BIOIMAGEIO_URL.format("gorgeous-eagle"),
+        "ribbon": _BIOIMAGEIO_URL.format("determined-bat"),
+        "vesicles_2d": _BIOIMAGEIO_URL.format("adaptable-microbe"),
+        "vesicles_3d": _BIOIMAGEIO_URL.format("funny-bug"),
+        "vesicles_cryo": _BIOIMAGEIO_URL.format("generous-lobster"),
         # Additional models that are only available in the CLI, not in the plugin model selection.
-        "vesicles_2d_maus": "https://owncloud.gwdg.de/index.php/s/sZ8woLr0zs5zOpv/download",
-        "vesicles_3d_endbulb": "https://owncloud.gwdg.de/index.php/s/16tmnWrEDpYIMzU/download",
-        "vesicles_3d_innerear": "https://owncloud.gwdg.de/index.php/s/UFUCYivsCxrqISX/download",
+        "vesicles_2d_maus": _BIOIMAGEIO_URL.format("hardworking-parrot"),
+        "vesicles_3d_endbulb": _BIOIMAGEIO_URL.format("angry-flamingo"),
+        "vesicles_3d_innerear": _BIOIMAGEIO_URL.format("discreet-angelfish"),
     }
     cache_dir = get_cache_dir()
     models = pooch.create(
@@ -67,6 +74,33 @@ def _get_model_registry():
         urls=urls,
     )
     return models
+
+
+def _build_unet(model_type):
+    if model_type in ("vesicles_2d", "vesicles_2d_maus"):
+        return UNet2d(in_channels=1, out_channels=2, depth=4, initial_features=32, gain=2, final_activation="Sigmoid")
+    in_channels, norm, scale_factors = 1, "InstanceNorm", [[1, 2, 2], [2, 2, 2], [2, 2, 2], [2, 2, 2]]
+    if model_type == "cristae5":
+        in_channels, norm = 2, None
+    elif model_type == "mitochondria_fibsem":
+        norm, scale_factors = None, [[1, 2, 2], [1, 2, 2], [2, 2, 2], [2, 2, 2]]
+    out_channels = {"active_zone": 1, "ribbon": 3}.get(model_type, 2)
+    return AnisotropicUNet(
+        in_channels=in_channels, out_channels=out_channels, scale_factors=scale_factors,
+        initial_features=32, gain=2, final_activation="Sigmoid", norm=norm,
+    )
+
+
+def _state_dict_to_model(fname, action, pup, model_type):
+    # bioimage.io models ship a state dict; convert it once into a pickled model like the other registry entries.
+    out = fname + ".pt"
+    if action == "fetch" and os.path.exists(out):
+        return out
+    state = torch.load(fname, map_location="cpu", weights_only=True)
+    model = _build_unet(model_type)
+    model.load_state_dict({k.removeprefix("unet."): v for k, v in state.items()})
+    torch.save(model, out)
+    return out
 
 
 def get_available_models() -> List[str]:
@@ -89,7 +123,9 @@ def get_model_path(model_type: str) -> str:
         The local path to the model.
     """
     model_registry = _get_model_registry()
-    model_path = model_registry.fetch(model_type)
+    is_bioimageio = "hypha.aicell.io" in model_registry.get_url(model_type)
+    processor = partial(_state_dict_to_model, model_type=model_type) if is_bioimageio else None
+    model_path = model_registry.fetch(model_type, processor=processor)
     return model_path
 
 
