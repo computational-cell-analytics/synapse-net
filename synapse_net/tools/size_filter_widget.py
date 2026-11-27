@@ -66,7 +66,7 @@ class SizeFilterWidget(BaseWidget):
         filter_ids = [prop.label for prop in props if prop.area < size_threshold]
         segmentation[np.isin(segmentation, filter_ids)] = 0
         if apply_label:
-            mapping = {prop.label: int(prop.max_intensity) for prop in props if prop.label not in filter_ids}
+            mapping = {prop.label: int(prop.intensity_max) for prop in props if prop.label not in filter_ids}
             mapping[0] = 0
             segmentation = take_dict(mapping, segmentation)
         return segmentation.astype(dtype)

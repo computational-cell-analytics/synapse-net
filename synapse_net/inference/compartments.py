@@ -10,9 +10,9 @@ from elf.tracking.tracking_utils import compute_edges_from_overlap
 from scipy.ndimage import distance_transform_edt, binary_closing
 from skimage.measure import label, regionprops
 from skimage.segmentation import watershed
-from skimage.morphology import remove_small_holes, local_maxima
+from skimage.morphology import local_maxima
 
-from synapse_net.inference.util import get_prediction, _Scaler, _postprocess_seg_3d
+from synapse_net.inference.util import get_prediction, _Scaler, _postprocess_seg_3d, _remove_small_holes
 
 
 def _segment_compartments_2d(
@@ -44,7 +44,7 @@ def _segment_compartments_2d(
 
     # We only keep small seeds that don't intersect with a large seed.
     props = regionprops(small_seeds, seeds)
-    keep_seeds = [prop.label for prop in props if prop.max_intensity == 0]
+    keep_seeds = [prop.label for prop in props if prop.intensity_max == 0]
     keep_mask = np.isin(small_seeds, keep_seeds)
 
     # Add up the small seeds we keep with the large seeds.
@@ -71,7 +71,7 @@ def _segment_compartments_2d(
         mask = raw_segmentation[bb] == prop.label
 
         # Fill small holes and apply closing.
-        mask = remove_small_holes(mask, area_threshold=500)
+        mask = _remove_small_holes(mask, 500)
         mask = np.logical_or(binary_closing(mask, iterations=4), mask)
         segmentation[bb][mask] = prop.label
 

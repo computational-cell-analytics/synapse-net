@@ -6,7 +6,8 @@ from elf.wrapper.base import (
     SimpleTransformationWrapper,
     MultiTransformationWrapper,
 )
-from skimage.morphology import binary_erosion, ball
+from scipy import ndimage
+from skimage.morphology import ball
 from skimage.measure import regionprops
 import numpy as np
 import torch
@@ -36,7 +37,7 @@ def _erode_instances(mito_data, erode_voxels, verbose):
         instance_mask = (mito_data[sl] == prop.label)
 
         # Apply erosion
-        eroded_mask = binary_erosion(instance_mask, footprint=footprint)
+        eroded_mask = ndimage.binary_erosion(instance_mask, structure=footprint, border_value=1)
 
         # Write True to the newly eroded locations in our boolean array
         eroded_binary_mask[sl][eroded_mask] = True

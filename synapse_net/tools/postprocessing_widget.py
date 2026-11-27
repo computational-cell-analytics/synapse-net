@@ -78,7 +78,7 @@ class PostprocessingWidget(BaseWidget):
             return
         segmentation, mask = self._get_segmentation_and_mask()
         props = regionprops(segmentation, mask)
-        filter_ids = [prop.label for prop in props if prop.max_intensity == 0]
+        filter_ids = [prop.label for prop in props if prop.intensity_max == 0]
         segmentation[np.isin(segmentation, filter_ids)] = 0
         self._write_pp(segmentation)
 
