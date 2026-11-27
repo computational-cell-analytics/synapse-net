@@ -1,5 +1,4 @@
 import napari
-import napari.layers
 import numpy as np
 import pandas as pd
 

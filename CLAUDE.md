@@ -62,9 +62,8 @@ Models are identified by a **`model_type` string** (`vesicles_3d`, `vesicles_2d`
 - `get_prediction` / `get_prediction_torch_em` — tiled prediction via `torch_em.util.prediction.predict_with_halo`. **Tiling is a dict** `{"tile": {"z","y","x"}, "halo": {"z","y","x"}}`; note `get_prediction` subtracts `2*halo` from each tile dim before calling the torch_em layer.
 - `_Scaler` — applies/reverts the voxel-size scale (order-0 for segmentations).
 - `inference_helper` — drives file-in/file-out batch segmentation over a folder; used by the CLI.
-- A `bioimageio` prediction path exists in `get_prediction` but currently raises `NotImplementedError` (model format migration in progress; see the `bioimage-cpp-migration` branch).
 
-Per-structure **post-processing** lives in `inference/postprocessing/` (vesicles, compartments, membranes, ribbon, presynaptic_density), kept separate from raw prediction.
+Per-structure **post-processing** lives in `inference/postprocessing/` (vesicles, membranes, ribbon, presynaptic_density), kept separate from raw prediction.
 
 ### Training (`synapse_net/training/`)
 Built on `torch_em` U-Nets (`UNet2d`, `AnisotropicUNet`). Two regimes:

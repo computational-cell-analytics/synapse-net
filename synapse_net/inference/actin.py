@@ -37,7 +37,7 @@ def segment_actin(
         foreground_threshold: Threshold for binarizing foreground predictions.
         min_size: The minimum size of an actin fiber to be considered.
         verbose: Whether to print timing information.
-        return_predictions: Whether to return the predictions (foreground, boundaries) alongside the segmentation.
+        return_predictions: Whether to return the foreground prediction alongside the segmentation.
         scale: The scale factor to use for rescaling the input volume before prediction.
         mask: An optional mask that is used to restrict the segmentation.
         preprocess: The function used to normalize the input. It should match the `raw_transform`
@@ -63,9 +63,9 @@ def segment_actin(
 
     pred = get_prediction(
         input_volume, model=model, model_path=model_path,
-        tiling=tiling, verbose=verbose, preprocess=preprocess, dtype=dtype, batch_size=batch_size,
+        tiling=tiling, verbose=verbose, preprocess=preprocess, dtype=dtype, batch_size=batch_size, mask=mask,
     )
-    foreground, boundaries = pred[:2]
+    foreground = pred[0]
 
     # TODO proper segmentation procedure
     # NOTE: actin fiber recall may improve by choosing a lower foreground threshold
@@ -77,6 +77,6 @@ def segment_actin(
     seg = scaler.rescale_output(seg, is_segmentation=True)
 
     if return_predictions:
-        foreground = scaler.rescale_output(foreground, is_segmentation=True)
+        foreground = scaler.rescale_output(foreground, is_segmentation=False)
         return seg, foreground
     return seg

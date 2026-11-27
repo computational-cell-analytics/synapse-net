@@ -1,8 +1,6 @@
 from typing import Dict
 
 import napari
-import napari.layers
-import napari.viewer
 import numpy as np
 import pandas as pd
 

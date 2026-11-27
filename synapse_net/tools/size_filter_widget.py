@@ -1,6 +1,4 @@
 import napari
-import napari.layers
-import napari.viewer
 
 import numpy as np
 from bioimage_cpp.utils import take_dict

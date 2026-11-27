@@ -1,6 +1,4 @@
 import napari
-import napari.layers
-import napari.viewer
 
 import numpy as np
 

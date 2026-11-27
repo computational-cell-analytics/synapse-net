@@ -121,7 +121,10 @@ def read_ome_zarr(uri: str, scale_level: int = 0, fs=None) -> Tuple[np.ndarray, 
         raise RuntimeError("The zarr library is required to read ome.zarr files.")
 
     def parse_s3_uri(uri):
-        return uri.lstrip("s3://")
+        return uri.removeprefix("s3://")
+
+    if (uri.startswith("s3") or fs is not None) and s3fs is None:
+        raise RuntimeError("The s3fs library is required to read ome.zarr files from s3.")
 
     if uri.startswith("s3"):
         if fs is None:
@@ -207,7 +210,7 @@ def read_data_from_cryo_et_portal_run(
     if use_zarr_format:
         if output_path is None:
             scale_level = 0 if scale_level is None else scale_level
-            data, voxel_size = read_ome_zarr(tomo.s3_omezarr_dir, fs=fs)
+            data, voxel_size = read_ome_zarr(tomo.s3_omezarr_dir, scale_level=scale_level, fs=fs)
         else:
             # TODO: write the outuput to ome zarr, for all scale levels.
             raise NotImplementedError

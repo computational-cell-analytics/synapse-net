@@ -447,7 +447,7 @@ def cristae_analysis_cli():
         "--min_junction_volume", type=float, default=None,
         help="The smallest junction volume in nm^3 that counts (--junction_mode skeleton only). This "
         "only removes specks; it does not address the fact that skeleton mode over-counts on densely "
-        "packed cristae - see docs/cristae_analysis.md. By default 50."
+        "packed cristae - see doc/cristae_analysis.md. By default 50."
     )
     parser.add_argument(
         "--n_jobs", type=int, default=-1,

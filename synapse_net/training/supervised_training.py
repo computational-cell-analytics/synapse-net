@@ -195,15 +195,12 @@ def supervised_training(
             )
         )
         metric = loss
-    elif mask_channel:
+    else:
         loss = torch_em.loss.LossWrapper(
             loss=base_loss,
             transform=torch_em.loss.wrapper.ApplyAndRemoveMask(
                 masking_method="crop" if out_channels == 1 else "multiply")
         )
-        metric = loss
-    else:
-        loss = base_loss
         metric = loss
 
     trainer = torch_em.default_segmentation_trainer(

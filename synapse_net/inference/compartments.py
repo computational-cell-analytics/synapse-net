@@ -186,11 +186,14 @@ def segment_compartments(
     # Create the scaler to handle prediction with a different scaling factor.
     scaler = _Scaler(scale, verbose)
     input_volume = scaler.scale_input(input_volume)
+    if mask is not None:
+        mask = scaler.scale_input(mask, is_segmentation=True)
 
     # Run prediction. Support models with a single or multiple channels,
     # assuming that the first channel is the boundary prediction.
     pred = get_prediction(
         input_volume, tiling=tiling, model_path=model_path, model=model, verbose=verbose, batch_size=batch_size,
+        mask=mask,
     )
 
     # Remove channel axis if necessary.

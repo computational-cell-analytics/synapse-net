@@ -105,7 +105,6 @@ def segment_cristae(
     tiling: Optional[Dict[str, Dict[str, int]]] = None,
     min_size: int = 2000,
     verbose: bool = True,
-    distance_based_segmentation: bool = False,
     return_predictions: bool = False,
     scale: Optional[List[float]] = None,
     mask: Optional[np.ndarray] = None,
@@ -124,7 +123,6 @@ def segment_cristae(
         tiling: The tiling configuration for the prediction.
         min_size: The minimum size of a cristae to be considered.
         verbose: Whether to print timing information.
-        distance_based_segmentation: Whether to use distance-based segmentation.
         return_predictions: Whether to return the predictions (foreground, boundaries) alongside the segmentation.
         scale: The scale factor to use for rescaling the input volume before prediction.
         mask: An optional mask that is used to restrict the segmentation.
@@ -175,7 +173,7 @@ def segment_cristae(
         tiling=tiling, with_channels=with_channels, channels_to_standardize=channels_to_standardize, verbose=verbose,
         batch_size=batch_size,
     )
-    foreground, boundaries = pred[:2]
+    foreground = pred[0]
     seg = _run_segmentation(
         foreground,
         verbose=verbose,

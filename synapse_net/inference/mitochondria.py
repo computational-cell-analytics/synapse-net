@@ -65,7 +65,6 @@ def segment_mitochondria(
     tiling: Optional[Dict[str, Dict[str, int]]] = None,
     min_size: int = 50000,
     verbose: bool = True,
-    distance_based_segmentation: bool = False,
     return_predictions: bool = False,
     scale: Optional[List[float]] = None,
     mask: Optional[np.ndarray] = None,
@@ -86,7 +85,6 @@ def segment_mitochondria(
         tiling: The tiling configuration for the prediction.
         min_size: The minimum size of a mitochondria to be considered.
         verbose: Whether to print timing information.
-        distance_based_segmentation: Whether to use distance-based segmentation.
         return_predictions: Whether to return the predictions (foreground, boundaries) alongside the segmentation.
         scale: The scale factor to use for rescaling the input volume before prediction.
         mask: An optional mask that is used to restrict the segmentation.

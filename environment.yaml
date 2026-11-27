@@ -3,10 +3,8 @@ channels:
 name:
     synapse-net
 dependencies:
-    - bioimageio.core
     - bioimage-cpp
     - kornia
-    - magicgui
     - napari >=0.7.0
     - pip
     - pyqt

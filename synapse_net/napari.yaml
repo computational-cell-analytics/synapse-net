@@ -44,7 +44,7 @@ contributions:
       title: Load small tomo sample data
     - id: synapse_net.sample_data_mito_small
       python_name: synapse_net.sample_data:sample_data_mito_small
-      title: Load TEM Tomo sample data
+      title: Load small mito sample data
 
   readers:
     - command: synapse_net.file_reader
